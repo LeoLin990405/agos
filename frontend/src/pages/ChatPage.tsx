@@ -188,7 +188,7 @@ export const ChatPage: React.FC<{
                 borderRadius: '8px',
                 backgroundColor: activeSessionId === s.id ? 'var(--bg-layer-2)' : 'transparent',
                 border: activeSessionId === s.id ? '1px solid var(--border-subtle)' : '1px solid transparent',
-                boxShadow: activeSessionId === s.id ? 'inset 2.5px 0 0 var(--state-running), var(--shadow-card)' : 'none',
+                boxShadow: activeSessionId === s.id ? '0 0 0 1px var(--border-bold), var(--shadow-card)' : 'none',
                 cursor: 'pointer',
                 display: 'flex',
                 flexDirection: 'column',
@@ -221,30 +221,22 @@ export const ChatPage: React.FC<{
       {/* 舞台 Stage */}
       <main className="app-stage">
         <AppTopbar
-          title="分布式认证令牌轮转与流式事件管道重构"
-          badge={<Chip active>{activeModel} · 671B</Chip>}
+          title={liveMode
+            ? (renderedSessions.find((x) => x.id === activeSessionId)?.title ?? 'AgOS 对话甲板')
+            : '分布式认证令牌轮转与流式事件管道重构'}
+          badge={liveMode ? undefined : <Chip active>{activeModel} · 671B</Chip>}
           rightActions={
             <>
-              <div className="telemetry-pill">
-                <span className="u-microlabel">上下文水位</span>
-                <span className="val u-num">38.4k / 128k</span>
-                <span className="u-num" style={{ color: 'var(--accent-cyan)' }}>(30%)</span>
-              </div>
-
-              <div className="telemetry-pill">
-                <span className="u-microlabel">延时 P95</span>
-                <span className="val u-num">240ms</span>
-              </div>
 
               <div className="telemetry-pill">
                 <span className="u-microlabel">RPC 管道</span>
                 <span className="val" style={{ color: isStreamOnline ? 'var(--state-done)' : 'var(--state-running)', fontSize: '10.5px' }}>
-                  ● {isStreamOnline ? 'ONLINE WS 426' : 'LOCAL SYNC'}
+                  ● {isStreamOnline ? 'ONLINE WS' : 'OFFLINE'}
                 </span>
               </div>
 
               <Button variant="ghost" size="sm" onClick={() => onNavigateGraph?.()}>
-                🧬 记忆星图
+                记忆星图
               </Button>
               <Button variant="primary" size="sm" onClick={onNavigateConsole}>
                 控制台概览

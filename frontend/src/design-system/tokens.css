@@ -27,22 +27,23 @@
   /* --------------------------------------------------------------------------
      3. 默认深色主题 (Dark Mode - 曜石航电甲板 Obsidian Avionics)
      -------------------------------------------------------------------------- */
-  --bg-app: #06080d;
-  --bg-layer-1: #0c0f17;
-  --bg-layer-2: #121723;
-  --bg-layer-3: #1a2233;
-  --bg-layer-active: #222d44;
-  --bg-glass: rgba(12, 15, 23, 0.82);
+  /* V3 精修:海拔用明暗(OKLCH 蓝倾中性,深夜昏暗房间的仪表舱),边框退居发丝 */
+  --bg-app: oklch(0.145 0.012 252);
+  --bg-layer-1: oklch(0.185 0.014 252);
+  --bg-layer-2: oklch(0.225 0.016 252);
+  --bg-layer-3: oklch(0.27 0.018 252);
+  --bg-layer-active: oklch(0.315 0.022 252);
+  --bg-glass: oklch(0.185 0.014 252 / 0.85);
 
-  --border-dim: rgba(255, 255, 255, 0.05);
-  --border-subtle: rgba(255, 255, 255, 0.09);
-  --border-bold: rgba(255, 255, 255, 0.18);
-  --border-glow: rgba(0, 166, 255, 0.4);
+  --border-dim: oklch(0.98 0.005 252 / 0.04);
+  --border-subtle: oklch(0.98 0.005 252 / 0.08);
+  --border-bold: oklch(0.98 0.005 252 / 0.16);
+  --border-glow: oklch(0.72 0.15 240 / 0.35);
 
-  --text-primary: #f8fafc;
-  --text-secondary: #94a3b8;
-  --text-tertiary: #64748b;
-  --text-dimmed: #475569;
+  --text-primary: oklch(0.965 0.006 252);
+  --text-secondary: oklch(0.74 0.018 252);
+  --text-tertiary: oklch(0.58 0.02 252);
+  --text-dimmed: oklch(0.46 0.018 252);
 
   /* 4态标准灯语 (Dark Neon Accents) */
   --state-running: #00a6ff;
@@ -81,11 +82,11 @@
   --accent-purple: #a855f7;
   --accent-blue: #3b82f6;
 
-  --shadow-card: inset 0 1px 0 0 rgba(255, 255, 255, 0.08), 0 4px 20px -2px rgba(0, 0, 0, 0.6);
-  --shadow-panel: inset 0 1px 0 0 rgba(255, 255, 255, 0.06), 0 20px 50px rgba(0, 0, 0, 0.7);
-  --shadow-glow: 0 0 28px rgba(0, 166, 255, 0.2);
-  --grid-line: rgba(255, 255, 255, 0.024);
-  --code-bg: #090c13;
+  --shadow-card: inset 0 1px 0 0 oklch(0.98 0.005 252 / 0.06), 0 2px 8px -2px oklch(0.08 0.01 252 / 0.5);
+  --shadow-panel: inset 0 1px 0 0 oklch(0.98 0.005 252 / 0.05), 0 16px 40px oklch(0.08 0.01 252 / 0.55);
+  --shadow-glow: 0 0 20px oklch(0.72 0.15 240 / 0.14); /* 辉光只留给运行态 */
+  --grid-line: oklch(0.98 0.005 252 / 0.02);
+  --code-bg: oklch(0.155 0.012 252);
 }
 
 /* --------------------------------------------------------------------------
@@ -93,11 +94,11 @@
    -------------------------------------------------------------------------- */
 [data-theme="light"],
 html.theme-light {
-  --bg-app: #f4f6fb;
-  --bg-layer-1: #ffffff;
-  --bg-layer-2: #f8fafc;
-  --bg-layer-3: #e2e8f0;
-  --bg-layer-active: #cbd5e1;
+  --bg-app: oklch(0.965 0.007 252);
+  --bg-layer-1: oklch(0.995 0.003 252);
+  --bg-layer-2: oklch(0.975 0.006 252);
+  --bg-layer-3: oklch(0.93 0.01 252);
+  --bg-layer-active: oklch(0.885 0.014 252);
   --bg-glass: rgba(255, 255, 255, 0.88);
 
   --border-dim: rgba(0, 0, 0, 0.06);

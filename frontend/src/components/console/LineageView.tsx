@@ -62,8 +62,8 @@ export const LineageView: React.FC = () => {
             </p>
           </div>
           <SegmentedControl value={tab} onChange={setTab} options={[
-            { value: 'live', label: `⚡ 实时活跃谱系 (${realBatches.length} 批次)` },
-            { value: 'history', label: '📜 跨重启历史档案' },
+            { value: 'live', label: `实时谱系 (${realBatches.length} 批次)` },
+            { value: 'history', label: '历史档案' },
           ]} />
         </div>
         {anyRunning && <SymMonitor bpm={25.0} periodMs={2400} driftMs={0.1} />}
@@ -103,8 +103,8 @@ export const LineageView: React.FC = () => {
           value={tab}
           onChange={setTab}
           options={[
-            { value: 'live', label: '⚡ 实时活跃谱系 (2 批次)' },
-            { value: 'history', label: '📜 跨重启历史档案 (18 批次)' },
+            { value: 'live', label: '实时谱系 (2 批次)' },
+            { value: 'history', label: '历史档案 (18 批次)' },
           ]}
         />
       </div>

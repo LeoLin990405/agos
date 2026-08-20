@@ -3,8 +3,6 @@
  * ConsolePage 在 telemetry/sessions 有真数据时渲染 <RealOverview/>,否则回落 V2 展示 mock。
  */
 import React, { useMemo, useSyncExternalStore } from 'react';
-import { KpiCard } from '@/components/ui/KpiCard';
-import { Chip } from '@/components/ui/Chip';
 import { Dot } from '@/components/ui/Dot';
 import { AttentionInbox } from '@/components/console/AttentionInbox';
 import { SessionMatrix } from '@/components/console/SessionMatrix';
@@ -72,49 +70,32 @@ export const RealOverview: React.FC<{
   onNavigateLineage?: () => void;
 }> = ({ live, onNavigateChat, onNavigateLineage }) => (
   <div style={{ display: 'flex', flexDirection: 'column', gap: '26px' }}>
-    <section className="kpi-grid">
-      <KpiCard
-        label="活跃派单 / 批次"
-        value={String(live.running)}
-        unit={`/ ${live.calls} 批`}
-        trend={`${live.rows} 行子任务`}
-        subValue={live.running > 0 ? '编队执行中' : '空闲待命'}
-        headerRight={<Dot state={live.running > 0 ? 'running' : 'queued'} />}
-      />
-      <KpiCard
-        label="会话总数"
-        value={String(live.sessionsTotal)}
-        unit="个"
-        trend={live.matrix[0] !== undefined ? `最近:${live.matrix[0].title.slice(0, 12)}` : '—'}
-        subValue="含子代理会话"
-        headerRight={<Chip active style={{ height: '16px' }}>实时</Chip>}
-      />
-      <KpiCard
-        label="计划档案"
-        value={String(live.plansTotal)}
-        unit={`/ ${live.plansExecuted} 已执行`}
-        subValue="~/.dsh/logs/plans"
-        trend="计划模式沉淀"
-        trendType="neutral"
-        headerRight={<Chip variant="purple" style={{ height: '16px' }}>PLAN</Chip>}
-      />
-      <KpiCard
-        label="失败子任务"
-        value={live.failed > 0 ? <span style={{ color: 'var(--state-failed)' }}>{live.failed}</span> : '0'}
-        unit="项"
-        trend={live.failed > 0 ? '需要关注' : '全部健康'}
-        trendType={live.failed > 0 ? 'down' : 'neutral'}
-        subValue="来自最近批次"
-        headerRight={<Dot state={live.failed > 0 ? 'failed' : 'done'} />}
-      />
-      <KpiCard
-        label="技能注册表"
-        value={String(live.skills)}
-        unit={live.skillsWarn > 0 ? `warn ${live.skillsWarn}` : '全部通过'}
-        trend="skill-librarian 审计"
-        subValue="双根扫描"
-        headerRight={<Chip style={{ height: '16px' }}>SKILLS</Chip>}
-      />
+    <section className="instrument-strip" aria-label="控制台仪表带">
+      <div className="instrument-cell">
+        <div className="instrument-label"><Dot state={live.running > 0 ? 'running' : 'queued'} size={6} />活跃派单</div>
+        <div className="instrument-value">{live.running}<span className="instrument-unit">/ {live.calls} 批 · {live.rows} 行</span></div>
+        <div className="instrument-sub">{live.running > 0 ? '编队执行中' : '空闲待命'}</div>
+      </div>
+      <div className="instrument-cell">
+        <div className="instrument-label">会话</div>
+        <div className="instrument-value">{live.sessionsTotal}<span className="instrument-unit">个</span></div>
+        <div className="instrument-sub">{live.matrix[0] !== undefined ? `最近:${live.matrix[0].title.slice(0, 14)}` : '含子代理会话'}</div>
+      </div>
+      <div className="instrument-cell">
+        <div className="instrument-label">计划档案</div>
+        <div className="instrument-value">{live.plansTotal}<span className="instrument-unit">/ {live.plansExecuted} 已执行</span></div>
+        <div className="instrument-sub">~/.dsh/logs/plans</div>
+      </div>
+      <div className="instrument-cell">
+        <div className="instrument-label"><Dot state={live.failed > 0 ? 'failed' : 'done'} size={6} />失败子任务</div>
+        <div className="instrument-value" style={live.failed > 0 ? { color: 'var(--state-failed)' } : undefined}>{live.failed}<span className="instrument-unit">项</span></div>
+        <div className="instrument-sub">{live.failed > 0 ? '需要关注' : '全部健康'}</div>
+      </div>
+      <div className="instrument-cell">
+        <div className="instrument-label">技能注册表</div>
+        <div className="instrument-value">{live.skills > 0 ? live.skills : '待审'}<span className="instrument-unit">{live.skills === 0 ? '冷缓存' : live.skillsWarn > 0 ? `warn ${live.skillsWarn}` : '全部通过'}</span></div>
+        <div className="instrument-sub">{live.skills === 0 ? '进技能页触发 librarian 审计' : 'skill-librarian 双根审计'}</div>
+      </div>
     </section>
 
     <AttentionInbox

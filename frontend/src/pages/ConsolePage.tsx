@@ -43,7 +43,7 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
           className={`console-nav-item ${activeTab === 'overview' ? 'is-active' : ''}`}
           onClick={() => setActiveTab('overview')}
         >
-          <span>📊 概览遥测</span>
+          <span>概览遥测</span>
           <Dot state="running" size={6} />
         </button>
 
@@ -52,7 +52,7 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
           className={`console-nav-item ${activeTab === 'fleet' ? 'is-active' : ''}`}
           onClick={() => setActiveTab('fleet')}
         >
-          <span>🖥️ 机器与机架</span>
+          <span>机器与机架</span>
           <Chip style={{ height: '16px', padding: '0 4px' }}>4 节点</Chip>
         </button>
 
@@ -61,7 +61,7 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
           className={`console-nav-item ${activeTab === 'sessions' ? 'is-active' : ''}`}
           onClick={() => setActiveTab('sessions')}
         >
-          <span>💬 会话矩阵</span>
+          <span>会话矩阵</span>
           <span className="u-num" style={{ fontSize: '11px' }}>24</span>
         </button>
 
@@ -70,7 +70,7 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
           className={`console-nav-item ${activeTab === 'lineage' ? 'is-active' : ''}`}
           onClick={() => setActiveTab('lineage')}
         >
-          <span>🧬 智能体谱系</span>
+          <span>智能体谱系</span>
           <Chip variant="purple" style={{ height: '16px', padding: '0 4px' }}>Swarm</Chip>
         </button>
 
@@ -79,7 +79,7 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
           className={`console-nav-item ${activeTab === 'plans' ? 'is-active' : ''}`}
           onClick={() => setActiveTab('plans')}
         >
-          <span>📋 计划与目标</span>
+          <span>计划与目标</span>
           <span className="u-num" style={{ fontSize: '11px' }}>2</span>
         </button>
 
@@ -88,7 +88,7 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
           className={`console-nav-item ${activeTab === 'skills' ? 'is-active' : ''}`}
           onClick={() => setActiveTab('skills')}
         >
-          <span>🧩 技能注册表</span>
+          <span>技能注册表</span>
           <span className="u-num" style={{ fontSize: '11px' }}>14/14</span>
         </button>
       </nav>
@@ -116,8 +116,8 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
                 value={densityMode}
                 onChange={setDensityMode}
                 options={[
-                  { value: 'dense', label: '⚡ 满载生产模式 (Dense)' },
-                  { value: 'sparse', label: '🌱 初始冷启模式 (Sparse)' },
+                  { value: 'dense', label: '满载生产 · Dense' },
+                  { value: 'sparse', label: '冷启待机 · Sparse' },
                 ]}
               />
             ) : undefined

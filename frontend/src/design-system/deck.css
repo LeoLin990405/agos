@@ -1175,3 +1175,35 @@
     animation: none !important;
   }
 }
+
+
+/* ── V3 精修:概览仪表带(替代五卡 KPI 阵列)────────────────────── */
+.instrument-strip {
+  display: flex; align-items: stretch;
+  background: var(--bg-layer-1);
+  border: 1px solid var(--border-dim); border-radius: 10px;
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+.instrument-cell {
+  flex: 1 1 0; min-width: 0;
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 16px 20px 14px;
+}
+.instrument-cell + .instrument-cell { border-left: 1px solid var(--border-dim); }
+.instrument-label {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 10.5px; letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--text-tertiary); white-space: nowrap;
+}
+.instrument-value {
+  display: flex; align-items: baseline; gap: 6px;
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 21px; font-weight: 600; line-height: 1.15;
+  color: var(--text-primary); white-space: nowrap;
+}
+.instrument-unit { font-size: 11px; font-weight: 500; color: var(--text-tertiary); }
+.instrument-sub {
+  font-size: 11px; color: var(--text-dimmed);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
