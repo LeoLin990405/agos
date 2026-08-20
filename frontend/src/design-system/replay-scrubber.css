@@ -1,0 +1,296 @@
+/* ==========================================================================
+   ReplayScrubber(P1-7)+ 交付物语法(P1-8)
+   两节共用一个文件:P1-8 只有一条完结行与若干文件卡,单独开一个 css 文件不划算,
+   且两者都只服务「会话流末尾」这一个位置。类名前缀区分:rs-* / dl-*。
+
+   动效:主档 0.3s ease-in-out;入场 fade cubic-bezier(0.4, 0, 0.2, 1)。
+   本文件没有任何 infinite 动画——回放条与完结区都不是运行态。
+   ========================================================================== */
+
+/* ==========================================================================
+   A. 回放刻度条(rs-*)
+   一条 4px 轨道:--bg-layer-3 打底,已播部分 --state-running 填充。
+   input[type=range] 透明覆盖在轨道上做无障碍与命中底座(键盘方向键/Home/End
+   由浏览器原生处理),视觉全部自绘。
+   ========================================================================== */
+
+.rs-root {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 7px 12px;
+  background: var(--bg-layer-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  animation: rs-fade-in 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+/* ── 逐步按钮:复用 .btn/.btn-ghost,只把尺寸收成 24px 方钮 ──────────── */
+.rs-steps {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.rs-step.btn {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 6px;
+}
+
+.rs-step svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ── 轨道 ────────────────────────────────────────────────────────── */
+.rs-bar {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 88px;
+  height: 16px; /* 命中区比视觉轨道高,便于拖动 */
+  display: flex;
+  align-items: center;
+}
+
+.rs-range {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  opacity: 0; /* 视觉自绘,原生控件只留行为与无障碍 */
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+}
+
+.rs-range:disabled {
+  cursor: default;
+}
+
+.rs-track {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-layer-3);
+  overflow: hidden;
+}
+
+.rs-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--state-running);
+  transition: width 0.3s ease-in-out;
+}
+
+/* 刻度:条目数适中时才画,密到看不清就不画(背景图由组件按真实条目数生成) */
+.rs-ticks {
+  position: absolute;
+  inset: 0;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* 当前位置的把手。放在 track 之外,避免被 4px 轨道的 overflow 裁掉。 */
+.rs-knob {
+  position: absolute;
+  top: 50%;
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--state-running);
+  border: 2px solid var(--bg-app);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  transition:
+    left 0.3s ease-in-out,
+    transform 0.3s ease-in-out;
+}
+
+.rs-bar:hover .rs-knob {
+  transform: translate(-50%, -50%) scale(1.15);
+}
+
+/* 键盘 seek 时把焦点描在轨道上(原生控件本身透明) */
+.rs-range:focus-visible ~ .rs-track {
+  outline: 2px solid var(--border-glow);
+  outline-offset: 3px;
+}
+
+/* ── 计数与实时锚 ────────────────────────────────────────────────── */
+.rs-count {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.rs-count .rs-total {
+  color: var(--text-tertiary);
+}
+
+.rs-live {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* 静止圆点:处在最新位置是一个状态而不是一段进程,所以不用会心跳的 <Dot> */
+.rs-live-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--state-running);
+}
+
+.rs-jump.btn {
+  flex: none;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 6px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+@keyframes rs-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ==========================================================================
+   B. 交付物语法(dl-*)
+   完结行 + 本轮产出的文件卡。文件卡宽度随文件名收缩、竖排,不做等宽卡片阵列。
+   ========================================================================== */
+
+.dl-block {
+  animation: rs-fade-in 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.dl-done {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--state-done);
+}
+
+.dl-check {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.dl-files {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.dl-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  margin: 0;
+  padding: 7px 12px;
+  background: var(--bg-layer-1);
+  border: 1px solid var(--border-dim);
+  border-radius: 8px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+
+button.dl-file {
+  appearance: none;
+  cursor: pointer;
+  transition:
+    background-color 0.3s ease-in-out,
+    border-color 0.3s ease-in-out;
+}
+
+button.dl-file:hover {
+  background: var(--bg-layer-2);
+  border-color: var(--border-subtle);
+}
+
+button.dl-file:focus-visible {
+  outline: 2px solid var(--border-glow);
+  outline-offset: 2px;
+}
+
+.dl-file-icon {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  color: var(--text-tertiary);
+}
+
+.dl-file-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dl-file-name {
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dl-file-path {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   C. 降级模式
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  .rs-root,
+  .dl-block {
+    animation: none;
+  }
+
+  .rs-fill,
+  .rs-knob,
+  button.dl-file {
+    transition: none;
+  }
+
+  .rs-bar:hover .rs-knob {
+    transform: translate(-50%, -50%);
+  }
+}

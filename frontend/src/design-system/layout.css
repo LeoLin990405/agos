@@ -545,3 +545,65 @@
   border-color: var(--state-running);
   box-shadow: 0 0 0 2px var(--state-running-bg);
 }
+
+/* ==========================================================================
+   顶栏响应式收敛 (P2)
+   顶栏右侧动作在 1374px 宽已贴边(实测 right=1355 / 1374)。收敛分两档,全部
+   由容器查询驱动,不做任何 JS 宽度测量:
+     顶栏容器 < 1200px → 次要动作(TopbarAction)收成方形图标键,文字隐藏,
+                         aria-label / title 保留完整中文名;间距同时收紧。
+     顶栏容器 <  980px → 标题区放开 max-width、允许省略号截断;左右间距收紧。
+   容器锚点放在 .app-topbar 自身:它是 .app-stage 列向 flex 的 flex:none 子项,
+   宽度由父级决定而非内容决定,inline-size containment 不会引起回环。
+   注意:容器只对「后代」生效,元素查询不到自己。所以下面两档里一律只写
+      .topbar-left / .topbar-right / .topbar-title 这类后代选择器,
+      绝不往 .app-topbar 自身上挂声明(写了也永远不命中,实测确认)。
+   ========================================================================== */
+
+.app-topbar {
+  container-type: inline-size;
+  container-name: topbar;
+}
+
+.topbar-action-icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.topbar-action-label {
+  white-space: nowrap;
+}
+
+@container topbar (max-width: 1199.98px) {
+  .topbar-left { gap: 10px; }
+  .topbar-right { gap: 6px; }
+
+  .topbar-action.is-collapsible {
+    width: 26px;
+    padding: 0;
+    gap: 0;
+  }
+
+  .topbar-action.is-collapsible .topbar-action-label {
+    display: none;
+  }
+}
+
+@container topbar (max-width: 979.98px) {
+  .topbar-left { gap: 8px; min-width: 0; }
+  .topbar-title-wrap { gap: 8px; }
+
+  .topbar-title {
+    max-width: none;
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .topbar-title-wrap > :not(.topbar-title) { flex: none; }
+
+  .topbar-right .telemetry-pill { padding: 0 8px; }
+}

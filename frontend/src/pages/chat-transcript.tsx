@@ -6,6 +6,10 @@
  *
  * P0-3:连续的通用工具调用折叠成 Kimi 式时间线(ToolTimelineGroup),
  * 特化卡(TerminalCard / SwarmBatchCard / ApprovalPanel)保持卡形不动。
+ *
+ * P1-7:可选 prop `replayLimit` 做纯渲染层截断(fold 与 store 都不动),
+ * 供 <ReplayScrubber> 回放;不传时行为与之前完全一致。
+ * P1-8:会话完结时在流末给出「✓ 任务完成」+ 本轮真实产出的文件卡。
  */
 import React, { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Dot } from '@/components/ui/Dot';
@@ -22,6 +26,7 @@ import { RpcId } from '@/contract/api/rpc';
 import type { OptimisticImageAttachment } from '@/components/chat/ImageAttachments';
 import { extractMultimodalMessageId, stripMultimodalMessageMarker } from '@/components/chat/CommandDeck';
 import '@/design-system/tool-timeline.css';
+import '@/design-system/replay-scrubber.css';
 
 export interface OptimisticImageMessage {
   id: string;
@@ -352,6 +357,110 @@ function isGenericToolItem(item: ConversationItem | undefined): item is ToolItem
   return item.name !== 'bash';
 }
 
+/* ==========================================================================
+   P1-8 交付物语法:完结判定 + 本轮产出文件(纯函数,可测)
+   ========================================================================== */
+
+/** 会写文件的工具名特征。语料实测的真实工具名:write / edit(todo_write 是待办不是文件)。 */
+const WRITE_TOOL_HINTS = ['write', 'edit', 'create', 'patch'] as const;
+
+/** 是否为写文件类工具。todo_write / read / search 明确排除。 */
+export function isFileWriteTool(name: string): boolean {
+  const n = name.toLowerCase();
+  if (n.includes('todo') || n.includes('read') || n.includes('search')) return false;
+  return WRITE_TOOL_HINTS.some((hint) => n.includes(hint));
+}
+
+/** 写文件类工具的真实目标路径;不是写工具、参数解析不出路径,一律 undefined(禁止编造)。 */
+export function writtenFilePath(source: ToolTitleSource): string | undefined {
+  if (!isFileWriteTool(source.name)) return undefined;
+  const args = parseArgsObject(source.argsRaw);
+  if (args === undefined) return undefined;
+  return readStringKey(args, PATH_KEYS);
+}
+
+export interface DeliverableSummary {
+  /** 完结轮次(取自最后一条 assistant 的 turn)。 */
+  readonly turn: number;
+  /** 本轮 write/edit 类工具真实写入的路径,按首次出现去重排序;可能为空数组。 */
+  readonly files: readonly string[];
+}
+
+/**
+ * 完结判定:最后一条条目是「已收尾、有正文」的 assistant,且没有任何运行中的工具。
+ * 满足才返回摘要;其余情况(仍在流式 / 末尾是工具或待决审批 / 空会话)一律 undefined。
+ * 文件清单按 turn 收窄到本轮——语料实测同一会话可跨 80+ 轮写 81 个文件,
+ * 不收窄会把整个会话的历史产出都倒在最后一轮下面。
+ */
+export function deriveDeliverables(items: readonly ConversationItem[]): DeliverableSummary | undefined {
+  const last = items[items.length - 1];
+  if (last === undefined || last.kind !== 'assistant') return undefined;
+  if (last.streaming || last.text.trim() === '') return undefined;
+  for (const item of items) {
+    if (item.kind === 'tool' && item.status === 'running') return undefined;
+  }
+  const files: string[] = [];
+  const seen = new Set<string>();
+  for (const item of items) {
+    if (item.kind !== 'tool' || item.turn !== last.turn || item.status !== 'done') continue;
+    const path = writtenFilePath(item);
+    if (path === undefined || seen.has(path)) continue;
+    seen.add(path);
+    files.push(path);
+  }
+  return { turn: last.turn, files };
+}
+
+const CheckIcon: React.FC = () => (
+  <svg className="dl-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <polyline points="4 12.5 9.5 18 20 6.5" />
+  </svg>
+);
+
+const FileIcon: React.FC = () => (
+  <svg className="dl-file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+    <polyline points="14 3 14 8 19 8" />
+  </svg>
+);
+
+const DeliverableBlock: React.FC<{
+  summary: DeliverableSummary;
+  onOpenFile?: (path: string) => void;
+}> = ({ summary, onOpenFile }) => (
+  <div className="message-wrap">
+    <div className="dl-block">
+      <div className="dl-done">
+        <CheckIcon />
+        <span>任务完成</span>
+      </div>
+      {summary.files.length > 0 && (
+        <div className="dl-files" aria-label={`本轮产出文件 ${summary.files.length} 个`}>
+          {summary.files.map((path) => {
+            const name = pathTail(path) ?? path;
+            const inner = (
+              <>
+                <FileIcon />
+                <span className="dl-file-text">
+                  <span className="dl-file-name">{name}</span>
+                  <span className="dl-file-path">{path}</span>
+                </span>
+              </>
+            );
+            return onOpenFile === undefined
+              ? <div className="dl-file" key={path} title={path}>{inner}</div>
+              : (
+                <button type="button" className="dl-file" key={path} title={`打开 ${path}`} onClick={() => onOpenFile(path)}>
+                  {inner}
+                </button>
+              );
+          })}
+        </div>
+      )}
+    </div>
+  </div>
+);
+
 const OptimisticImageStrip: React.FC<{ images: readonly OptimisticImageAttachment[] }> = ({ images }) => (
   <div className="user-attachments" aria-label={`已发送图片 ${images.length} 张`}>
     {images.map((image) => (
@@ -406,6 +515,7 @@ function renderItem(
           {item.reasoning !== '' && (
             <div className={`tl-reasoning${thinking ? ' is-thinking' : ''}`}>
               <ReasoningBlock
+                thinking={thinking}
                 duration=""
                 tokens={`${item.reasoning.length} chars`}
                 title={thinking ? '思考中…' : '思考已完成'}
@@ -505,10 +615,23 @@ function renderItem(
   );
 }
 
+/** 会话已折叠出的条目总数(<ReplayScrubber total> 的数据源)。会话未打开时为 0。 */
+export function useTranscriptItemCount(sessionId: string): number {
+  const convo = useSyncExternalStore(
+    conversationStore.subscribe,
+    useCallback(() => conversationStore.getSnapshot(sessionId), [sessionId]),
+  );
+  return convo.snapshot?.items.length ?? 0;
+}
+
 export const LiveTranscript: React.FC<{
   sessionId: string;
   optimisticImageMessages?: readonly OptimisticImageMessage[];
-}> = ({ sessionId, optimisticImageMessages = [] }) => {
+  /** P1-7 回放:只渲染 items 的前 N 项。undefined = 全量(与改造前完全一致)。 */
+  replayLimit?: number;
+  /** P1-8:点击产出文件卡。不传则文件卡不可点。 */
+  onOpenFile?: (path: string) => void;
+}> = ({ sessionId, optimisticImageMessages = [], replayLimit, onOpenFile }) => {
   const convo = useSyncExternalStore(
     conversationStore.subscribe,
     useCallback(() => conversationStore.getSnapshot(sessionId), [sessionId]),
@@ -528,14 +651,20 @@ export const LiveTranscript: React.FC<{
     imagesByItemIndex.set(index, local.images);
   }
   const items: readonly ConversationItem[] = snapshot?.items ?? [];
+  /* P1-7:纯渲染层截断。replayLimit 为 undefined 时 visibleCount === items.length,
+     下面每一处边界都退化成原来的 items.length,行为逐字节一致。 */
+  const visibleCount = replayLimit === undefined || !Number.isFinite(replayLimit)
+    ? items.length
+    : Math.max(0, Math.min(Math.floor(replayLimit), items.length));
+  const isReplaying = visibleCount < items.length;
   const renderedItems: React.ReactNode[] = [];
-  for (let index = 0; index < items.length; index += 1) {
+  for (let index = 0; index < visibleCount; index += 1) {
     const item = items[index];
     if (isGenericToolItem(item)) {
       // 连续的通用工具调用合并成一条时间线(虚线连接、首尾不越界)。
       const run: ToolItem[] = [];
       let end = index;
-      while (end < items.length) {
+      while (end < visibleCount) {
         const next = items[end];
         if (!isGenericToolItem(next)) break;
         run.push(next);
@@ -552,7 +681,14 @@ export const LiveTranscript: React.FC<{
     if (item === undefined) continue;
     renderedItems.push(renderItem(item, `${sessionId}:${index}`, sessionId, imagesByItemIndex.get(index) ?? []));
   }
-  const pendingLocalMessages = localMessages.filter((message) => !matchedLocalIds.has(message.id));
+  /* 回卷到历史某一步时,「发送中」的乐观气泡属于未来,不该出现在回放里。 */
+  const pendingLocalMessages = isReplaying
+    ? []
+    : localMessages.filter((message) => !matchedLocalIds.has(message.id));
+  /* P1-8:完结区按「可见条目」判定——回卷时自动消失,播回最新才重新出现。
+     有待同步的乐观消息 = 新一轮已经开始,这一轮不算完结。 */
+  const visibleItems = visibleCount === items.length ? items : items.slice(0, visibleCount);
+  const deliverables = pendingLocalMessages.length > 0 ? undefined : deriveDeliverables(visibleItems);
   return (
     <>
       {convo.phase === 'loading' && (
@@ -565,6 +701,9 @@ export const LiveTranscript: React.FC<{
         <div className="message-wrap"><TodoBar todos={snapshot.todos.map((t) => ({ content: t.content, status: t.status as 'completed' | 'in_progress' | 'pending' }))} /></div>
       )}
       {renderedItems}
+      {deliverables !== undefined && (
+        <DeliverableBlock summary={deliverables} onOpenFile={onOpenFile} />
+      )}
       {pendingLocalMessages.map((message) => (
         <div className="message-wrap" key={`optimistic:${message.id}`}>
           <div className="message-user" style={{ opacity: 0.9 }}>

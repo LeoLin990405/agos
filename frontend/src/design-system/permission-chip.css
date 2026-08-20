@@ -1,0 +1,190 @@
+/* ==========================================================================
+   P1-9 权限胶囊 + 审批面板视觉收敛
+   --------------------------------------------------------------------------
+   两个表面共用一套语汇:
+   - .pc-capsule       composer 工具栏内的常驻权限态(安静态 / 待批态)
+   - .pc-approval-*    流内 ApprovalPanel 的收敛件(风险徽标 / 正文 / 结果行)
+   规矩:只用既有 token;无侧边彩条;无渐变文字;无玻璃拟态;
+   唯一常驻动画是复用的 <Dot state="running">(自带 reduced-motion 降级)。
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. 权限胶囊
+   -------------------------------------------------------------------------- */
+.pc-capsule {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none; /* 工具栏(.input-deck-tools)不换行,胶囊宁可不缩也不被挤成省略号 */
+  height: 26px;
+  margin: 0;
+  padding: 0 9px;
+  border: 1px solid var(--border-dim);
+  border-radius: 5px;
+  background-color: transparent;
+  color: var(--text-tertiary);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-appearance: none;
+  appearance: none;
+  transition:
+    background-color 0.3s ease-in-out,
+    border-color 0.3s ease-in-out,
+    color 0.3s ease-in-out,
+    box-shadow 0.3s ease-in-out;
+  animation: pc-enter 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.pc-capsule__icon {
+  flex: none;
+  opacity: 0.7;
+}
+
+.pc-capsule__value {
+  color: var(--text-secondary);
+}
+
+/* 次要事实(审批策略)靠分隔点挂在主值后面,不另起一枚控件。 */
+.pc-capsule__sep {
+  color: var(--border-bold);
+}
+
+.pc-capsule__aux {
+  color: var(--text-tertiary);
+}
+
+/* 待批态:强调色 + 呼吸点。是否可点由 JS 决定(有回调才渲染成 button)。 */
+.pc-capsule.is-pending {
+  border-color: var(--state-running-border);
+  background-color: var(--state-running-bg);
+  color: var(--state-running);
+  font-weight: 600;
+}
+
+.pc-capsule.is-pending .pc-capsule__value,
+.pc-capsule.is-pending .pc-capsule__aux {
+  color: inherit;
+}
+
+.pc-capsule__count {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+button.pc-capsule {
+  cursor: pointer;
+}
+
+button.pc-capsule:hover {
+  border-color: var(--state-running);
+  box-shadow: 0 0 0 3px var(--state-running-bg);
+}
+
+button.pc-capsule:focus-visible {
+  outline: 2px solid var(--state-running);
+  outline-offset: 2px;
+}
+
+button.pc-capsule:active {
+  transform: scale(0.96);
+}
+
+@keyframes pc-enter {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* 窄屏让位:工具栏同排已有录音 / 音频文件 / Swarm / 模型选择器四件。
+   安静态收成一枚盾形图标(title 与 aria-label 仍带完整文案);
+   待批态是要人看见的那个,任何宽度都保留计数与文字。 */
+@media (max-width: 900px) {
+  .pc-capsule:not(.is-pending) {
+    padding: 0 7px;
+  }
+
+  .pc-capsule:not(.is-pending) .pc-capsule__value,
+  .pc-capsule:not(.is-pending) .pc-capsule__sep,
+  .pc-capsule:not(.is-pending) .pc-capsule__aux {
+    display: none;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   2. ApprovalPanel 收敛件
+   -------------------------------------------------------------------------- */
+
+/* 风险徽标:去掉组件里写死的 rgba,改跟 --accent-amber 走主题。 */
+.pc-approval-risk {
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-color: color-mix(in srgb, var(--accent-amber) 38%, transparent);
+  background-color: rgba(245, 158, 11, 0.14);
+  background-color: color-mix(in srgb, var(--accent-amber) 14%, transparent);
+  color: var(--accent-amber);
+}
+
+/* 正文首行:动作摘要。真实字段可能是 reason / callId,不再伪装成 shell 提示符。 */
+.pc-approval-summary {
+  display: block;
+  color: var(--text-primary);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.pc-approval-caption {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-tertiary);
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+}
+
+.pc-approval-diff-add { color: var(--accent-cyan); }
+.pc-approval-diff-ctx { color: var(--text-tertiary); }
+
+/* 结果行:与胶囊同一套语汇(6px 灯 + 11px 字 + 状态底色),不再占满一整块面板。 */
+.pc-approval-resolved {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0;
+  padding: 7px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background-color: transparent;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.4;
+  animation: pc-enter 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.pc-approval-resolved.is-allowed {
+  border-color: var(--state-done-border);
+  background-color: var(--state-done-bg);
+  color: var(--state-done);
+}
+
+.pc-approval-resolved.is-rejected {
+  border-color: var(--state-failed-border);
+  background-color: var(--state-failed-bg);
+  color: var(--state-failed);
+}
+
+/* --------------------------------------------------------------------------
+   3. reduced-motion 静态降级
+   -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .pc-capsule,
+  .pc-approval-resolved {
+    animation: none;
+    transition: none;
+  }
+
+  button.pc-capsule:active {
+    transform: none;
+  }
+}

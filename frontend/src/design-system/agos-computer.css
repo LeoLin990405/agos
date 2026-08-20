@@ -1,0 +1,369 @@
+/* ==========================================================================
+   AgosComputer /「AgOS 的电脑」右侧面板(P1-6)
+   固定 400px 舞台右舷:header(标题 + 实时在干什么)/ 三档 tab / 一个滚动体。
+   全部用既有 token,不引新色;运行态才有 infinite 动画。
+   ========================================================================== */
+
+.agc {
+  width: 400px;
+  flex: none;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background-color: var(--bg-layer-1);
+  border-left: 1px solid var(--border-dim);
+  overflow: hidden;
+  animation: agc-enter 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@media (max-width: 1400px) {
+  .agc { width: 380px; }
+}
+
+@keyframes agc-enter {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ── header ─────────────────────────────────────────────────────────── */
+.agc-head {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 14px 12px 16px;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.agc-head-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.agc-title {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.agc-status {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 0.3s ease-in-out;
+}
+
+.agc-close {
+  flex: none;
+  appearance: none;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition:
+    background-color 0.3s ease-in-out,
+    color 0.3s ease-in-out,
+    border-color 0.3s ease-in-out;
+}
+
+.agc-close:hover {
+  background-color: var(--bg-layer-2);
+  border-color: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+/* ── tabs ───────────────────────────────────────────────────────────── */
+.agc-tabs {
+  flex: none;
+  padding: 10px 16px;
+}
+
+.agc-tabs .segmented-control {
+  display: flex;
+  width: 100%;
+}
+
+.agc-tabs .seg-item {
+  flex: 1 1 0;
+  padding: 5px 0;
+}
+
+/* ── 滚动体 ─────────────────────────────────────────────────────────── */
+.agc-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+
+.agc-empty {
+  margin: 0;
+  padding: 20px 16px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-tertiary);
+}
+
+/* ── ① 终端 ─────────────────────────────────────────────────────────── */
+.agc-term {
+  display: flex;
+  flex-direction: column;
+}
+
+.agc-term-block {
+  padding: 12px 16px 11px;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.agc-term-block:last-child {
+  border-bottom: 0;
+}
+
+.agc-term-cmd {
+  display: flex;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+
+.agc-term-prompt {
+  flex: none;
+  color: var(--text-dimmed);
+}
+
+.agc-term-cmd-text {
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agc-term-out {
+  margin: 6px 0 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agc-term-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.agc-term-state {
+  transition: color 0.3s ease-in-out;
+}
+
+.agc-term-dur {
+  font-size: 11px;
+  color: var(--text-dimmed);
+}
+
+/* ── ② 文件 ─────────────────────────────────────────────────────────── */
+.agc-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.agc-file-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.agc-file-row:last-child {
+  border-bottom: 0;
+}
+
+.agc-file-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.agc-file-tail {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agc-file-path {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agc-file-count {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* ── ③ 子代理 ───────────────────────────────────────────────────────── */
+.agc-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.agc-table th {
+  padding: 8px 16px;
+  text-align: left;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border-dim);
+  white-space: nowrap;
+}
+
+.agc-table th:nth-child(2) { width: 108px; }
+.agc-table th:nth-child(3) { width: 56px; text-align: right; }
+
+.agc-table td {
+  padding: 10px 16px;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.agc-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.agc-batch-name {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 0.3s ease-in-out;
+}
+
+.agc-batch-id {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-dimmed);
+}
+
+.agc-cell-progress {
+  white-space: nowrap;
+}
+
+.agc-batch-count {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.agc-meter {
+  display: block;
+  margin-top: 6px;
+  height: 2px;
+  border-radius: 1px;
+  background-color: var(--bg-layer-3);
+  overflow: hidden;
+}
+
+.agc-meter-fill {
+  display: block;
+  height: 100%;
+  background-color: var(--state-done);
+  transition: width 0.3s ease-in-out, background-color 0.3s ease-in-out;
+}
+
+.agc-table tr.is-running .agc-meter-fill {
+  background-color: var(--state-running);
+}
+
+.agc-cell-failed {
+  text-align: right;
+  font-size: 12px;
+  color: var(--text-dimmed);
+}
+
+.agc-cell-failed.is-hot {
+  color: var(--state-failed);
+}
+
+/* ── 运行态文字扫光(Kimi/Manus 配方;infinite 只给运行态)───────────── */
+.agc-status.is-running,
+.agc-term-state.is-running {
+  background-image: linear-gradient(
+    120deg,
+    var(--text-tertiary) 40%,
+    var(--text-primary) 50%,
+    var(--text-tertiary) 60%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: agc-sweep 2.5s linear infinite;
+}
+
+@keyframes agc-sweep {
+  from { background-position: 100% 0; }
+  to   { background-position: -100% 0; }
+}
+
+/* ── 降级模式 ───────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .agc {
+    animation: none;
+  }
+  .agc-status,
+  .agc-close,
+  .agc-term-state,
+  .agc-batch-name,
+  .agc-meter-fill {
+    transition: none;
+  }
+  .agc-status.is-running,
+  .agc-term-state.is-running {
+    animation: none;
+    background-image: none;
+    color: var(--state-running);
+    -webkit-text-fill-color: currentColor;
+  }
+}

@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { PromptContentPart } from '@/contract/api';
 import { Button } from '@/components/ui/Button';
 import { Dot } from '@/components/ui/Dot';
+import { conversationStore } from '@/stores/live';
 import { ModelSelector } from './ModelSelector';
 import { VoiceInput } from './VoiceInput';
 import {
@@ -33,6 +34,11 @@ export interface CommandDeckProps {
   onAnalyzeImage?: (image: ImageAttachmentDraft) => void;
   /** 当前会话 id(模型选择器按会话拉真实路由清单)。 */
   sessionId?: string;
+  /**
+   * 权限胶囊在「有待决审批」时点击的出口:请求把视口滚到流内第一个 ApprovalPanel。
+   * 组件自己不碰 deck 之外的 DOM;没给回调就退化成不可点的强调态。
+   */
+  onFocusApproval?: () => void;
 }
 
 let multimodalMessageSequence = 0;
@@ -83,10 +89,145 @@ export function buildCommandDeckMessage(
   };
 }
 
+/* ==========================================================================
+   P1-9 权限胶囊:composer 内常驻的权限 / 审批态
+   --------------------------------------------------------------------------
+   数据全部来自 fold 快照(conversationStore),没有一处是编的:
+   - 待决数 = 快照里 kind==='approval' 且 outcome===undefined 的条目数
+     (fold 由 approval/asked 建条目、approval/decided 回填 outcome)。
+   - 安静态文案 = 快照的 sandboxMode / approvalPolicy,分别来自
+     sandbox/mode 与 approval/policy 事件。
+   三样都取不到(无会话 / 未折叠 / 老会话不带这两类事件)则整枚胶囊不渲染。
+   语料实测(~/.dsh/sessions-trash-20260820,392 会话)出现过的取值:
+     mode   = workspace-write | danger-full-access | read-only
+     policy = never | ask
+   未登记的取值原样透出,不做猜测性翻译。
+   ========================================================================== */
+
+const SANDBOX_LABELS: Record<string, string> = {
+  'read-only': '只读',
+  'workspace-write': '可写工作区',
+  'danger-full-access': '全权访问',
+};
+
+/** never 是安静默认,不占宽度;其余策略才需要在胶囊上露出。 */
+const APPROVAL_POLICY_LABELS: Record<string, string> = {
+  ask: '需审批',
+};
+
+export interface PermissionPosture {
+  pending: number;
+  sandboxMode: string | undefined;
+  approvalPolicy: string | undefined;
+}
+
+/** 从 fold 快照里读权限态。纯函数,便于测试;拿不到就留 undefined。 */
+export function readPermissionPosture(
+  snapshot: {
+    items: readonly { kind: string, outcome?: string | undefined }[];
+    sandboxMode: string | undefined;
+    approvalPolicy: string | undefined;
+  } | undefined,
+): PermissionPosture {
+  if (snapshot === undefined) {
+    return { pending: 0, sandboxMode: undefined, approvalPolicy: undefined };
+  }
+  let pending = 0;
+  for (const item of snapshot.items) {
+    if (item.kind === 'approval' && item.outcome === undefined) pending += 1;
+  }
+  return { pending, sandboxMode: snapshot.sandboxMode, approvalPolicy: snapshot.approvalPolicy };
+}
+
+const ShieldIcon: React.FC = () => (
+  <svg
+    className="pc-capsule__icon"
+    width="12"
+    height="12"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.7}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M12 3.2 5 6v5.4c0 4.2 2.8 7.6 7 9.4 4.2-1.8 7-5.2 7-9.4V6z" />
+  </svg>
+);
+
+const PermissionCapsule: React.FC<{
+  sessionId: string | undefined;
+  onFocusApproval?: (() => void) | undefined;
+}> = ({ sessionId, onFocusApproval }) => {
+  const convo = useSyncExternalStore(
+    conversationStore.subscribe,
+    useCallback(() => conversationStore.getSnapshot(sessionId), [sessionId]),
+  );
+  const posture = readPermissionPosture(convo.snapshot);
+
+  if (posture.pending > 0) {
+    const label = `${posture.pending} 项待批`;
+    const body = (
+      <>
+        <Dot state="running" size={6} />
+        <span className="pc-capsule__count">{posture.pending}</span>
+        <span>项待批</span>
+      </>
+    );
+    if (onFocusApproval === undefined) {
+      // 没有出口就不做成假按钮:只报状态,不承诺跳转。
+      return <span className="pc-capsule is-pending" role="status" aria-label={label}>{body}</span>;
+    }
+    return (
+      <button
+        type="button"
+        className="pc-capsule is-pending"
+        onClick={onFocusApproval}
+        title="跳到流内第一个待决审批"
+        aria-label={`${label},跳到流内第一个待决审批`}
+      >
+        {body}
+      </button>
+    );
+  }
+
+  const sandboxLabel = posture.sandboxMode === undefined
+    ? undefined
+    : SANDBOX_LABELS[posture.sandboxMode] ?? posture.sandboxMode;
+  const policyLabel = posture.approvalPolicy === undefined
+    ? undefined
+    : APPROVAL_POLICY_LABELS[posture.approvalPolicy]
+      ?? (posture.approvalPolicy === 'never' ? undefined : posture.approvalPolicy);
+
+  // 两样都没有(会话未折叠出这两类事件)就整枚不渲染,不填占位文案。
+  if (sandboxLabel === undefined && policyLabel === undefined) return null;
+
+  // title 给原始取值(排障时要看得到 workspace-write 本身);
+  // aria-label 跟可见文案一致,窄屏文字收起后仍有可读名字。
+  const title = [
+    posture.sandboxMode === undefined ? undefined : `沙箱模式:${posture.sandboxMode}`,
+    posture.approvalPolicy === undefined ? undefined : `审批策略:${posture.approvalPolicy}`,
+  ].filter((line) => line !== undefined).join(' / ');
+  const ariaLabel = `权限态:${[sandboxLabel, policyLabel].filter((v) => v !== undefined).join(' ')}`;
+
+  return (
+    <span className="pc-capsule" role="status" title={title} aria-label={ariaLabel}>
+      <ShieldIcon />
+      {sandboxLabel !== undefined && <span className="pc-capsule__value">{sandboxLabel}</span>}
+      {sandboxLabel !== undefined && policyLabel !== undefined && (
+        <span className="pc-capsule__sep" aria-hidden="true">·</span>
+      )}
+      {policyLabel !== undefined && <span className="pc-capsule__aux">{policyLabel}</span>}
+    </span>
+  );
+};
+
 export const CommandDeck: React.FC<CommandDeckProps> = ({
   onSend,
   onAnalyzeImage,
   sessionId,
+  onFocusApproval,
 }) => {
   const [text, setText] = useState('');
   const [swarmMode, setSwarmMode] = useState(true);
@@ -197,6 +338,7 @@ export const CommandDeck: React.FC<CommandDeckProps> = ({
               <span>Swarm 并发 ({swarmMode ? '开' : '关'})</span>
             </Button>
             <ModelSelector sessionId={sessionId} />
+            <PermissionCapsule sessionId={sessionId} onFocusApproval={onFocusApproval} />
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>

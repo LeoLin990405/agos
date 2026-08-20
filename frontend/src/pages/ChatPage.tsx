@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { AppTopbar } from '@/components/layout/AppTopbar';
+import { AppTopbar, TopbarAction, TOPBAR_ICONS } from '@/components/layout/AppTopbar';
 import { Dot } from '@/components/ui/Dot';
 import { Chip } from '@/components/ui/Chip';
 import { Button } from '@/components/ui/Button';
@@ -30,7 +30,9 @@ import { NEW_SESSION_EVENT } from '@/components/layout/AppRail';
 import '@/design-system/chat-empty.css';
 import { StateLamp } from '@/design-system/tokens';
 import { sessionsStore, streamStore, conversationStore, sendPromptParts, openConversation } from '@/stores/live';
-import { LiveTranscript, type OptimisticImageMessage } from '@/pages/chat-transcript';
+import { LiveTranscript, useTranscriptItemCount, type OptimisticImageMessage } from '@/pages/chat-transcript';
+import { AgosComputer } from '@/components/stage/AgosComputer';
+import { ReplayScrubber } from '@/components/stage/ReplayScrubber';
 
 /** DeepSeek 原生四模式 id → 名(agentPreset.list 实测)。 */
 const PRESET_NAMES: Record<string, string> = { standard: '标准模式', code: 'PTC 模式', minimal: '极简模式', cordis: '创造模式' };
@@ -69,6 +71,9 @@ export const ChatPage: React.FC<{
   const [searchQuery, setSearchQuery] = useState('');
   const [isNewSessionOpen, setIsNewSessionOpen] = useState(false);
   const [pendingPresetId, setPendingPresetId] = useState<string | undefined>(undefined);
+  const [isComputerOpen, setIsComputerOpen] = useState(false);
+  // undefined = 跟随最新(唯一的「实时」表示法);数字 = 回卷到第 N 项
+  const [replayValue, setReplayValue] = useState<number | undefined>(undefined);
   const [activeModel, setActiveModel] = useState('DeepSeek-V3');
   const [hasGoal, setHasGoal] = useState(true);
   const [optimisticImageMessages, setOptimisticImageMessages] = useState<OptimisticImageMessage[]>([]);
@@ -111,6 +116,10 @@ export const ChatPage: React.FC<{
     useCallback(() => conversationStore.getSnapshot(activeSessionId), [activeSessionId])
   );
   const isEmptyConversation = liveMode && convo.phase === 'live' && (convo.snapshot?.items.length ?? 0) === 0;
+
+  // 回放:总项数来自 fold 快照;换会话时把回卷位置清掉,否则会把上一个会话的位置带过来
+  const replayTotal = useTranscriptItemCount(activeSessionId);
+  useEffect(() => { setReplayValue(undefined); }, [activeSessionId]);
   // 有真后端时自动选中最近会话并打开(mock id '1' 不可用)
   useEffect(() => {
     if (!liveMode) return;
@@ -199,6 +208,15 @@ export const ChatPage: React.FC<{
       }].slice(-20));
     }
     return result;
+  };
+
+  /** 权限胶囊点击:滚到流内第一个「未决」审批面板。
+   *  已决面板渲染成 .pc-approval-resolved,所以 .approval-panel 只会命中待批的那些。
+   *  只在 liveMode 下动作 —— demo 态流里也有一张展示用的面板,不该被命中。 */
+  const handleFocusApproval = (): void => {
+    if (!liveMode) return;
+    document.querySelector('.chat-scroll-view .approval-panel')
+      ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
 
   const updateVisionCard = (id: string, update: Partial<LocalVisionCard>) => {
@@ -365,9 +383,12 @@ export const ChatPage: React.FC<{
                 </span>
               </div>
 
-              <Button variant="ghost" size="sm" onClick={() => onNavigateGraph?.()}>
-                记忆星图
-              </Button>
+              <TopbarAction
+                label="AgOS 的电脑"
+                icon={TOPBAR_ICONS.console}
+                onClick={() => setIsComputerOpen((v) => !v)}
+              />
+              <TopbarAction label="记忆星图" icon={TOPBAR_ICONS.graph} onClick={() => onNavigateGraph?.()} />
               <Button variant="primary" size="sm" onClick={onNavigateConsole}>
                 控制台概览
               </Button>
@@ -393,6 +414,7 @@ export const ChatPage: React.FC<{
             <LiveTranscript
               sessionId={activeSessionId}
               optimisticImageMessages={optimisticImageMessages}
+              replayLimit={replayValue}
             />
           ) : (<>
           {/* 用户 Prompt */}
@@ -592,11 +614,22 @@ export const ChatPage: React.FC<{
           ))}
         </div>
 
+        {liveMode && !isEmptyConversation && replayTotal > 0 && (
+          <ReplayScrubber
+            sessionId={activeSessionId}
+            total={replayTotal}
+            value={replayValue ?? replayTotal}
+            onChange={setReplayValue}
+            onLive={() => setReplayValue(undefined)}
+          />
+        )}
+
         <ProgressDock />
 
         <CommandDeck sessionId={liveMode ? activeSessionId : undefined}
           onSend={handleSend}
           onAnalyzeImage={handleAnalyzeImage}
+          onFocusApproval={handleFocusApproval}
         />
 
         {isEmptyConversation && (
@@ -609,6 +642,13 @@ export const ChatPage: React.FC<{
           </div>
         )}
       </main>
+
+      {isComputerOpen && (
+        <AgosComputer
+          sessionId={liveMode ? activeSessionId : undefined}
+          onClose={() => setIsComputerOpen(false)}
+        />
+      )}
 
       {/* 新建会话弹窗 */}
       <NewSessionModal
