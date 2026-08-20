@@ -22,5 +22,28 @@ export default defineConfig({
   },
   server: {
     port: 3092,
+    // 同源代理到本机 dsh(:3091):/api 全部(含两条 WS)——绕开宿主的 cross-site 栅栏
+    proxy: { '/api': dshProxy() },
+  },
+  preview: {
+    port: 4173,
+    proxy: { '/api': dshProxy() },
   },
 });
+
+/** 代理到本机 dsh。changeOrigin 只改 Host;宿主信任栅栏还核对 Origin 头,
+ *  浏览器 POST 会带 Origin: http://localhost:4173 → 403,必须改写成与 Host 同源。 */
+function dshProxy() {
+  return {
+    target: 'http://127.0.0.1:3091',
+    changeOrigin: true,
+    ws: true,
+    configure(proxy: { on(event: string, cb: (proxyReq: import('http').ClientRequest) => void): void }) {
+      const rewrite = (proxyReq: import('http').ClientRequest): void => {
+        proxyReq.setHeader('origin', 'http://127.0.0.1:3091');
+      };
+      proxy.on('proxyReq', rewrite);
+      proxy.on('proxyReqWs', rewrite);
+    },
+  };
+}

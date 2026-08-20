@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState, useSyncExternalStore } from 'react';
 import { AppTopbar } from '@/components/layout/AppTopbar';
 import { Chip } from '@/components/ui/Chip';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
@@ -9,11 +9,64 @@ import { FleetRack } from '@/components/console/FleetRack';
 import { SparseReadiness } from '@/components/console/SparseReadiness';
 import { Dot } from '@/components/ui/Dot';
 
+import { sessionsStore, telemetryStore, type SessionSummaryRow } from '@/stores/live';
+import type { TelemetryState } from '@/stores/live';
+
+interface ConsoleDerived {
+  running: number; failed: number; calls: number; rows: number;
+  sessionsTotal: number; plansTotal: number; plansExecuted: number;
+  skills: number; skillsWarn: number;
+  inbox: { id: string; type: 'error' | 'warning' | 'running'; title: string; description: string; timestamp: string; actionText: string }[];
+  matrix: SessionSummaryRow[];
+}
+
+const numAt = (o: Record<string, unknown> | undefined, ...path: string[]): number => {
+  let cur: unknown = o;
+  for (const k of path) { if (typeof cur !== 'object' || cur === null) return 0; cur = (cur as Record<string, unknown>)[k]; }
+  return typeof cur === 'number' ? cur : 0;
+};
+
+function deriveConsole(t: TelemetryState, s: { rows: SessionSummaryRow[] }): ConsoleDerived {
+  const ov = t.overview;
+  const calls = t.progress?.calls ?? [];
+  let running = numAt(ov, 'lineage', 'running');
+  let failed = numAt(ov, 'lineage', 'failed');
+  const inbox: ConsoleDerived['inbox'] = [];
+  for (const call of calls) {
+    const rows = Array.isArray(call['rows']) ? call['rows'] as Record<string, unknown>[] : [];
+    const rFail = rows.filter((r) => r['status'] === 'failed');
+    const rRun = rows.filter((r) => r['status'] === 'running');
+    const label = String(call['description'] ?? call['callId'] ?? '批次');
+    for (const fr of rFail.slice(0, 2)) {
+      inbox.push({ id: `${String(call['callId'])}:${String(fr['index'])}`, type: 'error',
+        title: `子任务未成功:${String(fr['item'] ?? fr['index'])}`,
+        description: `${label} · ${String(fr['error'] ?? '见谱系详情')}`.slice(0, 120),
+        timestamp: '', actionText: '查看谱系' });
+    }
+    if (rRun.length > 0) {
+      inbox.push({ id: `${String(call['callId'])}:run`, type: 'running',
+        title: `批次执行中 (${rows.filter((r) => r['status'] === 'completed').length}/${rows.length} 完成)`,
+        description: label.slice(0, 120), timestamp: `${rRun.length} 在跑`, actionText: '查看谱系' });
+    }
+  }
+  return {
+    running, failed, calls: calls.length,
+    rows: numAt(ov, 'lineage', 'rows'),
+    sessionsTotal: numAt(ov, 'sessions', 'total') || s.rows.length,
+    plansTotal: numAt(ov, 'plans', 'total'), plansExecuted: numAt(ov, 'plans', 'executed'),
+    skills: numAt(ov, 'skills', 'skills'), skillsWarn: numAt(ov, 'skills', 'warn'),
+    inbox, matrix: s.rows.slice(0, 8),
+  };
+}
+
 export const ConsolePage: React.FC<{ onNavigateChat?: () => void; onNavigateLineage?: () => void }> = ({
   onNavigateChat,
   onNavigateLineage,
 }) => {
   const [densityMode, setDensityMode] = useState<'dense' | 'sparse'>('dense');
+  const telemetry = useSyncExternalStore(telemetryStore.subscribe, telemetryStore.getSnapshot);
+  const sessionsSnap = useSyncExternalStore(sessionsStore.subscribe, sessionsStore.getSnapshot);
+  const live = useMemo(() => deriveConsole(telemetry, sessionsSnap), [telemetry, sessionsSnap]);
 
   return (
     <div style={{ display: 'flex', flex: 1, height: '100vh', overflow: 'hidden' }}>
@@ -70,135 +123,68 @@ export const ConsolePage: React.FC<{ onNavigateChat?: () => void; onNavigateLine
               {/* 1. Hero KPI 遥测矩阵 */}
               <section className="kpi-grid">
                 <KpiCard
-                  label="活跃智能体 / 批次"
-                  value="42"
-                  unit="/ 7 Swarms"
-                  trend="+6 较上小时"
-                  subValue="峰值 64 并发"
-                  headerRight={<Dot state="running" />}
+                  label="活跃派单 / 批次"
+                  value={String(live.running)}
+                  unit={`/ ${live.calls} 批`}
+                  trend={`${live.rows} 行子任务`}
+                  subValue={live.running > 0 ? '编队执行中' : '空闲待命'}
+                  headerRight={<Dot state={live.running > 0 ? 'running' : 'queued'} />}
                 />
                 <KpiCard
-                  label="批次任务吞吐"
-                  value="1,840"
-                  unit="ops/m"
-                  trend="+12.4% 环比"
-                  subValue="P95 240ms"
+                  label="会话总数"
+                  value={String(live.sessionsTotal)}
+                  unit="个"
+                  trend={live.matrix[0] !== undefined ? `最近:${live.matrix[0].title.slice(0, 12)}` : '—'}
+                  subValue="含子代理会话"
                   headerRight={<Chip active style={{ height: '16px' }}>实时</Chip>}
                 />
                 <KpiCard
-                  label="今日 Token 吞吐"
-                  value="14.82"
-                  unit="M"
-                  subValue="配额充足"
-                  trend="预算使用 38.4%"
+                  label="计划档案"
+                  value={String(live.plansTotal)}
+                  unit={`/ ${live.plansExecuted} 已执行`}
+                  subValue="~/.dsh/logs/plans"
+                  trend="计划模式沉淀"
                   trendType="neutral"
-                  headerRight={<Chip variant="purple" style={{ height: '16px' }}>DeepSeek-V3</Chip>}
+                  headerRight={<Chip variant="purple" style={{ height: '16px' }}>PLAN</Chip>}
                 />
                 <KpiCard
-                  label="安全拦截与否决"
-                  value={<span style={{ color: 'var(--state-failed)' }}>0.04%</span>}
-                  unit="(3次)"
-                  trend="1 次特权阻断待决"
-                  trendType="down"
-                  subValue="CivStrip 护航中"
-                  headerRight={<Dot state="failed" />}
+                  label="失败子任务"
+                  value={live.failed > 0 ? <span style={{ color: 'var(--state-failed)' }}>{live.failed}</span> : '0'}
+                  unit="项"
+                  trend={live.failed > 0 ? '需要关注' : '全部健康'}
+                  trendType={live.failed > 0 ? 'down' : 'neutral'}
+                  subValue="来自最近批次"
+                  headerRight={<Dot state={live.failed > 0 ? 'failed' : 'done'} />}
                 />
                 <KpiCard
-                  label="端到端响应延时"
-                  value="340"
-                  unit="ms"
-                  trend="极速响应"
-                  subValue="0 重试"
-                  headerRight={<Chip style={{ height: '16px' }}>WebSocket</Chip>}
+                  label="技能注册表"
+                  value={String(live.skills)}
+                  unit={live.skillsWarn > 0 ? `warn ${live.skillsWarn}` : '全部通过'}
+                  trend="skill-librarian 审计"
+                  subValue="双根扫描"
+                  headerRight={<Chip style={{ height: '16px' }}>SKILLS</Chip>}
                 />
               </section>
 
               {/* 2. 注意力收件箱 */}
               <AttentionInbox
-                items={[
-                  {
-                    id: '1',
-                    type: 'error',
-                    title: '子代理沙箱越界拦截: subagent-8402-sandbox-escape',
-                    description: '[E4012] 尝试访问宿主受限命名空间 /sys/kernel/debug，已被 seccomp 立即截获',
-                    timestamp: '3分钟前',
-                    actionText: '定位会话',
-                    onAction: onNavigateChat,
-                  },
-                  {
-                    id: '2',
-                    type: 'warning',
-                    title: '特权配置变更待授权: write_to_file /etc/agos/secrets.env',
-                    description: '会话 #8402 申请更新 Redis 主从哨兵配置，涉及生产环境变量覆盖',
-                    timestamp: '5分钟前',
-                    badgeText: '需人工批准',
-                    actionText: '前往审批',
-                    onAction: onNavigateChat,
-                  },
-                  {
-                    id: '3',
-                    type: 'running',
-                    title: 'Swarm 批次 #BATCH-8402 正在执行并发审计 (5/8 完成)',
-                    description: '当前节点: redis-cluster-failover 正在重放主从切换压测',
-                    timestamp: '12.8s 运行中',
-                    actionText: '查看谱系',
-                    onAction: onNavigateLineage,
-                  },
-                ]}
+                items={live.inbox.map((it) => ({ ...it, onAction: onNavigateLineage }))}
               />
 
               {/* 3. 高密度会话矩阵 */}
               <SessionMatrix
-                sessions={[
-                  {
-                    id: '1',
-                    state: 'running',
-                    title: '分布式认证令牌轮转与流式事件管道重构',
-                    subtitle: 'Swarm #BATCH-8402 8 节点并发执行中',
-                    model: 'DeepSeek-V3',
-                    tokenWatermark: '38.4k (30%)',
-                    latency: '240ms',
-                    updatedAt: '刚刚',
-                    actionText: '接入',
-                    onAction: onNavigateChat,
-                  },
-                  {
-                    id: '2',
-                    state: 'done',
-                    title: 'PostgreSQL DataConnect 模式迁移回归',
-                    subtitle: '14 条迁移脚本全部验证通过，0 冲突',
-                    model: 'Claude-3.5',
-                    tokenWatermark: '52.1k (41%)',
-                    latency: '310ms',
-                    updatedAt: '1小时前',
-                    actionText: '回放',
-                    onAction: onNavigateChat,
-                  },
-                  {
-                    id: '3',
-                    state: 'failed',
-                    title: 'Seccomp 宿主内核隔离逃逸巡检',
-                    subtitle: '[E4012] 宿主命名空间隔离拒绝，已记入审计',
-                    model: 'DeepSeek-V3',
-                    tokenWatermark: '84.0k (65%)',
-                    latency: '420ms',
-                    updatedAt: '3小时前',
-                    actionText: '排查',
-                    onAction: onNavigateChat,
-                  },
-                  {
-                    id: '4',
-                    state: 'done',
-                    title: 'AgOS 遥测甲板设计系统 Token 提取',
-                    subtitle: '完成 6 个动效常量与深浅双模式 CSS 变量抽离',
-                    model: 'Kimi-K1.5',
-                    tokenWatermark: '19.8k (15%)',
-                    latency: '180ms',
-                    updatedAt: '昨天',
-                    actionText: '查看',
-                    onAction: onNavigateChat,
-                  },
-                ]}
+                sessions={live.matrix.map((r) => ({
+                  id: r.sessionId,
+                  state: r.running ? 'running' as const : r.blank ? 'queued' as const : 'done' as const,
+                  title: r.title,
+                  subtitle: r.cwd,
+                  model: r.running ? 'RUNNING' : 'IDLE',
+                  tokenWatermark: `${(r.tokens / 1000).toFixed(1)}k tok`,
+                  latency: `${r.turns} 轮`,
+                  updatedAt: new Date(r.updatedAt).toLocaleTimeString('zh-CN', { hour12: false }),
+                  actionText: '接入',
+                  onAction: onNavigateChat,
+                }))}
               />
 
               {/* 4. 机房机架 */}
