@@ -51,9 +51,14 @@
       border-radius: 2px;
       transform-origin: center bottom;
       box-shadow: 0 0 8px rgba(0, 166, 255, 0.5);
+      animation: none; /* Default: paused */
+    }
+
+    .sym-monitor-banner.is-running .sym-bar {
       animation: u-sym-wave var(--u-dur-scan) ease-in-out infinite;
       animation-delay: var(--u-phase, 0ms);
     }
+
     .sym-bar:nth-child(1) { height: 30%; }
     .sym-bar:nth-child(2) { height: 60%; }
     .sym-bar:nth-child(3) { height: 90%; }
@@ -191,6 +196,7 @@
             <button class="seg-item">等待中 (2)</button>
             <button class="seg-item" style="color:var(--state-done);">已完成 (5)</button>
             <button class="seg-item" style="color:var(--state-failed);">未成功 (1)</button>
+            <button class="seg-item" style="color:var(--text-dimmed);">已中止 (0)</button>
           </div>
 
           <button class="btn btn-ghost btn-sm" data-action="toggle-theme">
@@ -203,7 +209,7 @@
       <div class="lineage-wrapper">
         
         <!-- 1. 共息同频心跳监视器 (Sym-Respiration Monitor Banner) -->
-        <section class="sym-monitor-banner">
+        <section class="sym-monitor-banner is-running">
           <div class="sym-pulse-indicator">
             <span class="u-dot u-dot--running" style="width:12px;height:12px;"></span>
             <div>
@@ -310,10 +316,10 @@
                   </div>
 
                   <!-- 段 3: 产物与实时日志 -->
-                  <div style="font-family:var(--font-mono);font-size:11.5px;color:var(--text-tertiary);background-color:var(--code-bg);padding:10px 14px;border-radius:6px;">
-                    <span style="color:#38bdf8;">[18:42:22]</span> INFO Sent SIGSTOP to redis-master-01<br>
-                    <span style="color:#38bdf8;">[18:42:23]</span> INFO Sentinel promoted replica redis-slave-02 to master (elapsed: 142ms)<br>
-                    <span style="color:#38bdf8;">[18:42:24]</span> SUCCESS Token rotation retry loop captured failover without request drop
+                  <div data-theme="dark" style="font-family:var(--font-mono);font-size:11.5px;color:var(--text-secondary);background-color:#090c13;padding:10px 14px;border-radius:6px;border:1px solid rgba(255,255,255,0.05);">
+                    <span style="color:var(--accent-cyan);">[18:42:22]</span> INFO Sent SIGSTOP to redis-master-01<br>
+                    <span style="color:var(--accent-cyan);">[18:42:23]</span> INFO Sentinel promoted replica redis-slave-02 to master (elapsed: 142ms)<br>
+                    <span style="color:var(--accent-cyan);">[18:42:24]</span> SUCCESS Token rotation retry loop captured failover without request drop
                   </div>
                 </div>
               </div>
@@ -345,7 +351,7 @@
                   <div style="background-color:var(--bg-layer-1);border-radius:6px;padding:10px 14px;font-size:12px;color:var(--text-secondary);">
                     尝试对宿主设备 <code>/dev/kmem</code> 发起 probe，触发安全防护策略并被内核 seccomp 强行挂起。
                   </div>
-                  <div style="font-family:var(--font-mono);font-size:11.5px;color:var(--state-failed);background-color:var(--code-bg);padding:10px 14px;border-radius:6px;">
+                  <div data-theme="dark" style="font-family:var(--font-mono);font-size:11.5px;color:var(--state-failed);background-color:#090c13;padding:10px 14px;border-radius:6px;border:1px solid rgba(255,255,255,0.05);">
                     [AUDIT_LOG] Operation forbidden by host policy. Subagent terminated safely.
                   </div>
                 </div>
@@ -377,7 +383,7 @@
                   <div style="background-color:var(--bg-layer-1);border-radius:6px;padding:10px 14px;font-size:12px;color:var(--text-secondary);">
                     完成 Ed25519 签名算法验证，未发现私钥泄露或侧信道弱随机数风险。
                   </div>
-                  <div style="font-family:var(--font-mono);font-size:11.5px;color:var(--state-done);background-color:var(--code-bg);padding:10px 14px;border-radius:6px;">
+                  <div data-theme="dark" style="font-family:var(--font-mono);font-size:11.5px;color:var(--state-done);background-color:#090c13;padding:10px 14px;border-radius:6px;border:1px solid rgba(255,255,255,0.05);">
                     Report generated: reports/security/crypto_audit_pass.json
                   </div>
                 </div>

@@ -79,6 +79,49 @@
 }
 
 /* --------------------------------------------------------------------------
+   3.5 显式深色主题 (用于组件级钉深底)
+   -------------------------------------------------------------------------- */
+[data-theme="dark"] {
+  --bg-app: #06080d;
+  --bg-layer-1: #0c0f17;
+  --bg-layer-2: #121723;
+  --bg-layer-3: #1a2233;
+  --bg-layer-active: #222d44;
+  --bg-glass: rgba(12, 15, 23, 0.75);
+
+  --border-dim: rgba(255, 255, 255, 0.05);
+  --border-subtle: rgba(255, 255, 255, 0.09);
+  --border-bold: rgba(255, 255, 255, 0.18);
+  --border-glow: rgba(0, 166, 255, 0.4);
+
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-tertiary: #64748b;
+  --text-dimmed: #475569;
+
+  --state-running: #00a6ff;
+  --state-running-bg: rgba(0, 166, 255, 0.12);
+  --state-running-border: rgba(0, 166, 255, 0.4);
+  --state-running-glow: rgba(0, 166, 255, 0.45);
+
+  --state-done: #10b981;
+  --state-done-bg: rgba(16, 185, 129, 0.12);
+  --state-done-border: rgba(16, 185, 129, 0.4);
+  --state-done-glow: rgba(16, 185, 129, 0.4);
+
+  --state-failed: #f43f5e;
+  --state-failed-bg: rgba(244, 63, 94, 0.14);
+  --state-failed-border: rgba(244, 63, 94, 0.4);
+  --state-failed-glow: rgba(244, 63, 94, 0.4);
+
+  --state-queued: #64748b;
+  --state-queued-bg: rgba(100, 116, 139, 0.12);
+  --state-queued-border: rgba(100, 116, 139, 0.3);
+
+  --code-bg: #090c13;
+}
+
+/* --------------------------------------------------------------------------
    4. 浅色主题 (Light Mode - 极简工程图纸 Architectural Spec)
    -------------------------------------------------------------------------- */
 [data-theme="light"],

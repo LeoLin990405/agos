@@ -430,13 +430,13 @@
 
 .terminal-body {
   padding: 14px 16px;
-  color: #e2e8f0;
+  color: var(--text-primary);
   line-height: 1.65;
   overflow-x: auto;
 }
 
 .terminal-cmd {
-  color: #38bdf8;
+  color: var(--state-running);
   display: flex;
   gap: 8px;
   margin-bottom: 8px;
@@ -444,7 +444,7 @@
 }
 
 .terminal-output {
-  color: #94a3b8;
+  color: var(--text-secondary);
   white-space: pre-wrap;
 }
 
@@ -495,7 +495,7 @@
   border-left: 2px solid var(--state-failed);
 }
 .diff-line--ctx {
-  color: #64748b;
+  color: var(--text-tertiary);
   border-left: 2px solid transparent;
 }
 
@@ -569,6 +569,10 @@
   background-color: var(--state-running);
   vertical-align: middle;
   box-shadow: 0 0 8px var(--state-running);
+  animation: none;
+}
+
+.is-running .stream-cursor {
   animation: u-cursor-blink 800ms step-end infinite;
 }
 
@@ -866,3 +870,4 @@
     animation: none !important;
   }
 }
+
