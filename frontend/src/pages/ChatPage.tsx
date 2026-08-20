@@ -188,7 +188,7 @@ export const ChatPage: React.FC<{
               onClick={() => handleSelectSession(s.id)}
               style={{
                 padding: '12px 14px',
-                borderRadius: '8px',
+                borderRadius: '10px',
                 backgroundColor: activeSessionId === s.id ? 'var(--bg-layer-2)' : 'transparent',
                 border: activeSessionId === s.id ? '1px solid var(--border-subtle)' : '1px solid transparent',
                 boxShadow: activeSessionId === s.id ? '0 0 0 1px var(--border-bold), var(--shadow-card)' : 'none',
@@ -201,16 +201,16 @@ export const ChatPage: React.FC<{
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
                   <Dot state={s.state} />
-                  <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {s.title}
                   </span>
                 </div>
                 {s.tag !== '' && <Chip variant={s.tagVariant}>{s.tag}</Chip>}
               </div>
-              <div style={{ fontSize: '11.5px', color: 'var(--text-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <div style={{ fontSize: '12.5px', color: 'var(--text-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {s.preview}
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '10.5px', color: 'var(--text-tertiary)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11.5px', color: 'var(--text-tertiary)' }}>
                 <span className="u-num">{s.meta}</span>
                 <span className="u-num" style={s.state === 'running' ? { color: 'var(--state-running)', fontWeight: 600 } : undefined}>
                   {s.time}

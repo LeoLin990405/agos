@@ -807,13 +807,13 @@
 }
 
 .input-box-container {
-  max-width: 900px;
+  max-width: 860px;
   width: 100%;
   margin: 0 auto;
   background-color: var(--bg-layer-2);
   border: 1px solid var(--border-subtle);
-  border-radius: 14px;
-  padding: 12px 16px;
+  border-radius: 16px;
+  padding: 14px 18px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -823,7 +823,7 @@
 
 .input-box-container:focus-within {
   border-color: var(--state-running);
-  box-shadow: 0 0 0 2px var(--state-running-bg), 0 8px 30px rgba(0, 166, 255, 0.25);
+  box-shadow: 0 0 0 3px var(--state-running-bg), 0 6px 20px rgba(0, 0, 0, 0.14); /* Kimi 柔焦,去霓虹 */
 }
 
 .chat-textarea {

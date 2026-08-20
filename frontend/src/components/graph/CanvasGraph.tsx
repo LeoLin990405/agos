@@ -83,14 +83,18 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     let warmup = 0;
+    let alpha = 1;          // 模拟退火:热度衰减到 0.02 后冻结(Obsidian 的"落定即静止")
+    let appearT = 0;        // 载入淡入 0→1
+    let focusT = 0;         // 焦点过渡 0→1(hover/选中平滑,不瞬跳)
 
     const tick = () => {
       const simNodes = simNodesRef.current;
       const width = canvas.width / (window.devicePixelRatio || 1);
       const height = canvas.height / (window.devicePixelRatio || 1);
 
-      // 1. 物理计算 (力导向)
-      if (isSimulating) {
+      // 1. 物理计算 (力导向,带退火:落定后完全静止)
+      if (isSimulating && alpha > 0.02) {
+        alpha *= 0.9965;
         // 库仑斥力
         for (let i = 0; i < simNodes.length; i++) {
           const a = simNodes[i];
@@ -141,8 +145,8 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
           if (n !== draggingNodeRef.current) {
             n.vx += (cx - n.x) * 0.00022;
             n.vy += (cy - n.y) * 0.00022;
-            n.x += n.vx;
-            n.y += n.vy;
+            n.x += n.vx * alpha;
+            n.y += n.vy * alpha;
             n.vx *= 0.88;
             n.vy *= 0.88;
           }
@@ -171,6 +175,10 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
       ctx.scale(dpr, dpr);
       ctx.translate(tx, ty);
       ctx.scale(k, k);
+
+      appearT = Math.min(1, appearT + 0.03);
+      const focusTarget = (hoveredNodeRef.current || selectedNodeId) ? 1 : 0;
+      focusT += (focusTarget - focusT) * 0.16; // ~150ms 平滑,Obsidian 的渐隐邻域
 
       // 计算高亮邻域
       const hovered = hoveredNodeRef.current;
@@ -220,11 +228,10 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
           ctx.lineWidth = isHighlighted ? 1.8 : 1;
         } else {
           ctx.setLineDash([]);
+          const edgeDim = isDimmed ? focusT : 0;
           ctx.strokeStyle = (activeId && isHighlighted)
-            ? 'rgba(103, 158, 254, 0.85)'
-            : isDimmed
-            ? 'rgba(255, 255, 255, 0.025)'
-            : 'rgba(255, 255, 255, 0.10)';
+            ? `rgba(103, 158, 254, ${0.3 + 0.55 * focusT})`
+            : `rgba(255, 255, 255, ${(0.10 - 0.075 * edgeDim) * appearT})`;
           ctx.lineWidth = isHighlighted ? 1.4 : 0.7;
         }
         ctx.stroke();
@@ -264,8 +271,11 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
         // 节点本体
         ctx.beginPath();
         ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
-        ctx.fillStyle = isDimmed ? `${color}1f` : color;
+        const dimMix = isDimmed ? focusT : 0; // 0=正常 1=完全沉底
+        ctx.globalAlpha = appearT * (1 - dimMix * 0.85);
+        ctx.fillStyle = color;
         ctx.fill();
+        ctx.globalAlpha = appearT;
         if (isFocus) { // 只有焦点邻域上细环,平时无描边(Obsidian 语法)
           ctx.lineWidth = 1.4;
           ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
@@ -286,6 +296,8 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
     };
 
     animId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animId);
+    // 焦点/过滤变化 → 复热一点,让图轻微再排(Obsidian 同款手感)
     return () => cancelAnimationFrame(animId);
   }, [isSimulating, rawEdges, selectedNodeId, searchQuery, typeFilter]);
 

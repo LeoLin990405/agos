@@ -76,7 +76,7 @@ function renderItem(item: ConversationItem, key: string, sessionId: string): Rea
               {item.at > 0 ? new Date(item.at).toLocaleTimeString('zh-CN', { hour12: false }) : ''}
             </span>
           </div>
-          <div style={{ fontSize: '13.5px', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{item.text}</div>
+          <div style={{ fontSize: '14.5px', lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{item.text}</div>
         </div>
       </div>
     );
@@ -97,7 +97,7 @@ function renderItem(item: ConversationItem, key: string, sessionId: string): Rea
             </ReasoningBlock>
           )}
           {item.text !== '' && (
-            <div style={{ fontSize: '13.5px', lineHeight: 1.65, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{item.text}</div>
+            <div style={{ fontSize: '14.5px', lineHeight: 1.75, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{item.text}</div>
           )}
           {item.streaming && item.text === '' && item.reasoning === '' && (
             <div className="stream-live-indicator"><Dot state="running" /><span>思考中…</span><span className="stream-cursor" /></div>
