@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "smoke": "tsx scripts/smoke.ts",
-    "vendor:diff": "sh scripts/vendor-diff.sh"
+    "vendor:diff": "sh scripts/vendor-diff.sh",
+    "replay": "tsx scripts/replay-check.ts"
   },
   "dependencies": {
     "clsx": "^2.1.1",
