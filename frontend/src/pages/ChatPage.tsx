@@ -20,6 +20,9 @@ import { StateLamp } from '@/design-system/tokens';
 import { sessionsStore, streamStore, sendPrompt, openConversation } from '@/stores/live';
 import { LiveTranscript } from '@/pages/chat-transcript';
 
+/** DeepSeek 原生四模式 id → 名(agentPreset.list 实测)。 */
+const PRESET_NAMES: Record<string, string> = { standard: '标准模式', code: 'PTC 模式', minimal: '极简模式', cordis: '创造模式' };
+
 interface SessionListItem {
   id: string;
   title: string;
@@ -105,7 +108,7 @@ export const ChatPage: React.FC<{
           title: r.title,
           preview: r.cwd || '任务进行中...',
           state: r.running ? 'running' : 'done',
-          tag: 'LIVE',
+          tag: '',
           meta: `${r.turns} 轮 · ${(r.tokens / 1000).toFixed(1)}k`,
           time: new Date(r.updatedAt).toLocaleTimeString(),
         }))
@@ -202,7 +205,7 @@ export const ChatPage: React.FC<{
                     {s.title}
                   </span>
                 </div>
-                <Chip variant={s.tagVariant}>{s.tag}</Chip>
+                {s.tag !== '' && <Chip variant={s.tagVariant}>{s.tag}</Chip>}
               </div>
               <div style={{ fontSize: '11.5px', color: 'var(--text-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {s.preview}
@@ -224,7 +227,9 @@ export const ChatPage: React.FC<{
           title={liveMode
             ? (renderedSessions.find((x) => x.id === activeSessionId)?.title ?? 'AgOS 对话甲板')
             : '分布式认证令牌轮转与流式事件管道重构'}
-          badge={liveMode ? undefined : <Chip active>{activeModel} · 671B</Chip>}
+          badge={liveMode
+            ? (() => { const p = liveSessions.rows.find((x) => x.sessionId === activeSessionId)?.agentPreset ?? ''; const n = PRESET_NAMES[p] ?? p; return n !== '' ? <Chip active>{n}</Chip> : undefined; })()
+            : <Chip active>{activeModel} · 671B</Chip>}
           rightActions={
             <>
 

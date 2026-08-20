@@ -58,7 +58,7 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
 
     simNodesRef.current = rawNodes.map((n, i) => {
       const angle = (i / rawNodes.length) * Math.PI * 2;
-      const dist = 120 + Math.random() * 260;
+      const dist = 220 + Math.random() * 520; // 大幅铺开:428 节点需要空间(Obsidian 的"星空"来自留白)
       return {
         ...n,
         x: width / 2 + Math.cos(angle) * dist + (Math.random() - 0.5) * 50,
@@ -71,6 +71,10 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
     });
   }, [rawNodes]);
 
+  // 首帧自动取景(一次):包围盒适配画布,留 12% 边距
+  const autofitDoneRef = React.useRef(false);
+  useEffect(() => { autofitDoneRef.current = false; }, [rawNodes]);
+
   // 动画与物理主循环
   useEffect(() => {
     let animId: number;
@@ -78,6 +82,7 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+    let warmup = 0;
 
     const tick = () => {
       const simNodes = simNodesRef.current;
@@ -95,8 +100,8 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
             const dy = b.y - a.y;
             const distSq = dx * dx + dy * dy + 100;
             const dist = Math.sqrt(distSq);
-            if (dist < 320) {
-              const force = 180 / distSq;
+            if (dist < 560) {
+              const force = 620 / distSq; // 400+ 节点需要更强斥力才能出星座感
               const fx = (dx / dist) * force;
               const fy = (dy / dist) * force;
               a.vx -= fx;
@@ -118,8 +123,8 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
             const dx = target.x - source.x;
             const dy = target.y - source.y;
             const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-            const targetDist = edge.dangling ? 140 : 80;
-            const force = (dist - targetDist) * 0.008;
+            const targetDist = edge.dangling ? 200 : 130;
+            const force = (dist - targetDist) * 0.006;
             const fx = (dx / dist) * force;
             const fy = (dy / dist) * force;
             source.vx += fx;
@@ -134,14 +139,27 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
         const cy = height / 2;
         simNodes.forEach((n) => {
           if (n !== draggingNodeRef.current) {
-            n.vx += (cx - n.x) * 0.0005;
-            n.vy += (cy - n.y) * 0.0005;
+            n.vx += (cx - n.x) * 0.00022;
+            n.vy += (cy - n.y) * 0.00022;
             n.x += n.vx;
             n.y += n.vy;
             n.vx *= 0.88;
             n.vy *= 0.88;
           }
         });
+      }
+
+      // 预热 60 帧后做一次自动取景(等物理摊开)
+      warmup += 1;
+      if (!autofitDoneRef.current && warmup === 60 && simNodes.length > 0) {
+        autofitDoneRef.current = true;
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        simNodes.forEach((n) => { minX = Math.min(minX, n.x); minY = Math.min(minY, n.y); maxX = Math.max(maxX, n.x); maxY = Math.max(maxY, n.y); });
+        const bw = Math.max(1, maxX - minX), bh = Math.max(1, maxY - minY);
+        const vw = canvas.width / (window.devicePixelRatio || 1), vh = canvas.height / (window.devicePixelRatio || 1);
+        const fit = Math.min(vw / bw, vh / bh) * 0.88;
+        const k2 = Math.max(0.25, Math.min(1.1, fit));
+        transformRef.current = { k: k2, x: vw / 2 - (minX + bw / 2) * k2, y: vh / 2 - (minY + bh / 2) * k2 };
       }
 
       // 2. 渲染画布
@@ -202,7 +220,7 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
           ctx.lineWidth = isHighlighted ? 1.8 : 1;
         } else {
           ctx.setLineDash([]);
-          ctx.strokeStyle = isHighlighted
+          ctx.strokeStyle = (activeId && isHighlighted)
             ? 'rgba(103, 158, 254, 0.85)'
             : isDimmed
             ? 'rgba(255, 255, 255, 0.025)'
@@ -229,8 +247,11 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
         const isHighlighted = activeId ? connectedSet.has(node.id) : isMatchSearch;
         const isDimmed = (activeId && !connectedSet.has(node.id)) || (searchQuery && !isMatchSearch);
 
-        const color = TYPE_COLORS[node.type] || '#00a6ff';
-        const radius = node.radius * (isHighlighted ? 1.25 : 1);
+        const color = TYPE_COLORS[node.type] || '#679efe';
+        // isHighlighted 在无焦点时对全图为真(空搜索=全命中),只能用于"防变暗";
+        // 标签/白环必须用显式焦点(有 activeId 才有焦点)——否则全图开灯=乱。
+        const isFocus = activeId ? connectedSet.has(node.id) : false;
+        const radius = node.radius * (isFocus ? 1.25 : 1);
 
         // 最近7天更新节点挂载共息呼吸光晕
         if (node.isRecent && !isDimmed) {
@@ -245,16 +266,16 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
         ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
         ctx.fillStyle = isDimmed ? `${color}1f` : color;
         ctx.fill();
-        if (isHighlighted) { // 只有焦点邻域上细环,平时无描边(Obsidian 语法)
+        if (isFocus) { // 只有焦点邻域上细环,平时无描边(Obsidian 语法)
           ctx.lineWidth = 1.4;
           ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
           ctx.stroke();
         }
 
         // 标签文本 (高亮节点或出度大节点显示)
-        if ((isHighlighted || k > 1.3) && !isDimmed) { // Obsidian:标签只给焦点邻域或放大后
-          ctx.fillStyle = isHighlighted ? 'rgba(255,255,255,0.92)' : 'rgba(255, 255, 255, 0.5)';
-          ctx.font = `${isHighlighted ? '600 ' : ''}9.5px -apple-system, sans-serif`;
+        if ((isFocus || k > 1.5) && !isDimmed) { // Obsidian:标签只给焦点邻域或明显放大后
+          ctx.fillStyle = isFocus ? 'rgba(255,255,255,0.92)' : 'rgba(255, 255, 255, 0.45)';
+          ctx.font = `${isFocus ? '600 ' : ''}9.5px -apple-system, sans-serif`;
           ctx.textAlign = 'center';
           ctx.fillText(node.id, node.x, node.y + radius + 12);
         }

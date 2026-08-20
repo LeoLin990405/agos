@@ -13,9 +13,10 @@ import { SessionsView } from '@/components/console/SessionsView';
 import { LineageView } from '@/components/console/LineageView';
 import { PlansView } from '@/components/console/PlansView';
 import { SkillsView } from '@/components/console/SkillsView';
+import { TraceView } from '@/components/console/TraceView';
 import { RealOverview, useConsoleLive } from '@/pages/console-live';
 
-export type ConsoleTab = 'overview' | 'fleet' | 'sessions' | 'lineage' | 'plans' | 'skills';
+export type ConsoleTab = 'overview' | 'fleet' | 'sessions' | 'lineage' | 'trace' | 'plans' | 'skills';
 
 export interface ConsolePageProps {
   initialTab?: ConsoleTab;
@@ -76,6 +77,14 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
 
         <button
           type="button"
+          className={`console-nav-item ${activeTab === 'trace' ? 'is-active' : ''}`}
+          onClick={() => setActiveTab('trace')}
+        >
+          <span>轨迹时间流</span>
+        </button>
+
+        <button
+          type="button"
           className={`console-nav-item ${activeTab === 'plans' ? 'is-active' : ''}`}
           onClick={() => setActiveTab('plans')}
         >
@@ -128,6 +137,7 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
           {activeTab === 'fleet' && <FleetView />}
           {activeTab === 'sessions' && <SessionsView onSelectSession={() => onNavigateChat?.()} />}
           {activeTab === 'lineage' && <LineageView />}
+          {activeTab === 'trace' && <TraceView onSelectSession={() => onNavigateChat?.()} />}
           {activeTab === 'plans' && <PlansView />}
           {activeTab === 'skills' && <SkillsView />}
 

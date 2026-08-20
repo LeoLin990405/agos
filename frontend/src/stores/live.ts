@@ -40,6 +40,7 @@ export interface SessionSummaryRow {
   blank: boolean
   turns: number
   tokens: number
+  agentPreset: string
 }
 
 interface SessionsState { rows: SessionSummaryRow[], loadedAt: number, error: string | undefined }
@@ -65,6 +66,7 @@ export async function refreshSessions(): Promise<void> {
         blank: item['blank'] === true,
         turns: Number(stats['turns'] ?? 0),
         tokens: Number(stats['decodeTokens'] ?? 0),
+        agentPreset: String(item['agentPreset'] ?? ''),
       } satisfies SessionSummaryRow
     }).filter((r) => r.sessionId !== '')
     rows.sort((a, b) => b.updatedAt - a.updatedAt)
