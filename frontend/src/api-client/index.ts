@@ -226,7 +226,7 @@ export function createAgosClient(options: AgosClientOptions = {}): AgosClient {
             console.error(`[agos-client] dropping malformed SSE frame on ${path}:`, error)
             continue
           }
-          options.onFrame?.(frame)
+          try { options.onFrame?.(frame) } catch (tapError) { console.error('[agos-client] onFrame tap threw (isolated):', tapError) }
           yield { rpcId: full.rpcId, payload: frame }
         }
       }
@@ -284,7 +284,7 @@ export function createAgosClient(options: AgosClientOptions = {}): AgosClient {
           console.error(`[agos-client] dropping malformed WS frame on ${path}:`, error)
           continue
         }
-        options.onFrame?.(frame)
+        try { options.onFrame?.(frame) } catch (tapError) { console.error('[agos-client] onFrame tap threw (isolated):', tapError) }
         yield { rpcId: full.rpcId, payload: frame }
       }
     } finally {
