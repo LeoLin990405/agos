@@ -1,0 +1,76 @@
+/* ==========================================================================
+   AppRail G5 侧栏语法(动词置顶 → 导航 → 底部账号)
+   仅 AppRail.tsx 引用;基础 .app-rail / .rail-btn 语汇仍在 layout.css。
+   ========================================================================== */
+
+/* 动词组:新会话主按钮 + ⌘K 键帽 */
+.rail-verb-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+}
+
+/* 新会话主按钮:accent 浅填充 + 描边,悬停加深 */
+.rail-btn.rail-new-session {
+  color: var(--state-running);
+  background-color: var(--state-running-bg);
+  border-color: var(--state-running-border);
+  transition:
+    background-color 0.3s ease-in-out,
+    border-color 0.3s ease-in-out,
+    color 0.3s ease-in-out,
+    box-shadow 0.3s ease-in-out,
+    transform var(--u-dur-tick) var(--u-ease-swift);
+}
+
+.rail-btn.rail-new-session:hover:not(:disabled) {
+  color: var(--state-running);
+  background-color: color-mix(in srgb, var(--state-running) 22%, transparent);
+  border-color: var(--state-running);
+  box-shadow: 0 0 12px var(--state-running-glow);
+}
+
+.rail-btn.rail-new-session:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+/* ⌘K 键帽 chip:10.5px mono、layer-3 底、圆角 4、1px 边(rail 为 58px 图标窄栏,
+   键帽放按钮正下方而非右侧) */
+.rail-kbd-chip {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 4px;
+  background-color: var(--bg-layer-3);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+  user-select: none;
+  white-space: nowrap;
+}
+
+/* 语法分组之间的发丝分隔线 */
+.rail-divider {
+  width: 26px;
+  height: 1px;
+  flex: none;
+  background-color: var(--border-dim);
+  margin: 1px 0;
+}
+
+/* 底部账号区(当前无真实余额/身份数据源,仅设置入口) */
+.rail-account {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail-btn.rail-new-session {
+    transition: none;
+  }
+}

@@ -1,0 +1,190 @@
+/* ==========================================================================
+   EmptyState —— 新会话空态(Kimi 基因,P0-1)
+   由 src/components/chat/EmptyState.tsx 引入;不改 deck.css / tokens.css。
+   动效纪律:主档过渡 0.3s ease-in-out;入场 fade cubic-bezier(0.4,0,0.2,1);
+   无自有 infinite 动画(运行态呼吸由 Dot / deck.css 承担);reduced-motion 全静态。
+   ========================================================================== */
+
+/* ── Hero:AgOS logotype + 副语 ───────────────────────────────────────────── */
+
+.es-hero {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 0 24px 28px; /* 竖向节奏:hero 与 composer 间 28px */
+  text-align: center;
+}
+
+.es-logotype {
+  font-family: var(--font-sans);
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--text-primary);
+}
+
+.es-tagline {
+  margin-top: 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+  letter-spacing: 0.01em;
+}
+
+/* ── Below:能力胶囊排 + 最近会话列表 ─────────────────────────────────────── */
+
+.es-below {
+  width: 100%;
+  max-width: 760px;
+  margin: 28px auto 0;
+  padding: 0 24px;
+}
+
+.es-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 32px; /* 竖向节奏:chips 与列表间 32px */
+}
+
+.es-chip {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 13px;
+  border-radius: 15px;
+  border: 1px solid var(--border-subtle);
+  background-color: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.3s ease-in-out, border-color 0.3s ease-in-out,
+    color 0.3s ease-in-out;
+}
+
+.es-chip svg {
+  flex: none;
+  color: var(--text-tertiary);
+  transition: color 0.3s ease-in-out;
+}
+
+.es-chip:hover {
+  background-color: var(--bg-layer-2);
+  border-color: var(--border-bold);
+  color: var(--text-primary);
+}
+
+.es-chip:hover svg {
+  color: var(--text-secondary);
+}
+
+.es-chip:active {
+  background-color: var(--bg-layer-3);
+}
+
+.es-chip:focus-visible {
+  outline: 1px solid var(--border-glow);
+  outline-offset: 1px;
+}
+
+/* ── 最近会话:极简列表(状态点 + 标题 + 相对时间,hairline 分隔)─────────── */
+
+.es-recent {
+  display: flex;
+  flex-direction: column;
+}
+
+.es-recent-label {
+  margin-bottom: 6px;
+  padding: 0 8px;
+}
+
+.es-session-row {
+  appearance: none;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 8px;
+  border: none;
+  border-radius: 8px;
+  background-color: transparent;
+  font-family: var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.3s ease-in-out;
+}
+
+.es-session-row:hover {
+  background-color: var(--bg-layer-1);
+}
+
+.es-session-row:focus-visible {
+  outline: 1px solid var(--border-glow);
+  outline-offset: -1px;
+}
+
+/* hairline:行与行之间的发丝分隔线 */
+.es-session-row + .es-session-row::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 8px;
+  right: 8px;
+  height: 1px;
+  background-color: var(--border-dim);
+}
+
+.es-session-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.es-session-time {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* ── 入场动效:一次性 fade(级联步长 24ms,列表上限 6 行)──────────────────── */
+
+@keyframes es-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.es-anim {
+  animation: es-fade-in 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
+  animation-delay: calc(var(--es-i, 0) * 24ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .es-anim {
+    animation: none;
+  }
+  .es-chip,
+  .es-chip svg,
+  .es-session-row {
+    transition: none;
+  }
+}

@@ -353,6 +353,67 @@ export async function createSession(params: { cwd: string, agentPreset?: string 
   return sid !== '' ? sid : undefined
 }
 
+// ── P0-2 ProgressDock 派生 selector(仅新增导出,不改任何既有函数与字段)──
+/** 单个 swarm 批次的进度汇总(来自 /api/swarm/progress 的 calls[n].rows)。 */
+export interface SwarmBatchProgress {
+  callId: string
+  label: string
+  done: number
+  failed: number
+  total: number
+}
+
+/** 全局运行中批次汇总;无运行中批次时 selector 返回 undefined。 */
+export interface SwarmProgressSummary {
+  batches: SwarmBatchProgress[]
+  done: number
+  total: number
+}
+
+function deriveSwarmProgress(state: TelemetryState): SwarmProgressSummary | undefined {
+  const calls = state.progress?.calls
+  if (calls === undefined || calls.length === 0) return undefined
+  const batches: SwarmBatchProgress[] = []
+  for (const call of calls) {
+    const rows = Array.isArray(call['rows']) ? call['rows'] as Record<string, unknown>[] : []
+    if (rows.length === 0) continue
+    const done = rows.filter((r) => r['status'] === 'completed').length
+    const failed = rows.filter((r) => r['status'] === 'failed').length
+    // 已结清(完成+失败=全部)的批次不算运行中,不进坞
+    if (done + failed >= rows.length) continue
+    batches.push({
+      callId: String(call['callId'] ?? ''),
+      label: String(call['description'] ?? call['callId'] ?? '批次'),
+      done,
+      failed,
+      total: rows.length,
+    })
+  }
+  if (batches.length === 0) return undefined
+  let doneSum = 0
+  let totalSum = 0
+  for (const b of batches) { doneSum += b.done; totalSum += b.total }
+  return { batches, done: doneSum, total: totalSum }
+}
+
+let swarmProgressCacheSrc: TelemetryState | undefined
+let swarmProgressCacheValue: SwarmProgressSummary | undefined
+
+/**
+ * ProgressDock 专用 store 视图:复用 telemetryStore 的订阅(含 10s 轮询启动),
+ * 快照按 telemetryState 引用缓存,保证 useSyncExternalStore 引用稳定不空转。
+ */
+export const swarmProgressStore = {
+  subscribe(l: Listener): () => void { return telemetryStore.subscribe(l) },
+  getSnapshot(): SwarmProgressSummary | undefined {
+    if (swarmProgressCacheSrc !== telemetryState) {
+      swarmProgressCacheSrc = telemetryState
+      swarmProgressCacheValue = deriveSwarmProgress(telemetryState)
+    }
+    return swarmProgressCacheValue
+  },
+}
+
 export interface MemoryGraphData {
   nodes: { id: string, type: string, description: string, bytes: number, mtime: number, outDegree: number }[]
   edges: { from: string, to: string, dangling: boolean }[]

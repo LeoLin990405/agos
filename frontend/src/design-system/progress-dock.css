@@ -1,0 +1,170 @@
+/* ==========================================================================
+   ProgressDock —— 计划进度坞(P0-2,Manus Task progress 叠卡 AgOS 化)
+   挂在 CommandDeck 正上方;底部 16px 藏进 composer 后面(负 margin)。
+   只在存在运行中批次时渲染,infinite 动画仅用于运行态(扫光/呼吸点)。
+   ========================================================================== */
+
+.progress-dock {
+  width: calc(100% - 56px); /* 对齐 .chat-input-deck 的 28px 左右内衬 */
+  max-width: 860px;         /* 对齐 .input-box-container 同宽 */
+  margin: 0 auto -16px;     /* 底部 16px 藏进 composer 后面 */
+  padding-bottom: 16px;     /* 被遮住的领口,内容不进入此区 */
+  background: var(--bg-layer-1);
+  border: 1px solid var(--border-subtle);
+  border-bottom: none;
+  border-radius: 16px 16px 0 0;
+  overflow: hidden;
+  animation: progress-dock-enter 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@keyframes progress-dock-enter {
+  from { transform: translateY(12px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+/* ── 收起态:一行 36px ─────────────────────────────────────────────── */
+.progress-dock__row {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  width: 100%;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.3s ease-in-out;
+}
+.progress-dock__row:hover {
+  background-color: var(--bg-layer-2);
+}
+
+.progress-dock__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 运行态文字扫光(Kimi/Manus 配方):background-clip:text + 120° 渐变 */
+.progress-dock__sweep {
+  background-image: linear-gradient(
+    120deg,
+    var(--text-secondary) 40%,
+    var(--text-primary) 50%,
+    var(--text-secondary) 60%
+  );
+  background-size: 200% 100%;
+  background-position: 100% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: progress-dock-sweep 2.5s linear infinite;
+}
+
+@keyframes progress-dock-sweep {
+  from { background-position: 100% 0; }
+  to   { background-position: -100% 0; }
+}
+
+.progress-dock__count {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.progress-dock__chevron {
+  flex: none;
+  color: var(--text-tertiary);
+  transition: transform 0.3s ease-in-out;
+}
+.progress-dock__chevron.is-open {
+  transform: rotate(180deg);
+}
+
+/* ── 展开态:批次列表(真实高度动画,高度值由组件内联提供)──────── */
+.progress-dock__list-clip {
+  overflow: hidden;
+  transition:
+    height 0.3s cubic-bezier(0.4, 0, 0.1, 1),
+    opacity 0.3s cubic-bezier(0.4, 0, 0.1, 1);
+}
+
+.progress-dock__list {
+  border-top: 1px solid var(--border-dim);
+  padding: 4px 0 6px;
+}
+
+.progress-dock__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+  padding: 5px 14px;
+}
+
+.progress-dock__item-label {
+  flex: 0 1 auto;
+  max-width: 42%;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.progress-dock__item-count {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+.progress-dock__bar {
+  flex: 1 1 auto;
+  min-width: 40px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-layer-3);
+  overflow: hidden;
+}
+
+.progress-dock__fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--state-running);
+  transition: width 0.3s ease-in-out;
+}
+
+.progress-dock__item-failed {
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--state-failed);
+}
+
+/* ── 降级模式 ─────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .progress-dock {
+    animation: none;
+  }
+  .progress-dock__sweep {
+    animation: none;
+    background-image: none;
+    color: var(--text-primary);
+    -webkit-text-fill-color: currentColor;
+  }
+  .progress-dock__row,
+  .progress-dock__chevron,
+  .progress-dock__list-clip,
+  .progress-dock__fill {
+    transition: none !important;
+  }
+}

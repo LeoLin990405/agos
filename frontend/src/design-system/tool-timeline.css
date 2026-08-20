@@ -1,0 +1,253 @@
+/* ==========================================================================
+   ToolTimeline —— 工具行时间线(P0-3,Kimi Work 实拍语法 AgOS 化)
+   连续的通用工具调用折叠成一条时间线:左 16px 语义图标 / 中 13.5px 语义标题 /
+   右 chevron;行间以图标中轴的 1px 虚线相连(首尾行不越界)。
+   展开走真实高度动画;infinite 动画仅用于运行态(标题扫光)。
+   ========================================================================== */
+
+.tl-group {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+/* ── 单条时间线项:行(32px)+ 可展开正文 ───────────────────────────── */
+.tl-item {
+  position: relative;
+}
+
+/* 竖虚线连接:图标中轴 x=8px,分上下两段绕开 16px 图标本体 */
+.tl-item::before,
+.tl-item::after {
+  content: '';
+  position: absolute;
+  left: 7px;
+  width: 0;
+  border-left: 1px dashed var(--border-subtle);
+  pointer-events: none;
+}
+
+.tl-item::before {
+  top: 0;
+  height: 7px;
+}
+
+.tl-item::after {
+  top: 25px;
+  bottom: 0;
+}
+
+/* 首尾不越界 */
+.tl-item:first-child::before { content: none; }
+.tl-item:last-child::after { content: none; }
+
+/* ── 行本体 ──────────────────────────────────────────────────────── */
+.tl-row {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  width: 100%;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tl-icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  transition: color 0.3s ease-in-out;
+}
+
+.tl-item.is-running .tl-icon { color: var(--state-running); }
+.tl-item.is-failed  .tl-icon { color: var(--state-failed); }
+
+.tl-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13.5px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 0.3s ease-in-out;
+}
+
+.tl-row:hover .tl-title { color: var(--text-primary); }
+.tl-item.is-failed .tl-title { color: var(--state-failed); }
+.tl-item.is-failed .tl-row:hover .tl-title { color: var(--state-failed); }
+
+.tl-dur {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.tl-chevron {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--text-tertiary);
+  transition: transform 0.3s cubic-bezier(0.36, 0.66, 0.04, 1);
+}
+
+.tl-item.is-open .tl-chevron { transform: rotate(90deg); }
+
+/* ── 展开正文:真实高度动画 ──────────────────────────────────────── */
+.tl-body {
+  height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition:
+    height 0.3s cubic-bezier(0.4, 0, 0.1, 1),
+    opacity 0.3s cubic-bezier(0.4, 0, 0.1, 1);
+}
+
+.tl-item.is-open .tl-body { opacity: 1; }
+
+.tl-body-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 0 12px 26px; /* 26px = 图标 16 + 间距 10,正文与标题对齐 */
+}
+
+.tl-card {
+  background: var(--bg-layer-2);
+  border: 1px solid var(--border-dim);
+  border-radius: 10px;
+  padding: 12px 16px;
+}
+
+.tl-card-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.tl-pre {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tl-more {
+  appearance: none;
+  align-self: flex-start;
+  margin-top: 8px;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background-color 0.3s ease-in-out,
+    color 0.3s ease-in-out;
+}
+
+.tl-more:hover {
+  background: var(--bg-layer-3);
+  color: var(--text-primary);
+}
+
+.tl-empty {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+/* ── 运行态文字扫光(Kimi/Manus 配方:background-clip:text + 120° 渐变)── */
+.tl-item.is-running .tl-title {
+  background-image: linear-gradient(
+    120deg,
+    var(--text-secondary) 40%,
+    var(--text-primary) 50%,
+    var(--text-secondary) 60%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: tl-sweep 2.5s linear infinite;
+}
+
+/* 思考中的 ReasoningBlock 入口行同款扫光(基色跟随 .cot-header 的 accent-cyan) */
+.tl-reasoning.is-thinking .cot-header > div > span:not(.cot-toggle-icon) {
+  background-image: linear-gradient(
+    120deg,
+    var(--accent-cyan) 40%,
+    var(--text-primary) 50%,
+    var(--accent-cyan) 60%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: tl-sweep 2.5s linear infinite;
+}
+
+@keyframes tl-sweep {
+  from { background-position: 100% 0; }
+  to   { background-position: -100% 0; }
+}
+
+/* ── 统一入场:特化卡与时间线组共用 ─────────────────────────────── */
+.tl-enter {
+  animation: tl-fade-in 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@keyframes tl-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ── 降级模式 ────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .tl-enter {
+    animation: none;
+  }
+  .tl-icon,
+  .tl-title,
+  .tl-chevron,
+  .tl-body,
+  .tl-more {
+    transition: none;
+  }
+  .tl-item.is-running .tl-title {
+    animation: none;
+    background-image: none;
+    color: var(--text-secondary);
+    -webkit-text-fill-color: currentColor;
+  }
+  .tl-reasoning.is-thinking .cot-header > div > span:not(.cot-toggle-icon) {
+    animation: none;
+    background-image: none;
+    color: var(--accent-cyan);
+    -webkit-text-fill-color: currentColor;
+  }
+}

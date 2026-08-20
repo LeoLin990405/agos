@@ -9,12 +9,18 @@ export interface NewSessionModalProps {
   onClose: () => void;
   /** 创建成功后回调(带真实 sessionId)。 */
   onCreated?: (sessionId: string) => void;
+  /**
+   * 打开时预选的 agentPreset id(空态胶囊排点击带入)。
+   * 给定时优先于 agentPreset.list 的 isDefault;不给则维持原有默认行为。
+   */
+  initialPresetId?: string;
 }
 
 export const NewSessionModal: React.FC<NewSessionModalProps> = ({
   isOpen,
   onClose,
   onCreated,
+  initialPresetId,
 }) => {
   const [title, setTitle] = useState('');
   const [cwd, setCwd] = useState('/Users/leo');
@@ -26,14 +32,17 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
   // DeepSeek 原生四模式(agentPreset.list 真值:标准/PTC/极简/创造)
   useEffect(() => {
     if (!isOpen) return;
+    const pinned = initialPresetId !== undefined && initialPresetId !== '' ? initialPresetId : undefined;
+    if (pinned !== undefined) setPreset(pinned); // 预选立即生效,不等 list 回来
     void fetchPresets().then((list: PresetInfo[]) => {
       if (list.length > 0) {
         setPresets(list.map((p) => ({ id: p.id, name: p.name, desc: p.description })));
+        if (pinned !== undefined) return; // 外部预选优先于 isDefault
         const def = list.find((p) => p.isDefault);
         if (def !== undefined) setPreset(def.id);
       }
     });
-  }, [isOpen]);
+  }, [isOpen, initialPresetId]);
 
   const handlePickDirectory = () => { /* host.pickDirectory 需宿主窗口,浅色占位:手输 cwd */ };
 

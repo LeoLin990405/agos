@@ -3,8 +3,11 @@
  * V2 重设计时展示 mock 覆盖了真渲染(P0 退化),本组件把 ee475dc 的接线
  * 以独立组件形式嫁接回来:ChatPage 在有真后端时渲染本组件,无后端时保留
  * Gemini 的展示 mock 作为 demo 态。
+ *
+ * P0-3:连续的通用工具调用折叠成 Kimi 式时间线(ToolTimelineGroup),
+ * 特化卡(TerminalCard / SwarmBatchCard / ApprovalPanel)保持卡形不动。
  */
-import React, { useCallback, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Dot } from '@/components/ui/Dot';
 import { Chip } from '@/components/ui/Chip';
 import { ReasoningBlock } from '@/components/chat/ReasoningBlock';
@@ -18,6 +21,7 @@ import type { ConversationItem, ToolItem } from '@/fold/model';
 import { RpcId } from '@/contract/api/rpc';
 import type { OptimisticImageAttachment } from '@/components/chat/ImageAttachments';
 import { extractMultimodalMessageId, stripMultimodalMessageMarker } from '@/components/chat/CommandDeck';
+import '@/design-system/tool-timeline.css';
 
 export interface OptimisticImageMessage {
   id: string;
@@ -49,30 +53,304 @@ function parseBashCommand(argsRaw: string): string {
   catch { return argsRaw.slice(0, 200); }
 }
 
-const GenericToolRow: React.FC<{ tool: ToolItem }> = ({ tool }) => {
-  const [open, setOpen] = useState(false);
-  const st = TOOL_STATE[tool.status];
+/* ==========================================================================
+   P0-3 工具行时间线:图标映射 + 标题生成(纯函数,可测)
+   ========================================================================== */
+
+export type ToolIconKind = 'terminal' | 'pencil' | 'doc' | 'search' | 'globe' | 'dot';
+
+/** 工具名 → 语义图标。纯函数,便于测试。 */
+export function toolIconKind(name: string): ToolIconKind {
+  const n = name.toLowerCase();
+  if (n.includes('bash') || n.includes('terminal') || n.includes('shell')) return 'terminal';
+  if (n.includes('edit') || n.includes('write') || n.includes('create')) return 'pencil';
+  if (n.includes('read') || n.includes('cat')) return 'doc';
+  if (n.includes('search') || n.includes('grep') || n.includes('glob')) return 'search';
+  if (n.includes('web') || n.includes('fetch')) return 'globe';
+  return 'dot';
+}
+
+/** 标题生成的最小输入。ToolItem 结构上兼容(label/title 为可选)。 */
+export interface ToolTitleSource {
+  readonly name: string;
+  readonly argsRaw: string;
+  /** 事件自带的现成标题(当前 fold 模型未提供,留作前向兼容)。 */
+  readonly label?: string;
+  readonly title?: string;
+}
+
+const SUMMARY_MAX_CHARS = 24;
+const LABEL_KEYS = ['label', 'title'] as const;
+const COMMAND_KEYS = ['command', 'cmd'] as const;
+const PATH_KEYS = ['file_path', 'filePath', 'notebook_path', 'file'] as const;
+const QUERY_KEYS = ['pattern', 'query', 'q'] as const;
+/** 泛化的 path 排在 pattern 之后:grep/glob 的 path 是搜索根,pattern 才是关键参数。 */
+const DIR_KEYS = ['path', 'dir', 'cwd'] as const;
+const URL_KEYS = ['url', 'uri'] as const;
+const TEXT_KEYS = ['description', 'prompt', 'subagent_type'] as const;
+
+function clampChars(text: string, max: number): string {
+  const chars = Array.from(text);
+  if (chars.length <= max) return text;
+  return `${chars.slice(0, max - 1).join('')}…`;
+}
+
+function parseArgsObject(argsRaw: string): Record<string, unknown> | undefined {
+  const trimmed = argsRaw.trim();
+  if (trimmed === '') return undefined;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
+    return parsed as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
+function readStringKey(args: Record<string, unknown>, keys: readonly string[]): string | undefined {
+  for (const key of keys) {
+    const value = args[key];
+    if (typeof value !== 'string') continue;
+    const trimmed = value.trim();
+    if (trimmed !== '') return trimmed;
+  }
+  return undefined;
+}
+
+function pathTail(value: string): string | undefined {
+  const segments = value.split(/[/\\]/).filter((s) => s !== '');
+  return segments.length > 0 ? segments[segments.length - 1] : undefined;
+}
+
+/** 从真实参数里挑一段可读摘要:命令首词 / 路径末段 / 查询串。取不到返回 undefined(禁止编造)。 */
+function argsSummary(args: Record<string, unknown>): string | undefined {
+  const command = readStringKey(args, COMMAND_KEYS);
+  if (command !== undefined) {
+    const head = command.split(/\s+/)[0];
+    if (head !== undefined && head !== '') return clampChars(head, SUMMARY_MAX_CHARS);
+  }
+  const path = readStringKey(args, PATH_KEYS);
+  if (path !== undefined) {
+    const tail = pathTail(path);
+    if (tail !== undefined) return clampChars(tail, SUMMARY_MAX_CHARS);
+  }
+  const query = readStringKey(args, QUERY_KEYS);
+  if (query !== undefined) return clampChars(query, SUMMARY_MAX_CHARS);
+  const dir = readStringKey(args, DIR_KEYS);
+  if (dir !== undefined) {
+    const tail = pathTail(dir);
+    if (tail !== undefined) return clampChars(tail, SUMMARY_MAX_CHARS);
+  }
+  const url = readStringKey(args, URL_KEYS);
+  if (url !== undefined) return clampChars(url.replace(/^https?:\/\//, ''), SUMMARY_MAX_CHARS);
+  const text = readStringKey(args, TEXT_KEYS);
+  if (text !== undefined) return clampChars(text.split('\n')[0] ?? text, SUMMARY_MAX_CHARS);
+  return undefined;
+}
+
+/**
+ * 工具行语义标题。优先用事件自带 label/title,否则「工具名 · 关键参数摘要(≤24 字)」;
+ * 参数里取不到东西就只显示工具名。全部取自真实字段,不生成任何虚构文案。
+ */
+export function toolRowTitle(source: ToolTitleSource): string {
+  const direct = [source.label, source.title]
+    .find((v) => typeof v === 'string' && v.trim() !== '');
+  if (direct !== undefined) return clampChars(direct.trim(), 48);
+
+  const args = parseArgsObject(source.argsRaw);
+  if (args !== undefined) {
+    const labelled = readStringKey(args, LABEL_KEYS);
+    if (labelled !== undefined) return clampChars(labelled, 48);
+  }
+
+  const name = source.name.trim();
+  if (name === '') return '(工具)';
+  const summary = args === undefined ? undefined : argsSummary(args);
+  return summary === undefined ? name : `${name} · ${summary}`;
+}
+
+const ToolIcon: React.FC<{ kind: ToolIconKind }> = ({ kind }) => {
+  const common = {
+    width: 16,
+    height: 16,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.5,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+  };
+  if (kind === 'terminal') {
+    return (
+      <svg {...common}>
+        <rect x="3" y="4" width="18" height="16" rx="2" />
+        <polyline points="7.5 9.5 10.5 12 7.5 14.5" />
+        <line x1="13" y1="15" x2="17" y2="15" />
+      </svg>
+    );
+  }
+  if (kind === 'pencil') {
+    return (
+      <svg {...common}>
+        <path d="M12 20h9" />
+        <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7.5 18.5 3.5 19.5l1-4z" />
+      </svg>
+    );
+  }
+  if (kind === 'doc') {
+    return (
+      <svg {...common}>
+        <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+        <polyline points="14 3 14 8 19 8" />
+      </svg>
+    );
+  }
+  if (kind === 'search') {
+    return (
+      <svg {...common}>
+        <circle cx="11" cy="11" r="6.5" />
+        <line x1="16" y1="16" x2="20.5" y2="20.5" />
+      </svg>
+    );
+  }
+  if (kind === 'globe') {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="12" r="8.5" />
+        <line x1="3.5" y1="12" x2="20.5" y2="12" />
+        <path d="M12 3.5a13 13 0 0 1 0 17a13 13 0 0 1 0-17z" />
+      </svg>
+    );
+  }
   return (
-    <div style={{ border: '1px solid var(--border-subtle)', borderRadius: '8px', backgroundColor: 'var(--bg-layer-2)' }}>
-      <div onClick={() => setOpen((v) => !v)} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px', cursor: 'pointer' }}>
-        <Dot state={st.lamp} size={6} />
-        <span className="u-num" style={{ fontSize: '12px', fontWeight: 600 }}>{tool.name || '(工具)'}</span>
-        <span style={{ flex: 1 }} />
-        <span className="u-num" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-          {fmtDur(tool.endAt !== undefined ? tool.endAt - tool.startAt : undefined)}
-        </span>
-        <span style={{ fontSize: '10.5px', letterSpacing: '0.06em', color: tool.status === 'failed' ? 'var(--state-failed)' : tool.status === 'running' ? 'var(--state-running)' : 'var(--text-tertiary)' }}>
-          {st.label}
-        </span>
+    <svg {...common}>
+      <circle cx="12" cy="12" r="4" />
+    </svg>
+  );
+};
+
+const ChevronIcon: React.FC = () => (
+  <svg
+    className="tl-chevron"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.5}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden
+  >
+    <polyline points="9 5 16 12 9 19" />
+  </svg>
+);
+
+const RESPONSE_LINE_LIMIT = 40;
+const TEXT_HARD_CAP = 8000;
+
+function prettyArgs(argsRaw: string): string {
+  const trimmed = argsRaw.trim();
+  if (trimmed === '') return '';
+  try {
+    return JSON.stringify(JSON.parse(trimmed) as unknown, null, 2).slice(0, TEXT_HARD_CAP);
+  } catch {
+    return trimmed.slice(0, TEXT_HARD_CAP);
+  }
+}
+
+const ToolTimelineRow: React.FC<{ tool: ToolItem }> = ({ tool }) => {
+  const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  const [bodyHeight, setBodyHeight] = useState(0);
+  const innerRef = useRef<HTMLDivElement | null>(null);
+
+  const st = TOOL_STATE[tool.status];
+  const title = toolRowTitle(tool);
+  const requestText = prettyArgs(tool.argsRaw);
+  const responseText = (tool.resultText ?? '').slice(0, TEXT_HARD_CAP);
+  const responseLines = responseText === '' ? [] : responseText.split('\n');
+  const overflowing = responseLines.length > RESPONSE_LINE_LIMIT;
+  const shownResponse = overflowing && !showAll
+    ? responseLines.slice(0, RESPONSE_LINE_LIMIT).join('\n')
+    : responseText;
+  const duration = tool.endAt !== undefined ? fmtDur(tool.endAt - tool.startAt) : undefined;
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const el = innerRef.current;
+    if (el === null) return;
+    setBodyHeight(el.scrollHeight);
+  }, [open, showAll, requestText, shownResponse]);
+
+  const toggle = (): void => {
+    setMounted(true);
+    setOpen((v) => !v);
+  };
+
+  const stateClass = tool.status === 'running' ? ' is-running' : tool.status === 'failed' ? ' is-failed' : ' is-done';
+
+  return (
+    <div className={`tl-item${stateClass}${open ? ' is-open' : ''}`}>
+      <button
+        type="button"
+        className="tl-row"
+        onClick={toggle}
+        aria-expanded={open}
+        aria-label={`${title}(${st.label})`}
+        title={st.label}
+      >
+        <span className="tl-icon"><ToolIcon kind={toolIconKind(tool.name)} /></span>
+        <span className="tl-title">{title}</span>
+        {duration !== undefined && <span className="tl-dur u-num">{duration}</span>}
+        <ChevronIcon />
+      </button>
+      <div className="tl-body" style={{ height: open ? `${bodyHeight}px` : 0 }}>
+        {mounted && (
+          <div className="tl-body-inner" ref={innerRef}>
+            {requestText !== '' && (
+              <div className="tl-card">
+                <span className="tl-card-label">Request</span>
+                <pre className="tl-pre">{requestText}</pre>
+              </div>
+            )}
+            {responseText !== '' && (
+              <div className="tl-card">
+                <span className="tl-card-label">Response</span>
+                <pre className="tl-pre">{shownResponse}</pre>
+                {overflowing && !showAll && (
+                  <button type="button" className="tl-more" onClick={() => setShowAll(true)}>
+                    展开全部({responseLines.length} 行)
+                  </button>
+                )}
+              </div>
+            )}
+            {requestText === '' && responseText === '' && (
+              <div className="tl-empty">
+                {tool.status === 'running' ? '运行中,暂无输出。' : '本次调用没有参数与返回内容。'}
+              </div>
+            )}
+          </div>
+        )}
       </div>
-      {open && tool.resultText !== undefined && tool.resultText !== '' && (
-        <pre style={{ margin: 0, padding: '10px 12px', borderTop: '1px solid var(--border-dim)', fontSize: '11.5px', lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: '260px', overflow: 'auto', color: 'var(--text-secondary)' }}>
-          {tool.resultText.slice(0, 8000)}
-        </pre>
-      )}
     </div>
   );
 };
+
+const ToolTimelineGroup: React.FC<{ tools: readonly ToolItem[], keyPrefix: string }> = ({ tools, keyPrefix }) => (
+  <div className="tl-group">
+    {tools.map((tool, i) => (
+      <ToolTimelineRow key={`${keyPrefix}:${i}:${tool.callId}`} tool={tool} />
+    ))}
+  </div>
+);
+
+/** 通用工具行(非 swarm、非 bash 特化卡)——这些才进时间线。 */
+function isGenericToolItem(item: ConversationItem | undefined): item is ToolItem {
+  if (item === undefined || item.kind !== 'tool') return false;
+  if (item.swarm !== undefined && item.swarm.length > 0) return false;
+  return item.name !== 'bash';
+}
 
 const OptimisticImageStrip: React.FC<{ images: readonly OptimisticImageAttachment[] }> = ({ images }) => (
   <div className="user-attachments" aria-label={`已发送图片 ${images.length} 张`}>
@@ -116,6 +394,7 @@ function renderItem(
   }
   if (item.kind === 'assistant') {
     if (item.text === '' && item.reasoning === '' && !item.streaming) return null;
+    const thinking = item.streaming && item.text === '';
     return (
       <div className="message-wrap" key={key}>
         <div className="message-assistant">
@@ -125,9 +404,15 @@ function renderItem(
             {item.streaming && (<><span>·</span><span className="u-num" style={{ color: 'var(--state-running)', fontSize: '11px' }}>流式中…</span></>)}
           </div>
           {item.reasoning !== '' && (
-            <ReasoningBlock duration="" tokens={`${item.reasoning.length} chars`}>
-              <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{item.reasoning}</span>
-            </ReasoningBlock>
+            <div className={`tl-reasoning${thinking ? ' is-thinking' : ''}`}>
+              <ReasoningBlock
+                duration=""
+                tokens={`${item.reasoning.length} chars`}
+                title={thinking ? '思考中…' : '思考已完成'}
+              >
+                <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{item.reasoning}</span>
+              </ReasoningBlock>
+            </div>
           )}
           {item.text !== '' && (
             <div style={{ fontSize: '14.5px', lineHeight: 1.75, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{item.text}</div>
@@ -144,7 +429,7 @@ function renderItem(
     if (swarmRows !== undefined && swarmRows.length > 0) {
       const completed = swarmRows.filter((r) => r.status === 'completed').length;
       return (
-        <div className="message-wrap" key={key}>
+        <div className="message-wrap tl-enter" key={key}>
           <SwarmBatchCard
             batchId={item.callId.slice(-8)}
             title={item.name}
@@ -169,7 +454,7 @@ function renderItem(
     }
     if (item.name === 'bash') {
       return (
-        <div className="message-wrap" key={key}>
+        <div className="message-wrap tl-enter" key={key}>
           <TerminalCard
             title="bash_exec"
             command={parseBashCommand(item.argsRaw)}
@@ -180,12 +465,16 @@ function renderItem(
         </div>
       );
     }
-    return <div className="message-wrap" key={key}><GenericToolRow tool={item} /></div>;
+    return (
+      <div className="message-wrap tl-enter" key={key}>
+        <ToolTimelineGroup tools={[item]} keyPrefix={key} />
+      </div>
+    );
   }
   // approval
   if (item.outcome !== undefined) {
     return (
-      <div className="message-wrap" key={key}>
+      <div className="message-wrap tl-enter" key={key}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border-subtle)', fontSize: '12px', color: 'var(--text-secondary)' }}>
           <Dot state={item.outcome === 'rejected' ? 'failed' : 'done'} size={6} />
           <span>审批 {item.toolName ?? ''}:{item.outcome === 'allowed-once' ? '已放行(一次)' : item.outcome}</span>
@@ -203,7 +492,7 @@ function renderItem(
     });
   };
   return (
-    <div className="message-wrap" key={key}>
+    <div className="message-wrap tl-enter" key={key}>
       <ApprovalPanel
         title={`特权操作审批请求:${item.toolName ?? '工具调用'}`}
         riskLevel="需人工决策"
@@ -238,9 +527,31 @@ export const LiveTranscript: React.FC<{
     matchedLocalIds.add(local.id);
     imagesByItemIndex.set(index, local.images);
   }
-  const renderedItems = snapshot?.items.map((item, index) => {
-    return renderItem(item, `${sessionId}:${index}`, sessionId, imagesByItemIndex.get(index) ?? []);
-  });
+  const items: readonly ConversationItem[] = snapshot?.items ?? [];
+  const renderedItems: React.ReactNode[] = [];
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    if (isGenericToolItem(item)) {
+      // 连续的通用工具调用合并成一条时间线(虚线连接、首尾不越界)。
+      const run: ToolItem[] = [];
+      let end = index;
+      while (end < items.length) {
+        const next = items[end];
+        if (!isGenericToolItem(next)) break;
+        run.push(next);
+        end += 1;
+      }
+      renderedItems.push(
+        <div className="message-wrap tl-enter" key={`${sessionId}:${index}:timeline`}>
+          <ToolTimelineGroup tools={run} keyPrefix={`${sessionId}:${index}`} />
+        </div>,
+      );
+      index = end - 1;
+      continue;
+    }
+    if (item === undefined) continue;
+    renderedItems.push(renderItem(item, `${sessionId}:${index}`, sessionId, imagesByItemIndex.get(index) ?? []));
+  }
   const pendingLocalMessages = localMessages.filter((message) => !matchedLocalIds.has(message.id));
   return (
     <>

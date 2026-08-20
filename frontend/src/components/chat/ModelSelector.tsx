@@ -19,7 +19,17 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({ sessionId }) => {
     return () => { alive = false; };
   }, [sessionId, open]);
 
-  const currentLabel = data.current !== undefined ? data.current.model : '选择模型';
+  // P0-5:主名 + 档位副词。档位=该模型在 session.models 里所属的分组名(provider),
+  // 分组未加载到就不渲染副词(数据零编造)。
+  const current = data.current;
+  const currentGroup = current === undefined
+    ? undefined
+    : data.groups.find((g) => g.provider === current.provider && g.models.some((m) => m.id === current.model));
+  const currentEntry = current === undefined
+    ? undefined
+    : currentGroup?.models.find((m) => m.id === current.model);
+  const currentLabel = current === undefined ? '选择模型' : (currentEntry?.name ?? current.model);
+  const currentTier = currentGroup?.provider ?? '';
   const total = data.groups.reduce((n, g) => n + g.models.length, 0);
 
   const pick = async (provider: string, model: string): Promise<void> => {
@@ -38,10 +48,15 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({ sessionId }) => {
         className="btn btn-ghost btn-sm"
         style={{ padding: '0 8px', gap: '6px' }}
         onClick={() => setOpen(!open)}
-        title={sessionId === undefined ? '先选择会话' : `主力模型 · ${total} 个可路由`}
+        title={sessionId === undefined
+          ? '先选择会话'
+          : currentTier !== '' ? `${currentLabel} · ${currentTier} 档 · ${total} 个可路由` : `主力模型 · ${total} 个可路由`}
         disabled={sessionId === undefined}
       >
         <Chip variant="purple">{currentLabel}</Chip>
+        {currentTier !== '' && (
+          <span style={{ fontSize: '12px', color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>{currentTier}</span>
+        )}
         <span style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>▾</span>
       </button>
 

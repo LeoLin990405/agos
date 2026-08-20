@@ -1,0 +1,28 @@
+/* ==========================================================================
+   空态舞台布局(P0-1 集成层)
+   目标:hero → composer → 能力胶囊/最近会话 三件垂直居中成一坨(Kimi 版式)。
+   手法:CommandDeck 在 DOM 里位置**永不变动**(避免空/非空切换时重挂载丢草稿与图片),
+        只靠 .app-stage.is-empty 下的 auto 外边距把这一组挤到垂直中央。
+   ========================================================================== */
+
+.app-stage.is-empty .chat-scroll-view {
+  flex: 0 0 auto;      /* 空态下不再吃满剩余高度 */
+  margin-top: auto;    /* 与下方 auto 配对 → 整组垂直居中 */
+  overflow: visible;
+  padding-bottom: 0;
+  gap: 0;
+}
+
+.app-stage.is-empty .es-below-host {
+  margin-bottom: auto; /* 与上方 auto 配对 */
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+/* composer 在空态下收窄到与 hero/胶囊同宽的视觉重心 */
+.app-stage.is-empty .chat-input-deck {
+  border-top-color: transparent;
+  background: transparent;
+  backdrop-filter: none;
+}

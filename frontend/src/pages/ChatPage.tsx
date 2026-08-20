@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { AppTopbar } from '@/components/layout/AppTopbar';
 import { Dot } from '@/components/ui/Dot';
 import { Chip } from '@/components/ui/Chip';
@@ -24,8 +24,12 @@ import {
   type VisionPanelEntry,
 } from '@/components/chat/vision-arbiter-api';
 import { NewSessionModal } from '@/components/chat/NewSessionModal';
+import { ProgressDock } from '@/components/chat/ProgressDock';
+import { EmptyStateHero, EmptyStateBelow } from '@/components/chat/EmptyState';
+import { NEW_SESSION_EVENT } from '@/components/layout/AppRail';
+import '@/design-system/chat-empty.css';
 import { StateLamp } from '@/design-system/tokens';
-import { sessionsStore, streamStore, sendPromptParts, openConversation } from '@/stores/live';
+import { sessionsStore, streamStore, conversationStore, sendPromptParts, openConversation } from '@/stores/live';
 import { LiveTranscript, type OptimisticImageMessage } from '@/pages/chat-transcript';
 
 /** DeepSeek 原生四模式 id → 名(agentPreset.list 实测)。 */
@@ -64,6 +68,7 @@ export const ChatPage: React.FC<{
   const [activeSessionId, setActiveSessionId] = useState('1');
   const [searchQuery, setSearchQuery] = useState('');
   const [isNewSessionOpen, setIsNewSessionOpen] = useState(false);
+  const [pendingPresetId, setPendingPresetId] = useState<string | undefined>(undefined);
   const [activeModel, setActiveModel] = useState('DeepSeek-V3');
   const [hasGoal, setHasGoal] = useState(true);
   const [optimisticImageMessages, setOptimisticImageMessages] = useState<OptimisticImageMessage[]>([]);
@@ -80,11 +85,32 @@ export const ChatPage: React.FC<{
     };
   }, []);
 
+  // 侧栏「新会话」按钮与 ⌘K 走同一入口:CustomEvent → 打开建会话弹窗
+  useEffect(() => {
+    const open = (): void => setIsNewSessionOpen(true);
+    const onKey = (e: KeyboardEvent): void => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); open(); }
+    };
+    window.addEventListener(NEW_SESSION_EVENT, open);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener(NEW_SESSION_EVENT, open);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, []);
+
   // 订阅真实 stores
   const liveSessions = useSyncExternalStore(sessionsStore.subscribe, sessionsStore.getSnapshot);
   const isStreamOnline = useSyncExternalStore(streamStore.subscribe, streamStore.getSnapshot);
 
   const liveMode = liveSessions.rows.length > 0;
+
+  // 空态判定:当前会话已就绪但一条消息都没有(不是「后端有没有会话」)
+  const convo = useSyncExternalStore(
+    conversationStore.subscribe,
+    useCallback(() => conversationStore.getSnapshot(activeSessionId), [activeSessionId])
+  );
+  const isEmptyConversation = liveMode && convo.phase === 'live' && (convo.snapshot?.items.length ?? 0) === 0;
   // 有真后端时自动选中最近会话并打开(mock id '1' 不可用)
   useEffect(() => {
     if (!liveMode) return;
@@ -321,7 +347,7 @@ export const ChatPage: React.FC<{
       </aside>
 
       {/* 舞台 Stage */}
-      <main className="app-stage">
+      <main className={`app-stage${isEmptyConversation ? ' is-empty' : ''}`}>
         <AppTopbar
           title={liveMode
             ? (renderedSessions.find((x) => x.id === activeSessionId)?.title ?? 'AgOS 对话甲板')
@@ -361,7 +387,9 @@ export const ChatPage: React.FC<{
 
         {/* 消息滚动流:真后端=fold 真渲染;无后端=展示 mock(demo 态) */}
         <div className="chat-scroll-view">
-          {liveMode ? (
+          {isEmptyConversation ? (
+            <EmptyStateHero />
+          ) : liveMode ? (
             <LiveTranscript
               sessionId={activeSessionId}
               optimisticImageMessages={optimisticImageMessages}
@@ -564,17 +592,30 @@ export const ChatPage: React.FC<{
           ))}
         </div>
 
+        <ProgressDock />
+
         <CommandDeck sessionId={liveMode ? activeSessionId : undefined}
           onSend={handleSend}
           onAnalyzeImage={handleAnalyzeImage}
         />
+
+        {isEmptyConversation && (
+          <div className="es-below-host">
+            <EmptyStateBelow
+              onSelectPreset={(presetId) => { setPendingPresetId(presetId); setIsNewSessionOpen(true); }}
+              onNavigate={(tab) => { if (tab === 'graph') onNavigateGraph?.(); else if (tab === 'console') onNavigateConsole?.(); }}
+              onOpenSession={handleSelectSession}
+            />
+          </div>
+        )}
       </main>
 
       {/* 新建会话弹窗 */}
       <NewSessionModal
         isOpen={isNewSessionOpen}
-        onClose={() => setIsNewSessionOpen(false)}
-        onCreated={(sid) => { setActiveSessionId(sid); }}
+        initialPresetId={pendingPresetId}
+        onClose={() => { setIsNewSessionOpen(false); setPendingPresetId(undefined); }}
+        onCreated={(sid) => { setActiveSessionId(sid); setPendingPresetId(undefined); }}
       />
     </div>
   );
