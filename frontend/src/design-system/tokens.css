@@ -21,45 +21,46 @@
   /* --------------------------------------------------------------------------
      2. 字体栈
      -------------------------------------------------------------------------- */
-  --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Noto Sans SC", sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Noto Sans SC", system-ui, sans-serif; /* V4:回归系统栈=DSH 原生手感 */
   --font-mono: "Geist Mono", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
 
   /* --------------------------------------------------------------------------
      3. 默认深色主题 (Dark Mode - 曜石航电甲板 Obsidian Avionics)
      -------------------------------------------------------------------------- */
-  /* V3 精修:海拔用明暗(OKLCH 蓝倾中性,深夜昏暗房间的仪表舱),边框退居发丝 */
-  --bg-app: oklch(0.145 0.012 252);
-  --bg-layer-1: oklch(0.185 0.014 252);
-  --bg-layer-2: oklch(0.225 0.016 252);
-  --bg-layer-3: oklch(0.27 0.018 252);
-  --bg-layer-active: oklch(0.315 0.022 252);
-  --bg-glass: oklch(0.185 0.014 252 / 0.85);
+  /* V4 融合:重基到 DeepSeek 原生炭灰系(上游 ui-theme/design-platform.css 权威值:
+     neutral-bluish 950/875/850/800 + deepseek-400 accent)。海拔仍靠明暗,边框发丝。 */
+  --bg-app: rgb(21, 21, 23);
+  --bg-layer-1: rgb(35, 35, 36);
+  --bg-layer-2: rgb(44, 44, 46);
+  --bg-layer-3: rgb(53, 54, 56);
+  --bg-layer-active: rgb(64, 65, 68);
+  --bg-glass: rgba(35, 35, 36, 0.86);
 
-  --border-dim: oklch(0.98 0.005 252 / 0.04);
-  --border-subtle: oklch(0.98 0.005 252 / 0.08);
-  --border-bold: oklch(0.98 0.005 252 / 0.16);
-  --border-glow: oklch(0.72 0.15 240 / 0.35);
+  --border-dim: rgba(255, 255, 255, 0.05);
+  --border-subtle: rgba(255, 255, 255, 0.09);
+  --border-bold: rgba(255, 255, 255, 0.17);
+  --border-glow: rgba(103, 158, 254, 0.35);
 
-  --text-primary: oklch(0.965 0.006 252);
-  --text-secondary: oklch(0.74 0.018 252);
-  --text-tertiary: oklch(0.58 0.02 252);
-  --text-dimmed: oklch(0.46 0.018 252);
+  --text-primary: rgb(249, 250, 251);
+  --text-secondary: rgb(207, 211, 214);
+  --text-tertiary: rgb(173, 178, 184);
+  --text-dimmed: rgb(129, 133, 140);
 
   /* 4态标准灯语 (Dark Neon Accents) */
-  --state-running: #00a6ff;
-  --state-running-bg: rgba(0, 166, 255, 0.12);
-  --state-running-border: rgba(0, 166, 255, 0.4);
-  --state-running-glow: rgba(0, 166, 255, 0.45);
+  --state-running: rgb(103, 158, 254); /* deepseek-400:原生品牌蓝 */
+  --state-running-bg: rgba(103, 158, 254, 0.13);
+  --state-running-border: rgba(103, 158, 254, 0.38);
+  --state-running-glow: rgba(103, 158, 254, 0.35);
 
-  --state-done: #10b981;
-  --state-done-bg: rgba(16, 185, 129, 0.12);
-  --state-done-border: rgba(16, 185, 129, 0.4);
-  --state-done-glow: rgba(16, 185, 129, 0.4);
+  --state-done: rgb(34, 197, 94); /* green-500 */
+  --state-done-bg: rgba(34, 197, 94, 0.12);
+  --state-done-border: rgba(34, 197, 94, 0.38);
+  --state-done-glow: rgba(34, 197, 94, 0.32);
 
-  --state-failed: #f43f5e;
-  --state-failed-bg: rgba(244, 63, 94, 0.14);
-  --state-failed-border: rgba(244, 63, 94, 0.4);
-  --state-failed-glow: rgba(244, 63, 94, 0.4);
+  --state-failed: rgb(242, 90, 90); /* red-400 */
+  --state-failed-bg: rgba(242, 90, 90, 0.13);
+  --state-failed-border: rgba(242, 90, 90, 0.38);
+  --state-failed-glow: rgba(242, 90, 90, 0.32);
 
   --state-queued: #64748b;
   --state-queued-bg: rgba(100, 116, 139, 0.12);
@@ -82,11 +83,11 @@
   --accent-purple: #a855f7;
   --accent-blue: #3b82f6;
 
-  --shadow-card: inset 0 1px 0 0 oklch(0.98 0.005 252 / 0.06), 0 2px 8px -2px oklch(0.08 0.01 252 / 0.5);
-  --shadow-panel: inset 0 1px 0 0 oklch(0.98 0.005 252 / 0.05), 0 16px 40px oklch(0.08 0.01 252 / 0.55);
-  --shadow-glow: 0 0 20px oklch(0.72 0.15 240 / 0.14); /* 辉光只留给运行态 */
-  --grid-line: oklch(0.98 0.005 252 / 0.02);
-  --code-bg: oklch(0.155 0.012 252);
+  --shadow-card: inset 0 1px 0 0 rgba(255, 255, 255, 0.06), 0 2px 8px -2px rgba(0, 0, 0, 0.45);
+  --shadow-panel: inset 0 1px 0 0 rgba(255, 255, 255, 0.05), 0 16px 40px rgba(0, 0, 0, 0.5);
+  --shadow-glow: 0 0 20px rgba(103, 158, 254, 0.14); /* 辉光只留给运行态 */
+  --grid-line: rgba(255, 255, 255, 0.02);
+  --code-bg: rgb(27, 27, 28);
 }
 
 /* --------------------------------------------------------------------------
@@ -94,11 +95,11 @@
    -------------------------------------------------------------------------- */
 [data-theme="light"],
 html.theme-light {
-  --bg-app: oklch(0.965 0.007 252);
-  --bg-layer-1: oklch(0.995 0.003 252);
-  --bg-layer-2: oklch(0.975 0.006 252);
-  --bg-layer-3: oklch(0.93 0.01 252);
-  --bg-layer-active: oklch(0.885 0.014 252);
+  --bg-app: rgb(249, 250, 251);
+  --bg-layer-1: rgb(255, 255, 255);
+  --bg-layer-2: rgb(245, 247, 250);
+  --bg-layer-3: rgb(233, 236, 242);
+  --bg-layer-active: rgb(225, 229, 238);
   --bg-glass: rgba(255, 255, 255, 0.88);
 
   --border-dim: rgba(0, 0, 0, 0.06);
@@ -112,7 +113,7 @@ html.theme-light {
   --text-dimmed: #94a3b8;
 
   /* 4态标准灯语 (Light) */
-  --state-running: #0284c7;
+  --state-running: rgb(65, 118, 230); /* deepseek-500 */
   --state-running-bg: rgba(2, 132, 199, 0.09);
   --state-running-border: rgba(2, 132, 199, 0.35);
   --state-running-glow: rgba(2, 132, 199, 0.25);
