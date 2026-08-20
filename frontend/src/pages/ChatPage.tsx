@@ -1,4 +1,4 @@
-import React, { useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import { AppTopbar } from '@/components/layout/AppTopbar';
 import { Dot } from '@/components/ui/Dot';
 import { Chip } from '@/components/ui/Chip';
@@ -17,7 +17,8 @@ import { QuestionPanel } from '@/components/chat/QuestionPanel';
 import { CommandDeck } from '@/components/chat/CommandDeck';
 import { NewSessionModal } from '@/components/chat/NewSessionModal';
 import { StateLamp } from '@/design-system/tokens';
-import { sessionsStore, conversationStore, streamStore, sendPrompt, openConversation } from '@/stores/live';
+import { sessionsStore, streamStore, sendPrompt, openConversation } from '@/stores/live';
+import { LiveTranscript } from '@/pages/chat-transcript';
 
 interface SessionListItem {
   id: string;
@@ -43,6 +44,17 @@ export const ChatPage: React.FC<{
   // 订阅真实 stores
   const liveSessions = useSyncExternalStore(sessionsStore.subscribe, sessionsStore.getSnapshot);
   const isStreamOnline = useSyncExternalStore(streamStore.subscribe, streamStore.getSnapshot);
+
+  const liveMode = liveSessions.rows.length > 0;
+  // 有真后端时自动选中最近会话并打开(mock id '1' 不可用)
+  useEffect(() => {
+    if (!liveMode) return;
+    const exists = liveSessions.rows.some((r) => r.sessionId === activeSessionId);
+    if (!exists) {
+      const first = liveSessions.rows[0];
+      if (first !== undefined) { setActiveSessionId(first.sessionId); openConversation(first.sessionId); }
+    }
+  }, [liveMode, liveSessions.rows, activeSessionId]);
 
   // 真实会话列表映射 (兼顾回退)
   const defaultSessions: SessionListItem[] = [
@@ -242,7 +254,7 @@ export const ChatPage: React.FC<{
         />
 
         {/* 顶部目标横幅 */}
-        {hasGoal && (
+        {hasGoal && !liveMode && (  /* goal.* 未接线,mock 横幅只在 demo 态 */
           <GoalBanner
             goalId="GOAL-8402"
             title="完成分布式认证租约升级并完成 8 节点 Swarm 攻防 Fuzzing 回归"
@@ -251,8 +263,9 @@ export const ChatPage: React.FC<{
           />
         )}
 
-        {/* 消息滚动流 */}
+        {/* 消息滚动流:真后端=fold 真渲染;无后端=展示 mock(demo 态) */}
         <div className="chat-scroll-view">
+          {liveMode ? <LiveTranscript sessionId={activeSessionId} /> : (<>
           {/* 用户 Prompt */}
           <div className="message-wrap">
             <div className="message-user">
@@ -426,9 +439,9 @@ export const ChatPage: React.FC<{
               </div>
             </div>
           </div>
+        </>)}
         </div>
 
-        {/* 底部指令底座 */}
         <CommandDeck
           defaultModel={activeModel}
           onModelChange={setActiveModel}
