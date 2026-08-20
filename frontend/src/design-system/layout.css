@@ -1,5 +1,5 @@
 /* ==========================================================================
-   AgOS Layout Styles
+   AgOS Layout Styles V2
    ========================================================================== */
 
 .app-container {
@@ -63,14 +63,19 @@
   transition: transform var(--u-dur-tick) var(--u-ease-swift), opacity var(--u-dur-fast) ease, background-color var(--u-dur-tick) ease;
 }
 
-.rail-btn:hover {
+.rail-btn:hover:not(:disabled) {
   background-color: var(--bg-layer-2);
   color: var(--text-primary);
   border-color: var(--border-subtle);
 }
 
-.rail-btn:active {
+.rail-btn:active:not(:disabled) {
   transform: scale(0.92);
+}
+
+.rail-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .rail-btn.is-active {
@@ -222,14 +227,20 @@
   transition: transform var(--u-dur-tick) var(--u-ease-swift), opacity var(--u-dur-fast) ease, background-color var(--u-dur-tick) ease;
 }
 
-.btn:hover {
+.btn:hover:not(:disabled) {
   background-color: var(--bg-layer-3);
   border-color: var(--border-bold);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
-.btn:active {
+.btn:active:not(:disabled) {
   transform: scale(0.96);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
 .btn-primary {
@@ -239,7 +250,7 @@
   font-weight: 600;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 4px 14px rgba(0, 166, 255, 0.4);
 }
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled) {
   filter: brightness(1.1);
 }
 
@@ -265,7 +276,7 @@
   color: var(--text-secondary);
   box-shadow: none;
 }
-.btn-ghost:hover {
+.btn-ghost:hover:not(:disabled) {
   background-color: var(--bg-layer-2);
   color: var(--text-primary);
   border-color: var(--border-dim);
@@ -401,17 +412,129 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
-/* console 内部导航(review 补:JSX 已用而样式缺失 → 裸链接堆叠 bug) */
+/* Console Nav Rail */
 .console-nav-rail {
-  width: 200px; flex: none; display: flex; flex-direction: column; gap: 2px;
-  padding: 14px 10px; border-right: 1px solid var(--border-subtle);
-  background: var(--bg-layer-1); overflow-y: auto;
+  width: 220px;
+  flex: none;
+  background-color: var(--bg-layer-1);
+  border-right: 1px solid var(--border-dim);
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
+
 .console-nav-item {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  height: 32px; padding: 0 10px; border-radius: 8px;
-  font-size: 12.5px; color: var(--text-secondary); text-decoration: none;
-  transition: transform var(--u-dur-tick) var(--u-ease-swift);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background-color var(--u-dur-tick) ease, color var(--u-dur-tick) ease;
 }
-.console-nav-item:hover { background: var(--bg-layer-3); color: var(--text-primary); }
-.console-nav-item.is-active { background: var(--state-running-bg); color: var(--state-running); font-weight: 600; }
+
+.console-nav-item:hover {
+  background-color: var(--bg-layer-2);
+  color: var(--text-primary);
+}
+
+.console-nav-item.is-active {
+  background-color: var(--bg-layer-2);
+  color: var(--text-primary);
+  font-weight: 600;
+  border-color: var(--border-subtle);
+  box-shadow: inset 2px 0 0 var(--state-running), var(--shadow-card);
+}
+
+.console-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 32px;
+}
+
+/* Modals & Overlays */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 20px;
+}
+
+.modal-card {
+  background-color: var(--bg-layer-1);
+  border: 1px solid var(--border-bold);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 580px;
+  box-shadow: var(--shadow-panel), 0 0 40px rgba(0, 166, 255, 0.15);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+.modal-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-dim);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: var(--bg-layer-2);
+}
+
+.modal-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.modal-footer {
+  padding: 14px 20px;
+  border-top: 1px solid var(--border-dim);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  background-color: var(--bg-layer-2);
+}
+
+/* Form Controls */
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.form-input {
+  background-color: var(--bg-layer-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  outline: none;
+  font-family: var(--font-sans);
+}
+
+.form-input:focus {
+  border-color: var(--state-running);
+  box-shadow: 0 0 0 2px var(--state-running-bg);
+}

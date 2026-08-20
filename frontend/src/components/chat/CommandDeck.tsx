@@ -1,19 +1,22 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/Button';
-import { Chip } from '@/components/ui/Chip';
 import { Dot } from '@/components/ui/Dot';
+import { ModelSelector } from './ModelSelector';
 
 export interface CommandDeckProps {
   onSend?: (text: string) => void;
   defaultModel?: string;
+  onModelChange?: (model: string) => void;
 }
 
 export const CommandDeck: React.FC<CommandDeckProps> = ({
   onSend,
   defaultModel = 'DeepSeek-V3',
+  onModelChange,
 }) => {
   const [text, setText] = useState('');
   const [swarmMode, setSwarmMode] = useState(true);
+  const [currentModel, setCurrentModel] = useState(defaultModel);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
@@ -30,6 +33,11 @@ export const CommandDeck: React.FC<CommandDeckProps> = ({
       onSend?.(text);
       setText('');
     }
+  };
+
+  const handleSelectModel = (m: string) => {
+    setCurrentModel(m);
+    onModelChange?.(m);
   };
 
   return (
@@ -58,9 +66,9 @@ export const CommandDeck: React.FC<CommandDeckProps> = ({
               title="切换 Swarm 多智能体并发模式"
             >
               <Dot state={swarmMode ? 'running' : 'queued'} size={6} />
-              <span>Swarm 模式 ({swarmMode ? '开' : '关'})</span>
+              <span>Swarm 并发 ({swarmMode ? '开' : '关'})</span>
             </Button>
-            <Chip>{defaultModel}</Chip>
+            <ModelSelector currentModel={currentModel} onSelectModel={handleSelectModel} />
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>

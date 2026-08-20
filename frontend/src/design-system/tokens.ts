@@ -1,5 +1,5 @@
 /**
- * AgOS Design Tokens & Type System
+ * AgOS Design Tokens & Type System V2
  */
 
 export type StateLamp = 'queued' | 'running' | 'done' | 'failed';
@@ -35,6 +35,42 @@ export const STATE_DEFS: Record<StateLamp, StateDefinition> = {
     dotClass: 'u-dot--failed',
     badgeClass: 'badge--failed',
     colorVar: 'var(--state-failed)',
+  },
+};
+
+export type MemoryNodeType = 'user' | 'feedback' | 'project' | 'reference' | 'incident';
+
+export interface MemoryNodeMeta {
+  label: string;
+  color: string;
+  colorBg: string;
+}
+
+export const MEMORY_TYPE_DEFS: Record<MemoryNodeType, MemoryNodeMeta> = {
+  user: {
+    label: '用户偏好 / User',
+    color: 'var(--mem-user)',
+    colorBg: 'var(--mem-user-bg)',
+  },
+  feedback: {
+    label: '经验反馈 / Feedback',
+    color: 'var(--mem-feedback)',
+    colorBg: 'var(--mem-feedback-bg)',
+  },
+  project: {
+    label: '架构项目 / Project',
+    color: 'var(--mem-project)',
+    colorBg: 'var(--mem-project-bg)',
+  },
+  reference: {
+    label: '契约参考 / Ref',
+    color: 'var(--mem-reference)',
+    colorBg: 'var(--mem-reference-bg)',
+  },
+  incident: {
+    label: '故障复盘 / Incident',
+    color: 'var(--mem-incident)',
+    colorBg: 'var(--mem-incident-bg)',
   },
 };
 

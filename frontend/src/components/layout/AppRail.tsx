@@ -1,9 +1,11 @@
 import React from 'react';
 import { useTheme } from '@/design-system/theme-context';
 
+export type MainTab = 'chat' | 'console' | 'graph' | 'settings';
+
 export interface AppRailProps {
-  currentTab: 'chat' | 'console' | 'lineage';
-  onSelectTab: (tab: 'chat' | 'console' | 'lineage') => void;
+  currentTab: MainTab;
+  onSelectTab: (tab: MainTab) => void;
   unreadCount?: number;
 }
 
@@ -23,7 +25,7 @@ export const AppRail: React.FC<AppRailProps> = ({
       <button
         type="button"
         className={`rail-btn ${currentTab === 'chat' ? 'is-active' : ''}`}
-        title="对话流"
+        title="对话流 (Chat)"
         onClick={() => onSelectTab('chat')}
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -35,7 +37,7 @@ export const AppRail: React.FC<AppRailProps> = ({
       <button
         type="button"
         className={`rail-btn ${currentTab === 'console' ? 'is-active' : ''}`}
-        title="控制台概览"
+        title="控制台 (Console - 概览·机器·会话·谱系·计划·技能)"
         onClick={() => onSelectTab('console')}
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -48,15 +50,28 @@ export const AppRail: React.FC<AppRailProps> = ({
 
       <button
         type="button"
-        className={`rail-btn ${currentTab === 'lineage' ? 'is-active' : ''}`}
-        title="智能体谱系"
-        onClick={() => onSelectTab('lineage')}
+        className={`rail-btn ${currentTab === 'graph' ? 'is-active' : ''}`}
+        title="记忆图谱 (Memory Graph - 124 篇星图)"
+        onClick={() => onSelectTab('graph')}
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M6 3v12" />
-          <circle cx="18" cy="6" r="3" />
-          <circle cx="6" cy="18" r="3" />
-          <path d="M18 9a9 9 0 0 1-9 9" />
+          <circle cx="18" cy="5" r="3" />
+          <circle cx="6" cy="12" r="3" />
+          <circle cx="18" cy="19" r="3" />
+          <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+          <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+        </svg>
+      </button>
+
+      <button
+        type="button"
+        className={`rail-btn ${currentTab === 'settings' ? 'is-active' : ''}`}
+        title="系统设置 (Settings - 特权面)"
+        onClick={() => onSelectTab('settings')}
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
         </svg>
       </button>
 
