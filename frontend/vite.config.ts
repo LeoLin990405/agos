@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 
 export default defineConfig({
+  base: '/agos/', // dsh-agos 插件在 :3091/agos/ 下 serve 本产物(同源,无需代理)
   plugins: [react()],
   resolve: {
     alias: {
