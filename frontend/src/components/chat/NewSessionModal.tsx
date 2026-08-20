@@ -1,45 +1,52 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Chip } from '@/components/ui/Chip';
+import { createSession, fetchPresets, type PresetInfo } from '@/stores/live';
 
 export interface NewSessionModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreateSession: (params: { title: string; cwd: string; preset: string; model: string }) => void;
+  /** 创建成功后回调(带真实 sessionId)。 */
+  onCreated?: (sessionId: string) => void;
 }
 
 export const NewSessionModal: React.FC<NewSessionModalProps> = ({
   isOpen,
   onClose,
-  onCreateSession,
+  onCreated,
 }) => {
   const [title, setTitle] = useState('');
-  const [cwd, setCwd] = useState('/Users/leo/Documents/kimi/workspace/agos-frontend');
-  const [preset, setPreset] = useState('full-stack-architect');
-  const [model, setModel] = useState('DeepSeek-V3');
+  const [cwd, setCwd] = useState('/Users/leo');
+  const [preset, setPreset] = useState('cordis');
+  const [presets, setPresets] = useState<{ id: string, name: string, desc: string }[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
 
-  const presets = [
-    { id: 'full-stack-architect', name: '全栈架构师 (Full-Stack)', desc: '具备前后端全景架构与深度重构权限' },
-    { id: 'security-auditor', name: '安全攻防审计员 (Security Auditor)', desc: '严格隔离，专注于漏洞与竞争条件探针' },
-    { id: 'ui-design-engineer', name: 'UI 设计工程师 (Design Engineer)', desc: '精通 CSS Token、Geist 排印与共息动效' },
-    { id: 'db-migration-specialist', name: '数据库与契约专家 (Data Connect)', desc: '模式校验与严格向后兼容迁移' },
-  ];
+  // DeepSeek 原生四模式(agentPreset.list 真值:标准/PTC/极简/创造)
+  useEffect(() => {
+    if (!isOpen) return;
+    void fetchPresets().then((list: PresetInfo[]) => {
+      if (list.length > 0) {
+        setPresets(list.map((p) => ({ id: p.id, name: p.name, desc: p.description })));
+        const def = list.find((p) => p.isDefault);
+        if (def !== undefined) setPreset(def.id);
+      }
+    });
+  }, [isOpen]);
 
-  const handlePickDirectory = () => {
-    // 模拟 host.pickDirectory RPC 调用
-    setCwd('/Users/leo/Documents/kimi/workspace/agos-frontend');
-  };
+  const handlePickDirectory = () => { /* host.pickDirectory 需宿主窗口,浅色占位:手输 cwd */ };
 
   const handleCreate = () => {
-    onCreateSession({
-      title: title.trim() || '未命名会话',
-      cwd,
-      preset,
-      model,
+    if (busy) return;
+    setBusy(true); setError(undefined);
+    void createSession({ cwd: cwd.trim() || '/Users/leo', agentPreset: preset }).then((sid) => {
+      setBusy(false);
+      if (sid !== undefined) { onCreated?.(sid); onClose(); }
+      else setError('创建失败:检查 cwd 是否存在');
     });
-    onClose();
   };
+  void title; // 标题由宿主按首条消息自动生成
 
   return (
     <Modal
@@ -51,8 +58,9 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
           <Button variant="ghost" size="sm" onClick={onClose}>
             取消
           </Button>
-          <Button variant="primary" size="sm" onClick={handleCreate}>
-            创建并进入会话 →
+          {error !== undefined && <span style={{ fontSize: '11px', color: 'var(--state-failed)', marginRight: '8px' }}>{error}</span>}
+          <Button variant="primary" size="sm" onClick={handleCreate} disabled={busy}>
+            {busy ? '创建中…' : '创建并进入会话 →'}
           </Button>
         </>
       }
@@ -116,21 +124,6 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
         </div>
       </div>
 
-      <div className="form-group">
-        <label className="form-label">主力大语言模型</label>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          {['DeepSeek-V3', 'Claude-3.5-Sonnet', 'Kimi-K1.5', 'Qwen-2.5-72B'].map((m) => (
-            <Button
-              key={m}
-              variant={model === m ? 'primary' : 'ghost'}
-              size="sm"
-              onClick={() => setModel(m)}
-            >
-              {m}
-            </Button>
-          ))}
-        </div>
-      </div>
     </Modal>
   );
 };

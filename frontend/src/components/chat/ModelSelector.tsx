@@ -1,23 +1,35 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Chip } from '@/components/ui/Chip';
+import { fetchSessionModels, selectSessionModel, type SessionModels } from '@/stores/live';
 
+/** 模型选择器(V5 真值):session.models 全量分组 + session.selectModel 切换。 */
 export interface ModelSelectorProps {
-  currentModel: string;
-  onSelectModel: (model: string) => void;
+  sessionId: string | undefined;
 }
 
-export const ModelSelector: React.FC<ModelSelectorProps> = ({
-  currentModel,
-  onSelectModel,
-}) => {
+export const ModelSelector: React.FC<ModelSelectorProps> = ({ sessionId }) => {
   const [open, setOpen] = useState(false);
+  const [data, setData] = useState<SessionModels>({ current: undefined, groups: [] });
+  const [busy, setBusy] = useState(false);
 
-  const models = [
-    { id: 'DeepSeek-V3', provider: 'DeepSeek', desc: '671B MoE · 极速高精推理', context: '128k' },
-    { id: 'Claude-3.5-Sonnet', provider: 'Anthropic', desc: '顶级代码重构与指令遵循', context: '200k' },
-    { id: 'Kimi-K1.5', provider: 'Moonshot', desc: '超长上下文与中文推理', context: '256k' },
-    { id: 'Qwen-2.5-Coder', provider: 'Alibaba', desc: '本地离线私密沙箱专用', context: '128k' },
-  ];
+  useEffect(() => {
+    if (sessionId === undefined) { setData({ current: undefined, groups: [] }); return; }
+    let alive = true;
+    void fetchSessionModels(sessionId).then((d) => { if (alive) setData(d); });
+    return () => { alive = false; };
+  }, [sessionId, open]);
+
+  const currentLabel = data.current !== undefined ? data.current.model : '选择模型';
+  const total = data.groups.reduce((n, g) => n + g.models.length, 0);
+
+  const pick = async (provider: string, model: string): Promise<void> => {
+    if (sessionId === undefined || busy) return;
+    setBusy(true);
+    const ok = await selectSessionModel(sessionId, provider, model);
+    if (ok) setData((d) => ({ ...d, current: { provider, model } }));
+    setBusy(false);
+    setOpen(false);
+  };
 
   return (
     <div style={{ position: 'relative', display: 'inline-block' }}>
@@ -26,59 +38,58 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         className="btn btn-ghost btn-sm"
         style={{ padding: '0 8px', gap: '6px' }}
         onClick={() => setOpen(!open)}
-        title="选择主力推理模型"
+        title={sessionId === undefined ? '先选择会话' : `主力模型 · ${total} 个可路由`}
+        disabled={sessionId === undefined}
       >
-        <Chip variant="purple">{currentModel}</Chip>
+        <Chip variant="purple">{currentLabel}</Chip>
         <span style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>▾</span>
       </button>
 
       {open && (
         <div
           style={{
-            position: 'absolute',
-            bottom: '100%',
-            left: 0,
-            marginBottom: '8px',
-            width: '260px',
+            position: 'absolute', bottom: '100%', left: 0, marginBottom: '8px',
+            width: '300px', maxHeight: '380px', overflowY: 'auto',
             backgroundColor: 'var(--bg-layer-1)',
-            border: '1px solid var(--border-bold)',
-            borderRadius: '8px',
-            padding: '6px',
-            boxShadow: 'var(--shadow-panel)',
-            zIndex: 50,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '4px',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '12px', padding: '6px',
+            boxShadow: 'var(--shadow-panel)', zIndex: 50,
+            display: 'flex', flexDirection: 'column', gap: '2px',
           }}
         >
-          <div style={{ padding: '4px 8px', fontSize: '10px', color: 'var(--text-tertiary)', fontWeight: 700 }}>
-            切换活跃会话模型 (LLM SELECT)
-          </div>
-          {models.map((m) => (
-            <div
-              key={m.id}
-              onClick={() => {
-                onSelectModel(m.id);
-                setOpen(false);
-              }}
-              style={{
-                padding: '8px 10px',
-                borderRadius: '6px',
-                backgroundColor: currentModel === m.id ? 'var(--state-running-bg)' : 'transparent',
-                border: currentModel === m.id ? '1px solid var(--state-running-border)' : '1px solid transparent',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-              }}
-            >
-              <div>
-                <div style={{ fontWeight: 600, fontSize: '12px', color: currentModel === m.id ? 'var(--state-running)' : 'var(--text-primary)' }}>
-                  {m.id}
-                </div>
-                <div style={{ fontSize: '10.5px', color: 'var(--text-tertiary)' }}>{m.desc}</div>
+          {data.groups.length === 0 && (
+            <div style={{ padding: '14px', fontSize: '12px', color: 'var(--text-tertiary)', textAlign: 'center' }}>
+              正在加载模型清单…
+            </div>
+          )}
+          {data.groups.map((g) => (
+            <div key={g.provider}>
+              <div style={{ padding: '8px 10px 4px', fontSize: '10.5px', letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--text-dimmed)' }}>
+                {g.provider} · {g.models.length}
               </div>
-              <span className="u-num" style={{ fontSize: '10px', color: 'var(--text-dimmed)' }}>{m.context}</span>
+              {g.models.map((m) => {
+                const isCurrent = data.current?.provider === g.provider && data.current?.model === m.id;
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => { void pick(g.provider, m.id); }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '8px', width: '100%',
+                      padding: '7px 10px', border: 'none', borderRadius: '8px',
+                      background: isCurrent ? 'var(--state-running-bg)' : 'transparent',
+                      color: isCurrent ? 'var(--state-running)' : 'var(--text-secondary)',
+                      fontSize: '12.5px', textAlign: 'left', cursor: 'pointer',
+                      fontFamily: 'var(--font-mono)',
+                    }}
+                    onMouseEnter={(e) => { if (!isCurrent) e.currentTarget.style.background = 'var(--interactive-hover, rgba(127,127,127,0.08))'; }}
+                    onMouseLeave={(e) => { if (!isCurrent) e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.name}</span>
+                    {isCurrent && <span style={{ fontSize: '10px' }}>当前</span>}
+                  </button>
+                );
+              })}
             </div>
           ))}
         </div>

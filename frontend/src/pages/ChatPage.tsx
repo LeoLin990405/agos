@@ -434,9 +434,7 @@ export const ChatPage: React.FC<{
         </>)}
         </div>
 
-        <CommandDeck
-          defaultModel={activeModel}
-          onModelChange={setActiveModel}
+        <CommandDeck sessionId={liveMode ? activeSessionId : undefined}
           onSend={handleSend}
         />
       </main>
@@ -445,9 +443,7 @@ export const ChatPage: React.FC<{
       <NewSessionModal
         isOpen={isNewSessionOpen}
         onClose={() => setIsNewSessionOpen(false)}
-        onCreateSession={(params) => {
-          setActiveModel(params.model);
-        }}
+        onCreated={(sid) => { setActiveSessionId(sid); }}
       />
     </div>
   );

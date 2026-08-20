@@ -11,12 +11,13 @@ interface SimNode extends MemoryNodeData {
   isRecent: boolean;
 }
 
+/* Obsidian 式柔和五色(降饱和;user 用 DeepSeek 蓝维持品牌) */
 const TYPE_COLORS: Record<MemoryNodeType, string> = {
-  user: '#00a6ff',
-  feedback: '#10b981',
-  project: '#a855f7',
-  reference: '#f59e0b',
-  incident: '#f43f5e',
+  user: '#679efe',
+  feedback: '#7fce9b',
+  project: '#b5a1ef',
+  reference: '#dfb56e',
+  incident: '#ef8f8f',
 };
 
 export interface CanvasGraphProps {
@@ -64,7 +65,7 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
         y: height / 2 + Math.sin(angle) * dist + (Math.random() - 0.5) * 50,
         vx: 0,
         vy: 0,
-        radius: Math.max(5, Math.min(14, 4 + n.outDegree * 2)),
+        radius: Math.max(2.6, Math.min(9, 2.6 + Math.sqrt(n.outDegree) * 1.7)), // Obsidian 星点:小而密,sqrt 缩放
         isRecent: now - n.mtime < SEVEN_DAYS,
       };
     });
@@ -197,16 +198,16 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
             ? '#f59e0b'
             : isDimmed
             ? 'rgba(245, 158, 11, 0.12)'
-            : 'rgba(245, 158, 11, 0.35)';
+            : 'rgba(200, 200, 210, 0.14)'; /* dangling:暗虚线,不喊叫 */
           ctx.lineWidth = isHighlighted ? 1.8 : 1;
         } else {
           ctx.setLineDash([]);
           ctx.strokeStyle = isHighlighted
-            ? '#00a6ff'
+            ? 'rgba(103, 158, 254, 0.85)'
             : isDimmed
-            ? 'rgba(255, 255, 255, 0.04)'
-            : 'rgba(255, 255, 255, 0.14)';
-          ctx.lineWidth = isHighlighted ? 1.5 : 0.8;
+            ? 'rgba(255, 255, 255, 0.025)'
+            : 'rgba(255, 255, 255, 0.10)';
+          ctx.lineWidth = isHighlighted ? 1.4 : 0.7;
         }
         ctx.stroke();
       });
@@ -242,18 +243,18 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
         // 节点本体
         ctx.beginPath();
         ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
-        ctx.fillStyle = isDimmed ? `${color}33` : color;
+        ctx.fillStyle = isDimmed ? `${color}1f` : color;
         ctx.fill();
-
-        // 边框高光
-        ctx.lineWidth = isHighlighted ? 2 : 1;
-        ctx.strokeStyle = isHighlighted ? '#ffffff' : 'rgba(255, 255, 255, 0.3)';
-        ctx.stroke();
+        if (isHighlighted) { // 只有焦点邻域上细环,平时无描边(Obsidian 语法)
+          ctx.lineWidth = 1.4;
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+          ctx.stroke();
+        }
 
         // 标签文本 (高亮节点或出度大节点显示)
-        if ((isHighlighted || node.outDegree >= 3 || k > 1.4) && !isDimmed) {
-          ctx.fillStyle = isHighlighted ? '#ffffff' : 'rgba(255, 255, 255, 0.7)';
-          ctx.font = `${isHighlighted ? 'bold ' : ''}10px Geist, sans-serif`;
+        if ((isHighlighted || k > 1.3) && !isDimmed) { // Obsidian:标签只给焦点邻域或放大后
+          ctx.fillStyle = isHighlighted ? 'rgba(255,255,255,0.92)' : 'rgba(255, 255, 255, 0.5)';
+          ctx.font = `${isHighlighted ? '600 ' : ''}9.5px -apple-system, sans-serif`;
           ctx.textAlign = 'center';
           ctx.fillText(node.id, node.x, node.y + radius + 12);
         }

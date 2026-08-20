@@ -5,18 +5,16 @@ import { ModelSelector } from './ModelSelector';
 
 export interface CommandDeckProps {
   onSend?: (text: string) => void;
-  defaultModel?: string;
-  onModelChange?: (model: string) => void;
+  /** 当前会话 id(模型选择器按会话拉真实路由清单)。 */
+  sessionId?: string;
 }
 
 export const CommandDeck: React.FC<CommandDeckProps> = ({
   onSend,
-  defaultModel = 'DeepSeek-V3',
-  onModelChange,
+  sessionId,
 }) => {
   const [text, setText] = useState('');
   const [swarmMode, setSwarmMode] = useState(true);
-  const [currentModel, setCurrentModel] = useState(defaultModel);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
@@ -33,11 +31,6 @@ export const CommandDeck: React.FC<CommandDeckProps> = ({
       onSend?.(text);
       setText('');
     }
-  };
-
-  const handleSelectModel = (m: string) => {
-    setCurrentModel(m);
-    onModelChange?.(m);
   };
 
   return (
@@ -68,7 +61,7 @@ export const CommandDeck: React.FC<CommandDeckProps> = ({
               <Dot state={swarmMode ? 'running' : 'queued'} size={6} />
               <span>Swarm 并发 ({swarmMode ? '开' : '关'})</span>
             </Button>
-            <ModelSelector currentModel={currentModel} onSelectModel={handleSelectModel} />
+            <ModelSelector sessionId={sessionId} />
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>

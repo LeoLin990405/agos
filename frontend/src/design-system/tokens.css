@@ -29,22 +29,24 @@
      -------------------------------------------------------------------------- */
   /* V4 融合:重基到 DeepSeek 原生炭灰系(上游 ui-theme/design-platform.css 权威值:
      neutral-bluish 950/875/850/800 + deepseek-400 accent)。海拔仍靠明暗,边框发丝。 */
-  --bg-app: rgb(21, 21, 23);
-  --bg-layer-1: rgb(35, 35, 36);
-  --bg-layer-2: rgb(44, 44, 46);
-  --bg-layer-3: rgb(53, 54, 56);
-  --bg-layer-active: rgb(64, 65, 68);
-  --bg-glass: rgba(35, 35, 36, 0.86);
+  /* V5 基因:Kimi/Manus 式安静优雅(Kimi app 实测:bg #18181c、raise rgba(40,40,46)、
+     文字用透明度分层、发丝 .08 边)+ DeepSeek 蓝品牌。 */
+  --bg-app: #141416;
+  --bg-layer-1: #1b1b1f;
+  --bg-layer-2: #232328;
+  --bg-layer-3: #2b2b31;
+  --bg-layer-active: #34343a;
+  --bg-glass: rgba(40, 40, 46, 0.85);
 
-  --border-dim: rgba(255, 255, 255, 0.05);
-  --border-subtle: rgba(255, 255, 255, 0.09);
-  --border-bold: rgba(255, 255, 255, 0.17);
+  --border-dim: rgba(255, 255, 255, 0.06);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-bold: rgba(255, 255, 255, 0.14);
   --border-glow: rgba(103, 158, 254, 0.35);
 
-  --text-primary: rgb(249, 250, 251);
-  --text-secondary: rgb(207, 211, 214);
-  --text-tertiary: rgb(173, 178, 184);
-  --text-dimmed: rgb(129, 133, 140);
+  --text-primary: rgba(245, 245, 247, 0.92);
+  --text-secondary: rgba(245, 245, 247, 0.56);
+  --text-tertiary: rgba(245, 245, 247, 0.38);
+  --text-dimmed: rgba(245, 245, 247, 0.26);
 
   /* 4态标准灯语 (Dark Neon Accents) */
   --state-running: rgb(103, 158, 254); /* deepseek-400:原生品牌蓝 */
@@ -52,12 +54,12 @@
   --state-running-border: rgba(103, 158, 254, 0.38);
   --state-running-glow: rgba(103, 158, 254, 0.35);
 
-  --state-done: rgb(34, 197, 94); /* green-500 */
+  --state-done: #34c759; /* Kimi/iOS 绿 */
   --state-done-bg: rgba(34, 197, 94, 0.12);
   --state-done-border: rgba(34, 197, 94, 0.38);
   --state-done-glow: rgba(34, 197, 94, 0.32);
 
-  --state-failed: rgb(242, 90, 90); /* red-400 */
+  --state-failed: #ff5f57; /* iOS 红族 */
   --state-failed-bg: rgba(242, 90, 90, 0.13);
   --state-failed-border: rgba(242, 90, 90, 0.38);
   --state-failed-glow: rgba(242, 90, 90, 0.32);
@@ -83,7 +85,7 @@
   --accent-purple: #a855f7;
   --accent-blue: #3b82f6;
 
-  --shadow-card: inset 0 1px 0 0 rgba(255, 255, 255, 0.06), 0 2px 8px -2px rgba(0, 0, 0, 0.45);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.2), 0 4px 16px -8px rgba(0, 0, 0, 0.4);
   --shadow-panel: inset 0 1px 0 0 rgba(255, 255, 255, 0.05), 0 16px 40px rgba(0, 0, 0, 0.5);
   --shadow-glow: 0 0 20px rgba(103, 158, 254, 0.14); /* 辉光只留给运行态 */
   --grid-line: rgba(255, 255, 255, 0.02);
@@ -95,11 +97,11 @@
    -------------------------------------------------------------------------- */
 [data-theme="light"],
 html.theme-light {
-  --bg-app: rgb(249, 250, 251);
-  --bg-layer-1: rgb(255, 255, 255);
-  --bg-layer-2: rgb(245, 247, 250);
-  --bg-layer-3: rgb(233, 236, 242);
-  --bg-layer-active: rgb(225, 229, 238);
+  --bg-app: #fbfaf9; /* Kimi 暖纸白 */
+  --bg-layer-1: #ffffff;
+  --bg-layer-2: #f5f4f2;
+  --bg-layer-3: #ecebe8;
+  --bg-layer-active: #e4e3df;
   --bg-glass: rgba(255, 255, 255, 0.88);
 
   --border-dim: rgba(0, 0, 0, 0.06);

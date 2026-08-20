@@ -287,3 +287,68 @@ export const telemetryStore = {
   },
   getSnapshot(): TelemetryState { return telemetryState },
 }
+
+
+// ── 模式 / 模型 / 建会话 / 记忆图谱(V5 接线)────────────────────────────
+export interface PresetInfo { id: string, name: string, description: string, isDefault: boolean }
+export async function fetchPresets(): Promise<PresetInfo[]> {
+  const res = await agos.call('agentPreset.list', {})
+  if (!res.result.ok) return []
+  const v = res.result.value as unknown as Record<string, unknown>
+  const list = (v['presets'] ?? []) as Record<string, unknown>[]
+  return list.map((p) => ({
+    id: String(p['id'] ?? ''), name: String(p['name'] ?? p['id'] ?? ''),
+    description: String(p['description'] ?? ''), isDefault: p['isDefault'] === true,
+  })).filter((p) => p.id !== '')
+}
+
+export interface ModelGroup { provider: string, models: { id: string, name: string }[] }
+export interface SessionModels { current: { provider: string, model: string } | undefined, groups: ModelGroup[] }
+export async function fetchSessionModels(sessionId: string): Promise<SessionModels> {
+  const res = await agos.call('session.models', { sessionId: sessionId as never })
+  if (!res.result.ok) return { current: undefined, groups: [] }
+  const v = res.result.value as unknown as Record<string, unknown>
+  const cur = v['current'] as Record<string, unknown> | undefined
+  const groups = ((v['groups'] ?? []) as Record<string, unknown>[]).map((g) => ({
+    provider: String(g['provider'] ?? g['id'] ?? ''),
+    models: ((g['models'] ?? []) as Record<string, unknown>[]).map((m) => ({
+      id: String(m['id'] ?? ''), name: String(m['name'] ?? m['id'] ?? ''),
+    })),
+  })).filter((g) => g.provider !== '' && g.models.length > 0)
+  return {
+    current: cur !== undefined ? { provider: String(cur['provider'] ?? ''), model: String(cur['model'] ?? '') } : undefined,
+    groups,
+  }
+}
+export async function selectSessionModel(sessionId: string, provider: string, model: string): Promise<boolean> {
+  const res = await agos.call('session.selectModel', { sessionId: sessionId as never, provider, model })
+  return res.result.ok
+}
+
+export async function createSession(params: { cwd: string, agentPreset?: string }): Promise<string | undefined> {
+  const payload: Record<string, unknown> = { cwd: params.cwd }
+  if (params.agentPreset !== undefined) payload['agentPreset'] = params.agentPreset
+  const res = await agos.call('session.create', payload as never)
+  if (!res.result.ok) return undefined
+  const sid = String((res.result.value as unknown as Record<string, unknown>)['sessionId'] ?? '')
+  if (sid !== '') { void refreshSessions(); openConversation(sid) }
+  return sid !== '' ? sid : undefined
+}
+
+export interface MemoryGraphData {
+  nodes: { id: string, type: string, description: string, bytes: number, mtime: number, outDegree: number }[]
+  edges: { from: string, to: string, dangling: boolean }[]
+  counts: Record<string, unknown>
+}
+export async function fetchMemoryGraph(): Promise<MemoryGraphData | undefined> {
+  try {
+    const r = await fetch('/api/memory/graph')
+    if (!r.ok) return undefined
+    const d = await r.json() as Record<string, unknown>
+    return {
+      nodes: (d['nodes'] ?? []) as MemoryGraphData['nodes'],
+      edges: (d['edges'] ?? []) as MemoryGraphData['edges'],
+      counts: (d['counts'] ?? {}) as Record<string, unknown>,
+    }
+  } catch { return undefined }
+}

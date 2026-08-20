@@ -131,7 +131,7 @@
 .u-swarm-card {
   background-color: var(--bg-layer-2);
   border: 1px solid var(--border-subtle);
-  border-radius: 10px;
+  border-radius: 14px;
   padding: 18px 20px;
   margin: 14px 0;
   box-shadow: var(--shadow-card);
@@ -323,7 +323,7 @@
 .team-card {
   background-color: var(--bg-layer-2);
   border: 1px solid rgba(168, 85, 247, 0.35);
-  border-radius: 10px;
+  border-radius: 14px;
   padding: 16px 20px;
   margin: 12px 0;
   box-shadow: var(--shadow-card);
@@ -358,7 +358,7 @@
 .memory-submit-card {
   background: linear-gradient(135deg, rgba(168, 85, 247, 0.12) 0%, rgba(6, 182, 212, 0.08) 100%);
   border: 1px solid rgba(168, 85, 247, 0.4);
-  border-radius: 10px;
+  border-radius: 14px;
   padding: 16px 20px;
   margin: 12px 0;
   box-shadow: var(--shadow-card);
@@ -379,7 +379,7 @@
   gap: 14px;
   background-color: var(--bg-layer-1);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 12px;
   padding: 12px 16px;
   margin-top: 8px;
 }
@@ -402,7 +402,7 @@
 .question-panel {
   background-color: var(--bg-layer-2);
   border: 1px solid rgba(6, 182, 212, 0.5);
-  border-radius: 10px;
+  border-radius: 14px;
   padding: 18px 22px;
   margin: 14px 0;
   box-shadow: 0 0 30px rgba(6, 182, 212, 0.15), var(--shadow-card);
@@ -455,7 +455,7 @@
 .plan-run-card {
   background-color: var(--bg-layer-2);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 12px;
   padding: 14px 16px;
   margin: 10px 0;
 }
@@ -616,7 +616,7 @@
 .terminal-card {
   background-color: var(--code-bg);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 12px;
   overflow: hidden;
   font-family: var(--font-mono);
   font-size: 11.5px;
@@ -681,7 +681,7 @@
 .diff-card {
   background-color: var(--code-bg);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 12px;
   overflow: hidden;
   font-family: var(--font-mono);
   font-size: 11.5px;
@@ -726,7 +726,7 @@
 .approval-panel {
   background-color: var(--bg-layer-2);
   border: 1px solid rgba(245, 158, 11, 0.5);
-  border-radius: 10px;
+  border-radius: 14px;
   padding: 16px 20px;
   margin: 14px 0;
   box-shadow: 0 0 30px rgba(245, 158, 11, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.08);
@@ -812,7 +812,7 @@
   margin: 0 auto;
   background-color: var(--bg-layer-2);
   border: 1px solid var(--border-subtle);
-  border-radius: 10px;
+  border-radius: 14px;
   padding: 12px 16px;
   display: flex;
   flex-direction: column;
@@ -871,7 +871,7 @@
 .u-kpi-card {
   background-color: var(--bg-layer-2);
   border: 1px solid var(--border-subtle);
-  border-radius: 10px;
+  border-radius: 14px;
   padding: 18px 20px;
   box-shadow: var(--shadow-card);
   display: flex;
@@ -914,7 +914,7 @@
 .inbox-section {
   background-color: var(--bg-layer-2);
   border: 1px solid var(--border-subtle);
-  border-radius: 10px;
+  border-radius: 14px;
   padding: 20px 24px;
   box-shadow: var(--shadow-card);
 }
@@ -933,7 +933,7 @@
   padding: 12px 16px;
   background-color: var(--bg-layer-1);
   border: 1px solid var(--border-dim);
-  border-radius: 8px;
+  border-radius: 12px;
   gap: 14px;
   transition: background-color var(--u-dur-tick) ease, transform var(--u-dur-tick) ease;
 }
@@ -963,7 +963,7 @@
 .fleet-rack-card {
   background-color: var(--bg-layer-2);
   border: 1px solid var(--border-subtle);
-  border-radius: 10px;
+  border-radius: 14px;
   padding: 16px 18px;
   display: flex;
   flex-direction: column;
@@ -973,7 +973,7 @@
 
 .telemetry-table-wrap {
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 12px;
   overflow: hidden;
   background-color: var(--bg-layer-2);
 }
@@ -1020,7 +1020,7 @@
 .sym-monitor-banner {
   background: linear-gradient(135deg, rgba(0, 166, 255, 0.12) 0%, rgba(16, 185, 129, 0.08) 100%);
   border: 1px solid var(--border-subtle);
-  border-radius: 10px;
+  border-radius: 14px;
   padding: 16px 20px;
   display: flex;
   align-items: center;
@@ -1059,7 +1059,7 @@
 .root-agent-card {
   background-color: var(--bg-layer-2);
   border: 1px solid var(--border-subtle);
-  border-radius: 10px;
+  border-radius: 14px;
   padding: 16px 20px;
   display: flex;
   align-items: center;
@@ -1115,7 +1115,7 @@
 .lineage-job-card {
   background-color: var(--bg-layer-2);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 12px;
   padding: 14px 16px;
   cursor: pointer;
   box-shadow: var(--shadow-card);
@@ -1181,7 +1181,7 @@
 .instrument-strip {
   display: flex; align-items: stretch;
   background: var(--bg-layer-1);
-  border: 1px solid var(--border-dim); border-radius: 10px;
+  border: 1px solid var(--border-dim); border-radius: 14px;
   box-shadow: var(--shadow-card);
   overflow: hidden;
 }
