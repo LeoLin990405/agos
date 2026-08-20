@@ -400,3 +400,18 @@
   font-weight: 600;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
+
+/* console 内部导航(review 补:JSX 已用而样式缺失 → 裸链接堆叠 bug) */
+.console-nav-rail {
+  width: 200px; flex: none; display: flex; flex-direction: column; gap: 2px;
+  padding: 14px 10px; border-right: 1px solid var(--border-subtle);
+  background: var(--bg-layer-1); overflow-y: auto;
+}
+.console-nav-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  height: 32px; padding: 0 10px; border-radius: 8px;
+  font-size: 12.5px; color: var(--text-secondary); text-decoration: none;
+  transition: transform var(--u-dur-tick) var(--u-ease-swift);
+}
+.console-nav-item:hover { background: var(--bg-layer-3); color: var(--text-primary); }
+.console-nav-item.is-active { background: var(--state-running-bg); color: var(--state-running); font-weight: 600; }
