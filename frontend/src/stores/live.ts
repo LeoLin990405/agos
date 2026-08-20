@@ -14,7 +14,7 @@
  */
 import { createAgosClient, watchStream } from '../api-client/index.ts'
 import type { MuxFrame } from '../contract/api/index.ts'
-import type { RpcRequest } from '../contract/api/index.ts'
+import type { PromptContentPart, RpcRequest } from '../contract/api/index.ts'
 import { createFold, type Fold } from '../fold/fold.ts'
 import type { FoldedConversation } from '../fold/model.ts'
 
@@ -239,6 +239,22 @@ export async function sendPrompt(sessionId: string, text: string): Promise<{ ok:
       sessionId: sessionId as never,
       mode: 'steer',
       content: [{ type: 'text', text }],
+      clientTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    })
+    if (!res.result.ok) return { ok: false, error: JSON.stringify(res.result.error) }
+    return { ok: true }
+  } catch (error) {
+    return { ok: false, error: String((error as Error)?.message ?? error) }
+  }
+}
+
+/** 发送已经组装好的多模态 prompt；调用语义与 sendPrompt 完全一致。 */
+export async function sendPromptParts(sessionId: string, parts: PromptContentPart[]): Promise<{ ok: boolean, error?: string }> {
+  try {
+    const res = await agos.call('session.prompt', {
+      sessionId: sessionId as never,
+      mode: 'steer',
+      content: parts,
       clientTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     })
     if (!res.result.ok) return { ok: false, error: JSON.stringify(res.result.error) }

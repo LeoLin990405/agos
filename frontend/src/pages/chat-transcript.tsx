@@ -16,6 +16,16 @@ import type { StateLamp } from '@/design-system/tokens';
 import { agos, approvalRpc, conversationStore } from '@/stores/live';
 import type { ConversationItem, ToolItem } from '@/fold/model';
 import { RpcId } from '@/contract/api/rpc';
+import type { OptimisticImageAttachment } from '@/components/chat/ImageAttachments';
+import { extractMultimodalMessageId, stripMultimodalMessageMarker } from '@/components/chat/CommandDeck';
+
+export interface OptimisticImageMessage {
+  id: string;
+  sessionId: string;
+  text: string;
+  images: OptimisticImageAttachment[];
+  at: number;
+}
 
 const fmtDur = (ms: number | undefined): string =>
   ms === undefined ? '—' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
@@ -64,7 +74,29 @@ const GenericToolRow: React.FC<{ tool: ToolItem }> = ({ tool }) => {
   );
 };
 
-function renderItem(item: ConversationItem, key: string, sessionId: string): React.ReactNode {
+const OptimisticImageStrip: React.FC<{ images: readonly OptimisticImageAttachment[] }> = ({ images }) => (
+  <div className="user-attachments" aria-label={`已发送图片 ${images.length} 张`}>
+    {images.map((image) => (
+      <figure key={image.id} style={{ margin: 0, width: '92px' }}>
+        <img
+          src={image.url}
+          alt={image.name}
+          style={{ display: 'block', width: '92px', height: '72px', objectFit: 'cover', borderRadius: '8px', border: '1px solid var(--border-subtle)', background: 'var(--bg-layer-1)' }}
+        />
+        <figcaption title={image.name} style={{ marginTop: '4px', color: 'var(--text-tertiary)', fontSize: '10px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {image.name}
+        </figcaption>
+      </figure>
+    ))}
+  </div>
+);
+
+function renderItem(
+  item: ConversationItem,
+  key: string,
+  sessionId: string,
+  optimisticImages: readonly OptimisticImageAttachment[] = [],
+): React.ReactNode {
   if (item.kind === 'user') {
     if (item.sourceKind !== 'user') return null;
     return (
@@ -76,7 +108,8 @@ function renderItem(item: ConversationItem, key: string, sessionId: string): Rea
               {item.at > 0 ? new Date(item.at).toLocaleTimeString('zh-CN', { hour12: false }) : ''}
             </span>
           </div>
-          <div style={{ fontSize: '14.5px', lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{item.text}</div>
+          <div style={{ fontSize: '14.5px', lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{stripMultimodalMessageMarker(item.text)}</div>
+          {optimisticImages.length > 0 && <OptimisticImageStrip images={optimisticImages} />}
         </div>
       </div>
     );
@@ -183,12 +216,32 @@ function renderItem(item: ConversationItem, key: string, sessionId: string): Rea
   );
 }
 
-export const LiveTranscript: React.FC<{ sessionId: string }> = ({ sessionId }) => {
+export const LiveTranscript: React.FC<{
+  sessionId: string;
+  optimisticImageMessages?: readonly OptimisticImageMessage[];
+}> = ({ sessionId, optimisticImageMessages = [] }) => {
   const convo = useSyncExternalStore(
     conversationStore.subscribe,
     useCallback(() => conversationStore.getSnapshot(sessionId), [sessionId]),
   );
   const snapshot = convo.snapshot;
+  const localMessages = optimisticImageMessages.filter((message) => message.sessionId === sessionId);
+  const matchedLocalIds = new Set<string>();
+  const imagesByItemIndex = new Map<number, readonly OptimisticImageAttachment[]>();
+  const localById = new Map(localMessages.map((message) => [message.id, message]));
+  for (let index = 0; index < (snapshot?.items.length ?? 0); index += 1) {
+    const item = snapshot?.items[index];
+    if (item?.kind !== 'user' || item.sourceKind !== 'user') continue;
+    const markerId = extractMultimodalMessageId(item.text);
+    const local = markerId === undefined ? undefined : localById.get(markerId);
+    if (local === undefined) continue;
+    matchedLocalIds.add(local.id);
+    imagesByItemIndex.set(index, local.images);
+  }
+  const renderedItems = snapshot?.items.map((item, index) => {
+    return renderItem(item, `${sessionId}:${index}`, sessionId, imagesByItemIndex.get(index) ?? []);
+  });
+  const pendingLocalMessages = localMessages.filter((message) => !matchedLocalIds.has(message.id));
   return (
     <>
       {convo.phase === 'loading' && (
@@ -200,7 +253,19 @@ export const LiveTranscript: React.FC<{ sessionId: string }> = ({ sessionId }) =
       {snapshot !== undefined && snapshot.todos.length > 0 && (
         <div className="message-wrap"><TodoBar todos={snapshot.todos.map((t) => ({ content: t.content, status: t.status as 'completed' | 'in_progress' | 'pending' }))} /></div>
       )}
-      {snapshot !== undefined && snapshot.items.map((item, i) => renderItem(item, `${sessionId}:${i}`, sessionId))}
+      {renderedItems}
+      {pendingLocalMessages.map((message) => (
+        <div className="message-wrap" key={`optimistic:${message.id}`}>
+          <div className="message-user" style={{ opacity: 0.9 }}>
+            <div className="message-user-header">
+              <span style={{ fontWeight: 700, fontSize: '12.5px' }}>Leo</span>
+              <span className="u-num" style={{ fontSize: '11px', color: 'var(--state-running)' }}>发送中同步…</span>
+            </div>
+            <div style={{ fontSize: '14.5px', lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{stripMultimodalMessageMarker(message.text)}</div>
+            <OptimisticImageStrip images={message.images} />
+          </div>
+        </div>
+      ))}
       {snapshot !== undefined && snapshot.items.length === 0 && convo.phase === 'live' && (
         <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '12.5px' }}>空白会话——在下方输入第一条指令。</div>
       )}

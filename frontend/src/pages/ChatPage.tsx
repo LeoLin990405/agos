@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { AppTopbar } from '@/components/layout/AppTopbar';
 import { Dot } from '@/components/ui/Dot';
 import { Chip } from '@/components/ui/Chip';
@@ -14,11 +14,19 @@ import { PlanCard } from '@/components/chat/PlanCard';
 import { TodoBar } from '@/components/chat/TodoBar';
 import { ApprovalPanel } from '@/components/chat/ApprovalPanel';
 import { QuestionPanel } from '@/components/chat/QuestionPanel';
-import { CommandDeck } from '@/components/chat/CommandDeck';
+import { CommandDeck, type CommandDeckMessage } from '@/components/chat/CommandDeck';
+import type { ImageAttachmentDraft } from '@/components/chat/ImageAttachments';
+import { VisionArbiterCard, type VisionArbiterCardState } from '@/components/chat/VisionArbiterCard';
+import {
+  requestVisionAnalysisWithPanelTexts,
+  VisionRequestError,
+  type ArbitratedVisionResponse,
+  type VisionPanelEntry,
+} from '@/components/chat/vision-arbiter-api';
 import { NewSessionModal } from '@/components/chat/NewSessionModal';
 import { StateLamp } from '@/design-system/tokens';
-import { sessionsStore, streamStore, sendPrompt, openConversation } from '@/stores/live';
-import { LiveTranscript } from '@/pages/chat-transcript';
+import { sessionsStore, streamStore, sendPromptParts, openConversation } from '@/stores/live';
+import { LiveTranscript, type OptimisticImageMessage } from '@/pages/chat-transcript';
 
 /** DeepSeek 原生四模式 id → 名(agentPreset.list 实测)。 */
 const PRESET_NAMES: Record<string, string> = { standard: '标准模式', code: 'PTC 模式', minimal: '极简模式', cordis: '创造模式' };
@@ -34,6 +42,21 @@ interface SessionListItem {
   time: string;
 }
 
+interface LocalVisionCard {
+  id: string;
+  sessionId: string;
+  imageName: string;
+  state: VisionArbiterCardState;
+  result?: ArbitratedVisionResponse;
+  panel?: VisionPanelEntry[];
+  error?: string;
+  notice?: string;
+  controller: AbortController;
+}
+
+const localId = (prefix: string): string =>
+  `${prefix}-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
+
 export const ChatPage: React.FC<{
   onNavigateConsole?: () => void;
   onNavigateGraph?: (nodeId?: string) => void;
@@ -43,6 +66,19 @@ export const ChatPage: React.FC<{
   const [isNewSessionOpen, setIsNewSessionOpen] = useState(false);
   const [activeModel, setActiveModel] = useState('DeepSeek-V3');
   const [hasGoal, setHasGoal] = useState(true);
+  const [optimisticImageMessages, setOptimisticImageMessages] = useState<OptimisticImageMessage[]>([]);
+  const [visionCards, setVisionCards] = useState<LocalVisionCard[]>([]);
+  const visionControllersRef = useRef(new Map<string, AbortController>());
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      for (const controller of visionControllersRef.current.values()) controller.abort();
+      visionControllersRef.current.clear();
+    };
+  }, []);
 
   // 订阅真实 stores
   const liveSessions = useSyncExternalStore(sessionsStore.subscribe, sessionsStore.getSnapshot);
@@ -125,8 +161,71 @@ export const ChatPage: React.FC<{
     openConversation(id);
   };
 
-  const handleSend = async (text: string) => {
-    await sendPrompt(activeSessionId, text);
+  const handleSend = async (message: CommandDeckMessage) => {
+    const result = await sendPromptParts(activeSessionId, message.parts);
+    if (mountedRef.current && result.ok && message.images.length > 0) {
+      setOptimisticImageMessages((previous) => [...previous, {
+        id: message.optimisticId ?? localId('image-message'),
+        sessionId: activeSessionId,
+        text: message.text,
+        images: message.images,
+        at: Date.now(),
+      }].slice(-20));
+    }
+    return result;
+  };
+
+  const updateVisionCard = (id: string, update: Partial<LocalVisionCard>) => {
+    if (!mountedRef.current) return;
+    setVisionCards((previous) => previous.map((card) => card.id === id ? { ...card, ...update } : card));
+  };
+
+  const handleAnalyzeImage = (image: ImageAttachmentDraft) => {
+    const id = localId('vision');
+    const controller = new AbortController();
+    visionControllersRef.current.set(id, controller);
+    setVisionCards((previous) => [...previous, {
+      id,
+      sessionId: activeSessionId,
+      imageName: image.name,
+      state: 'running',
+      controller,
+    }]);
+
+    void requestVisionAnalysisWithPanelTexts({
+      sessionId: activeSessionId,
+      name: image.name,
+      mime: image.mediaType,
+      data: image.data,
+    }, { signal: controller.signal }).then((result) => {
+      visionControllersRef.current.delete(id);
+      if (result.native) {
+        const selection = result.selection === null
+          ? ''
+          : `（${result.selection.provider}/${result.selection.model}）`;
+        updateVisionCard(id, {
+          state: 'done',
+          notice: `当前会话模型${selection}支持原生图片；保留图片并直接发送即可。`,
+        });
+        return;
+      }
+      updateVisionCard(id, { state: 'done', result });
+    }).catch((error: unknown) => {
+      visionControllersRef.current.delete(id);
+      if (controller.signal.aborted) {
+        updateVisionCard(id, { state: 'cancelled', error: '本次交叉读图已停止。' });
+        return;
+      }
+      if (error instanceof VisionRequestError) {
+        updateVisionCard(id, {
+          state: 'failed',
+          error: error.message,
+          panel: error.payload.panel,
+        });
+        return;
+      }
+      updateVisionCard(id, { state: 'failed', error: String((error as Error)?.message ?? error) });
+    });
   };
 
   return (
@@ -262,7 +361,12 @@ export const ChatPage: React.FC<{
 
         {/* 消息滚动流:真后端=fold 真渲染;无后端=展示 mock(demo 态) */}
         <div className="chat-scroll-view">
-          {liveMode ? <LiveTranscript sessionId={activeSessionId} /> : (<>
+          {liveMode ? (
+            <LiveTranscript
+              sessionId={activeSessionId}
+              optimisticImageMessages={optimisticImageMessages}
+            />
+          ) : (<>
           {/* 用户 Prompt */}
           <div className="message-wrap">
             <div className="message-user">
@@ -437,10 +541,32 @@ export const ChatPage: React.FC<{
             </div>
           </div>
         </>)}
+          {visionCards.filter((card) => card.sessionId === activeSessionId).map((card) => (
+            <div className="message-wrap" key={card.id}>
+              <VisionArbiterCard
+                imageName={card.imageName}
+                state={card.state}
+                result={card.result}
+                panel={card.panel}
+                error={card.error}
+                notice={card.notice}
+                onCancel={() => {
+                  card.controller.abort();
+                  updateVisionCard(card.id, { state: 'cancelled', error: '本次交叉读图已停止。' });
+                }}
+                onClose={() => {
+                  card.controller.abort();
+                  visionControllersRef.current.delete(card.id);
+                  setVisionCards((previous) => previous.filter((item) => item.id !== card.id));
+                }}
+              />
+            </div>
+          ))}
         </div>
 
         <CommandDeck sessionId={liveMode ? activeSessionId : undefined}
           onSend={handleSend}
+          onAnalyzeImage={handleAnalyzeImage}
         />
       </main>
 

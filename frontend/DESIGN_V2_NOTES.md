@@ -58,3 +58,23 @@
 
 - 所有 🎨 状态组件与页面均已按照真实后端数据契约定义 TypeScript 接口与真实感 Mock 数据。
 - 后续可无缝将 🎨 组件与 Claude / OpenCLI 正在推进的真数据端点进行直连接线！
+
+---
+
+## 四、2026-08-21 多模态输入接线与离线自查
+
+- 语音：`VoiceInput` 使用原生 `MediaRecorder`，把 `{ audio: <裸 base64>, mime }` POST 到 `/api/cn/asr`；成功只回填草稿，不自动发送。录音态使用 running 灯语；系统启用 `prefers-reduced-motion` 时沿用全站静态降级。
+- 图片消息：CommandDeck 支持粘贴、拖拽和文件选择，最多 4 张、单张 5 MB；`sendPromptParts` 是 `src/stores/live.ts` 唯一新增导出，既有函数签名与逻辑未改。当前发送把 `[图片 ×N]` 写进 text part，确保 fold 不改动时历史回放仍有占位；本轮浏览器内同时展示缩略图。
+- 交叉读图：图片缩略图可调用 `/api/cn/vision`，卡片展示 panel 的 provider/成功态/耗时/错误与 arbiter 结论，支持取消和关闭。视觉路由的紧凑响应不含各家正文，前端随后只读查询既有 `/api/cn/council-records`，按本次 `imagePath` 补齐每家最多 6000 字的台账答案；台账失败或 3 秒内未响应时安全降级为状态摘要。
+- 本地预览：原图 base64 只在发送所需的附件草稿中驻留，乐观消息保存最长边 320px 的浏览器缩略图；Canvas/解码不可用时使用固定轻量占位图，绝不回退保留完整 base64。每条消息带不可见唯一标记，确保连续发送相同文案或纯图片时缩略图不串线。历史冷回放仍按约定显示 `[图片 ×N]`。
+- 红线：所有开发验证均使用 fake fetch、fixture 与 fake attachment service；未调用真实 ASR、视觉、`session.prompt` 或模型。
+
+### Stub/fixture 自查清单
+
+- [x] 录音态：原生 MediaRecorder 状态机为 recording → transcribing，running Dot 可见且成功只触发回填；ASR 网络层使用 fake fetch。
+- [x] 转写失败态：stub `/api/cn/asr` 的 HTTP/error payload，错误在输入区小字呈现。
+- [x] 图片超限：fixture 覆盖第 5 张、单张超过 5 MB、非 PNG/JPEG/WebP/GIF。
+- [x] 视觉失败家：stub `/api/cn/vision` 覆盖 panel 单家失败、全失败与非法响应，卡片保留错误徽章/详情。
+- [x] 图片历史占位与 parts：纯函数测试断言 text + image parts、`[图片 ×N]` 与唯一回绑标记。
+- [x] 并发边界：纯函数回归覆盖发送期间 ASR 回填不丢稿；实现会在发送前等待图片 intake，清空/卸载以 generation 使迟到读取失效。
+- [x] 视觉正文：stub 首次返回紧凑 vision 结果、第二次返回只读台账，断言按 `imagePath` 补齐 panel 全文；台账失败回落紧凑结果。
