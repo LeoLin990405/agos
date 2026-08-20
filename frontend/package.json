@@ -1,0 +1,20 @@
+{
+  "name": "agos-frontend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "AgOS 前端:dsh 的自有 SPA(遥测甲板+共息)。P0 = 契约客户端。",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "smoke": "tsx scripts/smoke.ts",
+    "vendor:diff": "sh scripts/vendor-diff.sh"
+  },
+  "dependencies": {
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0"
+  }
+}
