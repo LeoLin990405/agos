@@ -4,9 +4,90 @@ import { RootNodeCard } from '@/components/lineage/RootNodeCard';
 import { LineageJobTree } from '@/components/lineage/LineageJobTree';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Chip } from '@/components/ui/Chip';
+import { useSyncExternalStore } from 'react';
+import { telemetryStore } from '@/stores/live';
+import type { LineageJobItem } from '@/components/lineage/LineageJobTree';
+import type { StateLamp } from '@/design-system/tokens';
+
+const LAMP: Record<string, { lamp: StateLamp, label: string }> = {
+  queued: { lamp: 'queued', label: '等待中' }, running: { lamp: 'running', label: '处理中' },
+  completed: { lamp: 'done', label: '已完成' }, failed: { lamp: 'failed', label: '未成功' },
+  aborted: { lamp: 'failed', label: '已中止' },
+};
+const fmtDur = (ms: unknown): string => typeof ms !== 'number' ? '--' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+
+interface RealBatch { callId: string, description: string, kind: string, rows: Record<string, unknown>[] }
+
+function toJob(r: Record<string, unknown>): LineageJobItem {
+  const st = LAMP[String(r['status'] ?? 'queued')] ?? LAMP['queued']!;
+  const roleBits = [
+    r['role'] != null ? `🎭 ${String(r['role'])}` : '',
+    r['forked'] != null && r['forked'] !== '' ? `⤴ ${String(r['forked'])}` : '',
+    typeof r['depth'] === 'number' && (r['depth'] as number) > 1 ? `⛓ ${String(r['depth'])}` : '',
+  ].filter((x) => x !== '').join(' ');
+  const metrics: { label: string, value: string }[] = [];
+  if (typeof r['queuePosition'] === 'number') metrics.push({ label: '队列位次', value: `#${String(r['queuePosition'])}` });
+  if (r['host'] != null) metrics.push({ label: '主机', value: String(r['host']) });
+  if (r['provider'] != null) metrics.push({ label: 'Provider', value: String(r['provider']) });
+  return {
+    id: String(r['agentId'] ?? r['index'] ?? ''),
+    name: String(r['item'] ?? r['type'] ?? `#${String(r['index'])}`).slice(0, 80),
+    role: roleBits !== '' ? roleBits : String(r['type'] ?? ''),
+    model: String(r['model'] ?? ''), duration: fmtDur(r['elapsedMs']),
+    state: st.lamp, badgeText: st.label, metrics,
+    targetPrompt: String(r['item'] ?? ''),
+    logs: r['error'] != null ? [String(r['error'])] : [],
+    defaultOpen: r['status'] === 'failed',
+  };
+}
 
 export const LineageView: React.FC = () => {
   const [tab, setTab] = useState<'live' | 'history'>('live');
+  const telemetry = useSyncExternalStore(telemetryStore.subscribe, telemetryStore.getSnapshot);
+  const realBatches: RealBatch[] = (telemetry.progress?.calls ?? []).map((c) => ({
+    callId: String(c['callId'] ?? ''), description: String(c['description'] ?? '批次'),
+    kind: String(c['kind'] ?? 'swarm'),
+    rows: Array.isArray(c['rows']) ? c['rows'] as Record<string, unknown>[] : [],
+  }));
+  const anyRunning = realBatches.some((b) => b.rows.some((r) => r['status'] === 'running'));
+  if (tab === 'live' && telemetry.at > 0) {
+    // 真后端在:渲染真实谱系(空=诚实空态),mock 只留给无后端 demo
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <h2 style={{ fontSize: '16px', fontWeight: 800 }}>智能体任务谱系与血缘拓扑 (Lineage)</h2>
+            <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
+              数据源: <code>/api/swarm/progress</code> · 10s 轮询 · 全局 2400ms 锁相
+            </p>
+          </div>
+          <SegmentedControl value={tab} onChange={setTab} options={[
+            { value: 'live', label: `⚡ 实时活跃谱系 (${realBatches.length} 批次)` },
+            { value: 'history', label: '📜 跨重启历史档案' },
+          ]} />
+        </div>
+        {anyRunning && <SymMonitor bpm={25.0} periodMs={2400} driftMs={0.1} />}
+        {realBatches.length === 0 && (
+          <div style={{ padding: '48px 24px', textAlign: 'center', border: '1px dashed var(--border-subtle)', borderRadius: '12px', color: 'var(--text-tertiary)' }}>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '8px' }}>谱系待机</div>
+            <div style={{ fontSize: '12.5px' }}>最近 10 分钟没有 swarm / civ / fleet / delegate 派单。发起一个批次,血缘拓扑会在这里生长。</div>
+          </div>
+        )}
+        {realBatches.map((b) => {
+          const done = b.rows.filter((r) => r['status'] === 'completed').length;
+          const pct = b.rows.length > 0 ? Math.round((done / b.rows.length) * 100) : 0;
+          return (
+            <LineageJobTree key={b.callId}
+              batchId={b.callId.startsWith('host:') ? 'HOST 派单' : b.callId.slice(-8)}
+              title={b.description.slice(0, 80)} categoryTag={b.kind}
+              completedSummary={`${done}/${b.rows.length} 完成 (${pct}%)`} duration=""
+              isRunningBranch={b.rows.some((r) => r['status'] === 'running')}
+              jobs={b.rows.map(toJob)} />
+          );
+        })}
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>

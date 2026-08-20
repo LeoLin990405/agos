@@ -13,6 +13,7 @@ import { SessionsView } from '@/components/console/SessionsView';
 import { LineageView } from '@/components/console/LineageView';
 import { PlansView } from '@/components/console/PlansView';
 import { SkillsView } from '@/components/console/SkillsView';
+import { RealOverview, useConsoleLive } from '@/pages/console-live';
 
 export type ConsoleTab = 'overview' | 'fleet' | 'sessions' | 'lineage' | 'plans' | 'skills';
 
@@ -29,6 +30,7 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<ConsoleTab>(initialTab);
   const [densityMode, setDensityMode] = useState<'dense' | 'sparse'>('dense');
+  const consoleLive = useConsoleLive();
 
   return (
     <div style={{ display: 'flex', flex: 1, height: '100vh', overflow: 'hidden' }}>
@@ -129,7 +131,10 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
           {activeTab === 'plans' && <PlansView />}
           {activeTab === 'skills' && <SkillsView />}
 
-          {activeTab === 'overview' && (
+          {activeTab === 'overview' && consoleLive.live && densityMode === 'dense' && (
+            <RealOverview live={consoleLive} onNavigateChat={onNavigateChat} onNavigateLineage={() => setActiveTab('lineage')} />
+          )}
+          {activeTab === 'overview' && !(consoleLive.live && densityMode === 'dense') && (
             densityMode === 'dense' ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '26px' }}>
                 {/* 1. Hero KPI 遥测矩阵 */}
