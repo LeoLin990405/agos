@@ -64,6 +64,7 @@ export const AppRail: React.FC<AppRailProps> = ({
         type="button"
         className={`rail-btn ${currentTab === 'chat' ? 'is-active' : ''}`}
         title="对话流 (Chat)"
+        aria-label="对话流"
         onClick={() => onSelectTab('chat')}
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
@@ -76,6 +77,7 @@ export const AppRail: React.FC<AppRailProps> = ({
         type="button"
         className={`rail-btn ${currentTab === 'console' ? 'is-active' : ''}`}
         title="控制台 (Console - 概览·机器·会话·谱系·计划·技能)"
+        aria-label="控制台"
         onClick={() => onSelectTab('console')}
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
@@ -90,6 +92,7 @@ export const AppRail: React.FC<AppRailProps> = ({
         type="button"
         className={`rail-btn ${currentTab === 'graph' ? 'is-active' : ''}`}
         title="记忆星图 (Memory Graph)"
+        aria-label="记忆星图"
         onClick={() => onSelectTab('graph')}
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
@@ -110,6 +113,7 @@ export const AppRail: React.FC<AppRailProps> = ({
           className="rail-btn"
           onClick={toggleTheme}
           title="切换深浅主题"
+        aria-label="切换深浅主题"
         >
           {theme === 'dark' ? (
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg>
@@ -124,6 +128,7 @@ export const AppRail: React.FC<AppRailProps> = ({
           type="button"
           className={`rail-btn ${currentTab === 'settings' ? 'is-active' : ''}`}
           title="系统设置 (Settings - 特权面)"
+        aria-label="系统设置"
           onClick={() => onSelectTab('settings')}
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
