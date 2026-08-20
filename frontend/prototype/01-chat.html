@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgOS 对话甲板 | Chat Telemetry</title>
+  <link rel="stylesheet" href="css/agos-tokens.css">
+  <link rel="stylesheet" href="css/agos-layout.css">
+  <link rel="stylesheet" href="css/agos-deck.css">
+  <style>
+    /* 对话页特化布局 */
+    .chat-layout-stage {
+      display: flex;
+      flex: 1;
+      height: 100vh;
+      overflow: hidden;
+    }
+    
+    /* 会话侧栏 */
+    .session-sidebar {
+      width: 290px;
+      flex: none;
+      background-color: var(--bg-layer-1);
+      border-right: 1px solid var(--border-dim);
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.02);
+    }
+    
+    .session-sidebar-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border-dim);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    
+    .session-search-box {
+      display: flex;
+      align-items: center;
+      background-color: var(--bg-layer-2);
+      border: 1px solid var(--border-subtle);
+      border-radius: 7px;
+      padding: 6px 12px;
+      gap: 8px;
+      box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
+    }
+    
+    .session-search-input {
+      background: transparent;
+      border: none;
+      color: var(--text-primary);
+      font-size: 12px;
+      width: 100%;
+      outline: none;
+      font-family: var(--font-sans);
+    }
+    
+    .session-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    
+    .session-item {
+      padding: 12px 14px;
+      border-radius: 8px;
+      background-color: transparent;
+      border: 1px solid transparent;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      transition: background-color var(--u-dur-tick) ease, border-color var(--u-dur-tick) ease;
+    }
+    
+    .session-item:hover {
+      background-color: var(--bg-layer-2);
+      border-color: var(--border-dim);
+    }
+    
+    .session-item.is-active {
+      background-color: var(--bg-layer-2);
+      border-color: var(--border-subtle);
+      box-shadow: inset 2.5px 0 0 var(--state-running), var(--shadow-card);
+    }
+    
+    .session-item-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    
+    .session-item-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: -0.015em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    
+    .session-item-preview {
+      font-size: 11.5px;
+      color: var(--text-tertiary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    
+    .session-item-bottom {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 10.5px;
+      color: var(--text-tertiary);
+    }
+  </style>
+</head>
+<body class="u-grid-bg">
+
+  <div class="app-container">
+    <!-- 1. 全局导航 Rail (极速换乘) -->
+    <aside class="app-rail">
+      <a href="index.html" class="app-rail-logo" title="AgOS 遥测甲板">AG</a>
+      
+      <a href="01-chat.html" class="rail-btn is-active" title="对话流 (当前)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span class="rail-badge rail-badge--running">1</span>
+      </a>
+
+      <a href="02-console.html" class="rail-btn" title="控制台概览">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+      </a>
+
+      <a href="03-lineage.html" class="rail-btn" title="智能体谱系">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+      </a>
+
+      <div class="rail-spacer"></div>
+
+      <button class="rail-btn" data-action="toggle-theme" title="切换深浅主题">
+        <span data-theme-icon>🌙</span>
+      </button>
+
+      <a href="index.html" class="rail-btn" title="设计系统概览">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+      </a>
+    </aside>
+
+    <!-- 2. 对话工作台主体 (侧栏 + 对话舞台) -->
+    <div class="chat-layout-stage">
+      
+      <!-- 会话历史侧栏 -->
+      <aside class="session-sidebar">
+        <div class="session-sidebar-header">
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <span class="u-microlabel">会话矩阵 (24)</span>
+            <button class="btn btn-primary btn-sm" style="padding:0 10px;gap:4px;">
+              <span style="font-size:14px;line-height:1;">+</span><span>新建会话</span>
+            </button>
+          </div>
+          <div class="session-search-box">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-tertiary);"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            <input type="text" class="session-search-input" placeholder="搜索历史会话 / 标签...">
+          </div>
+        </div>
+
+        <div class="session-list">
+          <!-- Active Session (处理中) -->
+          <div class="session-item is-active">
+            <div class="session-item-top">
+              <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+                <span class="u-dot u-dot--running"></span>
+                <span class="session-item-title">分布式认证令牌轮转与流式事件管道重构</span>
+              </div>
+              <span class="u-chip u-chip--amber">P0</span>
+            </div>
+            <div class="session-item-preview">8 节点 Swarm 编队审计中: Redis Failover 模拟中...</div>
+            <div class="session-item-bottom">
+              <span class="u-num">8 条消息 · 38.4k tok</span>
+              <span class="u-num" style="color:var(--state-running);font-weight:600;">刚刚</span>
+            </div>
+          </div>
+
+          <!-- Done Session -->
+          <div class="session-item">
+            <div class="session-item-top">
+              <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+                <span class="u-dot u-dot--done"></span>
+                <span class="session-item-title">PostgreSQL DataConnect 模式迁移回归</span>
+              </div>
+              <span class="u-chip">DB</span>
+            </div>
+            <div class="session-item-preview">数据表迁移脚本已执行完毕，0 冲突</div>
+            <div class="session-item-bottom">
+              <span class="u-num">14 条消息 · 52.1k tok</span>
+              <span class="u-num">1小时前</span>
+            </div>
+          </div>
+
+          <!-- Failed/Alert Session -->
+          <div class="session-item">
+            <div class="session-item-top">
+              <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+                <span class="u-dot u-dot--failed"></span>
+                <span class="session-item-title">Seccomp 宿主内核隔离逃逸巡检</span>
+              </div>
+              <span class="u-chip" style="color:var(--state-failed);border-color:var(--state-failed-border);">SEC</span>
+            </div>
+            <div class="session-item-preview">[E4012] 进程被内核 seccomp 截获，已阻断</div>
+            <div class="session-item-bottom">
+              <span class="u-num">22 条消息 · 84.0k tok</span>
+              <span class="u-num">3小时前</span>
+            </div>
+          </div>
+
+          <!-- Done Session -->
+          <div class="session-item">
+            <div class="session-item-top">
+              <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+                <span class="u-dot u-dot--done"></span>
+                <span class="session-item-title">AgOS 遥测甲板设计系统 Token 提取</span>
+              </div>
+              <span class="u-chip u-chip--purple">UI</span>
+            </div>
+            <div class="session-item-preview">已产出 CSS Token 与共息心跳规范</div>
+            <div class="session-item-bottom">
+              <span class="u-num">5 条消息 · 19.8k tok</span>
+              <span class="u-num">昨天</span>
+            </div>
+          </div>
+
+          <!-- Queued Session -->
+          <div class="session-item">
+            <div class="session-item-top">
+              <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+                <span class="u-dot u-dot--queued"></span>
+                <span class="session-item-title">WebSocket 事件多路复用连接池压测</span>
+              </div>
+              <span class="u-chip">NET</span>
+            </div>
+            <div class="session-item-preview">等待前序 CI 编译产物就绪...</div>
+            <div class="session-item-bottom">
+              <span class="u-num">18 条消息 · 41.2k tok</span>
+              <span class="u-num">2天前</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- 3. 对话舞台 Stage -->
+      <main class="app-stage">
+        <!-- 顶栏遥测指示 -->
+        <header class="app-topbar">
+          <div class="topbar-left">
+            <span class="u-dot u-dot--running"></span>
+            <div class="topbar-title-wrap">
+              <h1 class="topbar-title">分布式认证令牌轮转与流式事件管道重构</h1>
+              <span class="u-chip u-chip.is-on">DeepSeek-V3 · 671B</span>
+            </div>
+          </div>
+
+          <div class="topbar-right">
+            <div class="telemetry-pill">
+              <span class="u-microlabel">上下文水位</span>
+              <span class="val u-num">38.4k / 128k</span>
+              <span class="u-num" style="color:var(--accent-cyan);">(30%)</span>
+            </div>
+
+            <div class="telemetry-pill">
+              <span class="u-microlabel">延时 P95</span>
+              <span class="val u-num">240ms</span>
+            </div>
+
+            <div class="telemetry-pill">
+              <span class="u-microlabel">RPC 管道</span>
+              <span class="val" style="color:var(--state-done);font-size:10.5px;">● ONLINE WS 426</span>
+            </div>
+
+            <button class="btn btn-ghost btn-sm" title="导出 JSON 轨迹">导出</button>
+            <a href="02-console.html" class="btn btn-primary btn-sm" style="text-decoration:none;">控制台概览</a>
+          </div>
+        </header>
+
+        <!-- 消息流动展示区 -->
+        <div class="chat-scroll-view">
+          
+          <!-- 消息 1: 用户 Prompt -->
+          <div class="message-wrap">
+            <div class="message-user">
+              <div class="message-user-header">
+                <span style="font-weight:700;font-size:12.5px;">Leo (Architect)</span>
+                <span class="u-num" style="font-size:11px;color:var(--text-tertiary);">18:42:10</span>
+              </div>
+              <div style="font-size:13.5px;line-height:1.6;">
+                请对 <code>auth-matrix</code> 模块执行深度安全审计与高并发回归。需要拉起 8 节点并发 Swarm 编队，覆盖 Token 重放、内存竞争、Redis Failover 及沙箱边界。最后将修复后的令牌轮转配置写入受保护环境。
+              </div>
+              <div class="user-attachments">
+                <span class="u-chip">📎 auth_matrix.go:L1-84</span>
+                <span class="u-chip">📎 jwt_verifier.rs</span>
+                <span class="u-chip">📎 cluster-prod.yaml</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 消息 2: 助手回复 + 思考链 + 工具卡 + Swarm 卡 + 审批面板 -->
+          <div class="message-wrap">
+            <div class="message-assistant">
+              
+              <!-- 助手元信息 -->
+              <div class="assistant-meta">
+                <span style="font-weight:700;color:var(--state-running);font-size:12px;">AgOS Core Agent</span>
+                <span>·</span>
+                <span class="u-num">耗时 4.2s</span>
+                <span>·</span>
+                <span class="u-chip u-chip--purple">Swarm Orchestrator</span>
+              </div>
+
+              <!-- 思考链 CoT -->
+              <div class="cot-block">
+                <div class="cot-header">
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span class="cot-toggle-icon">▾</span>
+                    <span>思考过程: 耗时 3.4s · 深度安全契约与拓扑分析</span>
+                  </div>
+                  <span class="u-num" style="font-size:11px;color:var(--text-tertiary);">1,420 tokens</span>
+                </div>
+                <div class="cot-content">
+                  1. 分析了 <code>auth_matrix.go</code> 中的令牌刷新锁机制，发现并发更新时存在 18ms 的时间窗未加分布式互斥锁。<br>
+                  2. 规划 8 节点并发 Swarm 编队 (#BATCH-8402)，分别派遣给独立的特化子代理进行 Fuzzing 和故障演练。<br>
+                  3. 检测到最终步骤涉及 <code>/etc/agos/secrets.env</code> 写入，触发特权审批拦截策略。
+                </div>
+              </div>
+
+              <!-- 正文 Markdown -->
+              <div style="font-size:13.5px;line-height:1.6;color:var(--text-primary);">
+                已为您编排 8 节点并发审计编队 <strong>#BATCH-8402</strong>。在启动 Swarm 前，已在本地隔离容器中通过基础单元测试，以下为测试回执与代码补丁：
+              </div>
+
+              <!-- 工具卡 1: Generic Bash Tool Card (Mac Window Controls) -->
+              <div class="terminal-card">
+                <div class="terminal-header">
+                  <div class="terminal-controls">
+                    <span class="terminal-dot terminal-dot--red"></span>
+                    <span class="terminal-dot terminal-dot--yellow"></span>
+                    <span class="terminal-dot terminal-dot--green"></span>
+                  </div>
+                  <div class="terminal-header-title">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                    <span>bash_exec: cargo test --package auth-matrix --lib</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:10px;">
+                    <span class="u-num" style="color:var(--text-tertiary);">1.2s</span>
+                    <span class="terminal-badge-ok u-num">EXIT 0</span>
+                  </div>
+                </div>
+                <div class="terminal-body">
+                  <div class="terminal-cmd">$ cargo test --package auth-matrix --lib</div>
+                  <div class="terminal-output">running 18 tests
+test token::tests::test_jwt_signature_verify ... ok
+test token::tests::test_refresh_token_rotation ... ok
+test matrix::tests::test_acl_permission_grant ... ok
+test session::tests::test_store_concurrency ... ok
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.18s</div>
+                </div>
+              </div>
+
+              <!-- 工具卡 2: File Diff Card -->
+              <div class="diff-card">
+                <div class="diff-header">
+                  <div style="display:flex;align-items:center;gap:8px;font-weight:600;color:var(--text-secondary);">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    <span>replace_file_content: pkg/auth/token_rotator.rs</span>
+                  </div>
+                  <span class="u-num" style="color:var(--text-tertiary);font-size:11px;">+4 / -2 行</span>
+                </div>
+                <div class="diff-lines">
+                  <div class="diff-line diff-line--ctx"><span> 42 </span><span>    let current_token = self.store.get_token(session_id).await?;</span></div>
+                  <div class="diff-line diff-line--del"><span>-43 </span><span>    if current_token.is_expired() {</span></div>
+                  <div class="diff-line diff-line--del"><span>-44 </span><span>        return self.issue_new_token(session_id).await;</span></div>
+                  <div class="diff-line diff-line--add"><span>+43 </span><span>    // 加分布式互斥租约，消除 18ms 并发竞争窗</span></div>
+                  <div class="diff-line diff-line--add"><span>+44 </span><span>    let _lease = self.lock_manager.acquire_lease(session_id, Duration::from_millis(500)).await?;</span></div>
+                  <div class="diff-line diff-line--add"><span>+45 </span><span>    if current_token.is_expired() {</span></div>
+                  <div class="diff-line diff-line--add"><span>+46 </span><span>        return self.issue_new_token_atomic(session_id, _lease).await;</span></div>
+                  <div class="diff-line diff-line--ctx"><span> 47 </span><span>    }</span></div>
+                </div>
+              </div>
+
+              <!-- 工具卡 3: Swarm 批次卡 (一等公民，含 8 行四态完整展现) -->
+              <div class="u-swarm-card is-running">
+                <div class="u-swarm-header">
+                  <div class="u-swarm-title-wrap">
+                    <span class="u-dot u-dot--running"></span>
+                    <span class="u-swarm-title">Swarm 批次任务 #BATCH-8402: 8 节点并发安全巡检与契约回归</span>
+                  </div>
+                  <div class="u-swarm-stats">
+                    <span class="u-num" style="font-weight:800;color:var(--state-running);font-size:13px;">5 / 8</span>
+                    <span style="color:var(--text-tertiary);">完成 (62.5%)</span>
+                  </div>
+                </div>
+
+                <!-- 分段刻度进度条 + 运行态流光 -->
+                <div class="u-swarm-bar-wrap">
+                  <div class="u-swarm-bar">
+                    <div class="u-swarm-fill" style="--u-p: 0.625;"></div>
+                  </div>
+                </div>
+
+                <!-- 8 行四态子代理清单 -->
+                <div class="u-swarm-list">
+                  <!-- Row 1: Done -->
+                  <div class="u-swarm-row">
+                    <span class="u-swarm-idx u-num">01</span>
+                    <span class="u-dot u-dot--done"></span>
+                    <span class="u-swarm-name">auth-crypto-auditor</span>
+                    <span class="u-chip">🎭⤴ 审计</span>
+                    <span class="u-chip">Claude-3.5</span>
+                    <span class="u-swarm-time u-num">1.2s</span>
+                    <span class="u-swarm-state-text state--done">已完成</span>
+                  </div>
+
+                  <!-- Row 2: Done -->
+                  <div class="u-swarm-row">
+                    <span class="u-swarm-idx u-num">02</span>
+                    <span class="u-dot u-dot--done"></span>
+                    <span class="u-swarm-name">token-replay-verifier</span>
+                    <span class="u-chip">🎭⛓ 重放</span>
+                    <span class="u-chip">Qwen-2.5</span>
+                    <span class="u-swarm-time u-num">2.4s</span>
+                    <span class="u-swarm-state-text state--done">已完成</span>
+                  </div>
+
+                  <!-- Row 3: Done -->
+                  <div class="u-swarm-row">
+                    <span class="u-swarm-idx u-num">03</span>
+                    <span class="u-dot u-dot--done"></span>
+                    <span class="u-swarm-name">session-store-race-check</span>
+                    <span class="u-chip">🎭⤴ 竞争</span>
+                    <span class="u-chip">DeepSeek</span>
+                    <span class="u-swarm-time u-num">3.1s</span>
+                    <span class="u-swarm-state-text state--done">已完成</span>
+                  </div>
+
+                  <!-- Row 4: Done -->
+                  <div class="u-swarm-row">
+                    <span class="u-swarm-idx u-num">04</span>
+                    <span class="u-dot u-dot--done"></span>
+                    <span class="u-swarm-name">event-mux-benchmark</span>
+                    <span class="u-chip">🎭 基准</span>
+                    <span class="u-chip">Local-7B</span>
+                    <span class="u-swarm-time u-num">4.5s</span>
+                    <span class="u-swarm-state-text state--done">已完成</span>
+                  </div>
+
+                  <!-- Row 5: Done -->
+                  <div class="u-swarm-row">
+                    <span class="u-swarm-idx u-num">05</span>
+                    <span class="u-dot u-dot--done"></span>
+                    <span class="u-swarm-name">jwt-leak-fuzzer</span>
+                    <span class="u-chip">🎭⤴ 模糊</span>
+                    <span class="u-chip">Claude-3.5</span>
+                    <span class="u-swarm-time u-num">5.2s</span>
+                    <span class="u-swarm-state-text state--done">已完成</span>
+                  </div>
+
+                  <!-- Row 6: Running (共息同频心跳) -->
+                  <div class="u-swarm-row" style="background-color:var(--state-running-bg);">
+                    <span class="u-swarm-idx u-num">06</span>
+                    <span class="u-dot u-dot--running"></span>
+                    <span class="u-swarm-name" style="color:var(--state-running);font-weight:700;">redis-cluster-failover</span>
+                    <span class="u-chip is-on">🎭⛓ 演练</span>
+                    <span class="u-chip is-on">DeepSeek</span>
+                    <span class="u-swarm-time u-num" style="color:var(--state-running);font-weight:600;">12.8s</span>
+                    <span class="u-swarm-state-text state--running">处理中</span>
+                  </div>
+
+                  <!-- Row 7: Queued -->
+                  <div class="u-swarm-row">
+                    <span class="u-swarm-idx u-num">07</span>
+                    <span class="u-dot u-dot--queued"></span>
+                    <span class="u-swarm-name" style="opacity:0.6;">tls-handshake-loadtest</span>
+                    <span class="u-chip">🎭 压测</span>
+                    <span class="u-chip">Qwen-2.5</span>
+                    <span class="u-swarm-time u-num">--</span>
+                    <span class="u-swarm-state-text state--queued">等待中</span>
+                  </div>
+
+                  <!-- Row 8: Failed (静态血红，无闪烁) -->
+                  <div class="u-swarm-row" style="background-color:var(--state-failed-bg);">
+                    <span class="u-swarm-idx u-num">08</span>
+                    <span class="u-dot u-dot--failed"></span>
+                    <span class="u-swarm-name" style="color:var(--state-failed);font-weight:700;">sandbox-escape-probe</span>
+                    <span class="u-chip" style="color:var(--state-failed);border-color:var(--state-failed-border);">🎭⛓ 探针</span>
+                    <span class="u-chip">DeepSeek</span>
+                    <span class="u-swarm-time u-num" style="color:var(--state-failed);font-weight:600;">8.9s</span>
+                    <span class="u-swarm-state-text state--failed">未成功</span>
+                  </div>
+                </div>
+
+                <!-- CivStrip 治理统计底条 -->
+                <div class="u-civstrip">
+                  <div class="u-civ-metric is-pass">
+                    <span class="u-microlabel">安全巡检通过:</span>
+                    <span class="val u-num">7/8</span>
+                  </div>
+                  <div class="u-civ-metric is-veto">
+                    <span class="u-microlabel">策略否决:</span>
+                    <span class="val u-num">1</span>
+                  </div>
+                  <div class="u-civ-metric" style="color:var(--accent-amber);">
+                    <span class="u-microlabel">晋升门:</span>
+                    <span class="val">⚠️ 阻塞 (等待特权授权)</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 特权审批面板 (一等公民) -->
+              <div class="approval-panel">
+                <div class="approval-header">
+                  <div class="approval-title-wrap">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                    <span>特权操作审批请求: 写入受保护生产配置</span>
+                  </div>
+                  <span class="badge" style="background-color:rgba(245, 158, 11, 0.15);color:var(--accent-amber);border:1px solid rgba(245, 158, 11, 0.35);">LEVEL 4 · 高风险</span>
+                </div>
+
+                <div class="approval-body">
+                  <div style="color:var(--text-secondary);margin-bottom:4px;">$ write_to_file -> /etc/agos/secrets.env</div>
+                  <div style="color:var(--accent-cyan);">+ AGOS_AUTH_MUTEX_LEASE_MS=500</div>
+                  <div style="color:var(--accent-cyan);">+ AGOS_REDIS_FAILOVER_CLUSTER_NODES="10.0.4.11:6379,10.0.4.12:6379"</div>
+                </div>
+
+                <div class="approval-actions">
+                  <button class="btn btn-success btn-sm" data-approval-action="allow">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                    <span>允许单次执行</span>
+                  </button>
+                  <button class="btn btn-secondary btn-sm" data-approval-action="always-allow">
+                    <span>本会话永久信任</span>
+                  </button>
+                  <button class="btn btn-danger btn-sm" data-approval-action="reject">
+                    <span>拒绝并中止</span>
+                  </button>
+                  <span class="u-num" style="margin-left:auto;font-size:11px;color:var(--text-tertiary);">超时自动拒绝: 4m 58s</span>
+                </div>
+              </div>
+
+              <!-- 流式生成中展示 -->
+              <div style="display:flex;align-items:center;gap:12px;margin-top:6px;padding:10px 14px;background-color:var(--bg-layer-2);border-radius:8px;border:1px solid var(--border-subtle);box-shadow:var(--shadow-card);">
+                <div class="stream-live-indicator">
+                  <span class="u-dot u-dot--running"></span>
+                  <span style="font-weight:600;">正在汇聚 Redis Failover 遥测探针与内核阻断日志...</span>
+                  <span class="stream-cursor"></span>
+                </div>
+                <div style="margin-left:auto;display:flex;align-items:center;gap:10px;">
+                  <span class="u-num" style="font-size:11px;color:var(--text-tertiary);">74.2 tok/s · 18.4s</span>
+                  <button class="btn btn-danger btn-sm" style="height:22px;padding:0 8px;">中止</button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+        </div>
+
+        <!-- 4. 底部输入甲板 (Command Deck Input) -->
+        <footer class="chat-input-deck">
+          <div class="input-box-container">
+            <textarea class="chat-textarea" placeholder="输入需求、执行指令，或使用 / 唤起工具与技能..."></textarea>
+            
+            <div class="input-deck-footer">
+              <div class="input-deck-tools">
+                <button class="btn btn-ghost btn-sm" title="添加附件或代码上下文">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                  <span>附加文件</span>
+                </button>
+                <button class="btn btn-ghost btn-sm" title="启用 Swarm 多代理并发">
+                  <span class="u-dot u-dot--running" style="width:6px;height:6px;"></span>
+                  <span>Swarm 模式 (开)</span>
+                </button>
+                <span class="u-chip">DeepSeek-V3</span>
+              </div>
+
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span class="kbd">⌘ + ↵</span>
+                <button class="btn btn-primary btn-sm" style="padding:0 16px;">
+                  <span>发送</span>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </footer>
+
+      </main>
+    </div>
+  </div>
+
+  <script src="js/agos-core.js"></script>
+</body>
+</html>

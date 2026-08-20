@@ -3,14 +3,16 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "lib": ["ES2022", "DOM"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
     "strict": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "verbatimModuleSyntax": true,
+    "verbatimModuleSyntax": false,
     "skipLibCheck": true,
     "types": ["node"],
     "paths": {
+      "@/*": ["./src/*"],
       "@deepseek-ai/dsh-brand": ["./src/contract/shims/brand.ts"],
       "@deepseek-ai/dsh-llm": ["./src/contract/shims/llm.ts"],
       "@deepseek-ai/dsh-llm/brand": ["./src/contract/shims/llm-brand.ts"],
@@ -24,5 +26,5 @@
       "@deepseek-ai/dsh-user-questions/types": ["./src/contract/shims/user-questions-types.ts"]
     }
   },
-  "include": ["src/**/*.ts", "scripts/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "scripts/**/*.ts", "vite.config.ts"]
 }

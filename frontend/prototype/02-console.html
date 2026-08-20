@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgOS 控制台概览 | Console Telemetry Deck</title>
+  <link rel="stylesheet" href="css/agos-tokens.css">
+  <link rel="stylesheet" href="css/agos-layout.css">
+  <link rel="stylesheet" href="css/agos-deck.css">
+  <style>
+    /* 控制台特化布局 */
+    .console-stage {
+      display: flex;
+      flex: 1;
+      height: 100vh;
+      overflow: hidden;
+    }
+    
+    /* 内部导航 Rail */
+    .console-nav-rail {
+      width: 210px;
+      flex: none;
+      background-color: var(--bg-layer-1);
+      border-right: 1px solid var(--border-dim);
+      display: flex;
+      flex-direction: column;
+      padding: 16px 12px;
+      gap: 5px;
+      box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.02);
+    }
+    
+    .console-nav-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 9px 12px;
+      border-radius: 7px;
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 12.5px;
+      font-weight: 500;
+      transition: background-color var(--u-dur-tick) ease, color var(--u-dur-tick) ease;
+    }
+    
+    .console-nav-item:hover {
+      background-color: var(--bg-layer-2);
+      color: var(--text-primary);
+    }
+    
+    .console-nav-item.is-active {
+      background-color: var(--state-running-bg);
+      color: var(--state-running);
+      font-weight: 600;
+      box-shadow: inset 0 1px 0 rgba(0, 166, 255, 0.15);
+    }
+    
+    .console-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 28px 36px 64px 36px;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    /* 高密度数据表格 */
+    .telemetry-table-wrap {
+      background-color: var(--bg-layer-2);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: var(--shadow-card);
+    }
+    
+    .telemetry-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      text-align: left;
+    }
+    
+    .telemetry-table th {
+      background-color: var(--bg-layer-1);
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--text-tertiary);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    
+    .telemetry-table td {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-dim);
+      color: var(--text-primary);
+    }
+    
+    .telemetry-table tbody tr:hover {
+      background-color: var(--bg-layer-3);
+    }
+
+    /* 机架机房矩阵 (Fleet Blade Rack) */
+    .fleet-rack-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 14px;
+    }
+    
+    .fleet-rack-card {
+      background-color: var(--bg-layer-2);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      box-shadow: var(--shadow-card);
+    }
+
+    /* 冷启就绪卡片 */
+    .readiness-card {
+      background-color: var(--bg-layer-2);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      box-shadow: var(--shadow-card);
+    }
+
+    .readiness-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      background-color: var(--bg-layer-1);
+      border: 1px solid var(--border-dim);
+      border-radius: 7px;
+    }
+  </style>
+</head>
+<body class="u-grid-bg">
+
+  <div class="app-container">
+    <!-- 1. 全局导航 Rail -->
+    <aside class="app-rail">
+      <a href="index.html" class="app-rail-logo" title="AgOS 遥测甲板">AG</a>
+      
+      <a href="01-chat.html" class="rail-btn" title="对话流">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      </a>
+
+      <a href="02-console.html" class="rail-btn is-active" title="控制台概览 (当前)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+        <span class="rail-badge rail-badge--alert">1</span>
+      </a>
+
+      <a href="03-lineage.html" class="rail-btn" title="智能体谱系">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+      </a>
+
+      <div class="rail-spacer"></div>
+
+      <button class="rail-btn" data-action="toggle-theme" title="切换深浅主题">
+        <span data-theme-icon>🌙</span>
+      </button>
+
+      <a href="index.html" class="rail-btn" title="设计系统概览">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+      </a>
+    </aside>
+
+    <!-- 2. 控制台舞台 -->
+    <div class="console-stage">
+      
+      <!-- 控制台内部功能导航 -->
+      <nav class="console-nav-rail">
+        <div style="padding:4px 8px 10px 8px;" class="u-microlabel">控制台导航</div>
+        
+        <a href="#overview" class="console-nav-item is-active">
+          <span>📊 概览遥测</span>
+          <span class="u-dot u-dot--running" style="width:6px;height:6px;"></span>
+        </a>
+        <a href="#fleet" class="console-nav-item">
+          <span>🖥️ 机架与节点</span>
+          <span class="u-chip" style="height:16px;padding:0 4px;">4 节点</span>
+        </a>
+        <a href="#sessions" class="console-nav-item">
+          <span>💬 会话矩阵</span>
+          <span class="u-num" style="font-size:11px;">24</span>
+        </a>
+        <a href="03-lineage.html" class="console-nav-item">
+          <span>🧬 智能体谱系</span>
+          <span class="u-chip u-chip--purple" style="height:16px;padding:0 4px;">Swarm</span>
+        </a>
+        <a href="#plans" class="console-nav-item">
+          <span>📋 计划与目标</span>
+          <span class="u-num" style="font-size:11px;">3</span>
+        </a>
+        <a href="#skills" class="console-nav-item">
+          <span>🧩 技能注册表</span>
+          <span class="u-num" style="font-size:11px;">14/14</span>
+        </a>
+      </nav>
+
+      <!-- 控制台主展示区 -->
+      <main class="app-stage">
+        <!-- 顶栏与密度切换器 -->
+        <header class="app-topbar">
+          <div class="topbar-left">
+            <div class="topbar-title-wrap">
+              <span class="hero-title" style="font-size:14.5px;">AgOS 控制台概览</span>
+              <span class="u-chip">CLUSTER: ASIA-EAST-PROD-01</span>
+            </div>
+          </div>
+
+          <div class="topbar-right">
+            <!-- 满载 / 冷启双密度即时切换器 -->
+            <div class="segmented-control">
+              <button class="seg-item is-active" data-density-switch="dense">
+                <span>⚡ 满载生产模式 (Dense 42 节点)</span>
+              </button>
+              <button class="seg-item" data-density-switch="sparse">
+                <span>🌱 初始冷启模式 (Sparse 1 节点)</span>
+              </button>
+            </div>
+
+            <button class="btn btn-ghost btn-sm" data-action="toggle-theme">
+              <span data-theme-indicator>🌙 深色模式</span>
+            </button>
+          </div>
+        </header>
+
+        <!-- 页面滚动内容区 -->
+        <div class="console-body">
+          
+          <!-- =================================================================
+               视图 A: 满载生产模式 (Dense Mode - 42 节点高吞吐)
+               ================================================================= -->
+          <div id="view-dense-mode" style="display:flex;flex-direction:column;gap:26px;">
+            
+            <!-- 1. Hero KPI 遥测排印矩阵 (大字号排印时刻) -->
+            <section class="kpi-grid">
+              <!-- KPI 1: 活跃智能体 -->
+              <div class="u-kpi-card">
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                  <span class="u-microlabel">活跃智能体 / 批次</span>
+                  <span class="u-dot u-dot--running"></span>
+                </div>
+                <div class="u-kpi-val u-num">42 <span style="font-size:14px;color:var(--text-tertiary);font-weight:500;">/ 7 Swarms</span></div>
+                <div class="u-kpi-sub">
+                  <span class="trend-up u-num">+6 较上小时</span>
+                  <span class="u-num">峰值 64 并发</span>
+                </div>
+              </div>
+
+              <!-- KPI 2: 任务吞吐 -->
+              <div class="u-kpi-card">
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                  <span class="u-microlabel">批次任务吞吐</span>
+                  <span class="u-chip is-on" style="height:16px;">实时</span>
+                </div>
+                <div class="u-kpi-val u-num">1,840 <span style="font-size:14px;color:var(--text-tertiary);font-weight:500;">ops/m</span></div>
+                <div class="u-kpi-sub">
+                  <span class="trend-up u-num">+12.4% 环比</span>
+                  <span class="u-num">P95 240ms</span>
+                </div>
+              </div>
+
+              <!-- KPI 3: Token 消耗 -->
+              <div class="u-kpi-card">
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                  <span class="u-microlabel">今日 Token 吞吐</span>
+                  <span class="u-chip u-chip--purple" style="height:16px;">DeepSeek-V3</span>
+                </div>
+                <div class="u-kpi-val u-num">14.82 <span style="font-size:14px;color:var(--text-tertiary);font-weight:500;">M</span></div>
+                <div class="u-kpi-sub">
+                  <span class="u-num" style="color:var(--text-secondary);">预算使用 38.4%</span>
+                  <span class="u-num">配额充足</span>
+                </div>
+              </div>
+
+              <!-- KPI 4: 治理否决与拦截 -->
+              <div class="u-kpi-card">
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                  <span class="u-microlabel">安全拦截与否决</span>
+                  <span class="u-dot u-dot--failed"></span>
+                </div>
+                <div class="u-kpi-val u-num" style="color:var(--state-failed);">0.04% <span style="font-size:14px;color:var(--text-tertiary);font-weight:500;">(3次)</span></div>
+                <div class="u-kpi-sub">
+                  <span class="u-num" style="color:var(--state-failed);">1 次特权阻断待决</span>
+                  <span class="u-num">CivStrip 护航中</span>
+                </div>
+              </div>
+
+              <!-- KPI 5: P95 延时 -->
+              <div class="u-kpi-card">
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                  <span class="u-microlabel">端到端响应延时</span>
+                  <span class="u-chip" style="height:16px;">WebSocket</span>
+                </div>
+                <div class="u-kpi-val u-num">340 <span style="font-size:14px;color:var(--text-tertiary);font-weight:500;">ms</span></div>
+                <div class="u-kpi-sub">
+                  <span class="trend-up u-num">极速响应</span>
+                  <span class="u-num">0 重试</span>
+                </div>
+              </div>
+            </section>
+
+            <!-- 2. 注意力收件箱 (Attention Inbox - 聚焦异常与待决) -->
+            <section class="inbox-section">
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <span style="font-size:13.5px;font-weight:700;">注意力收件箱 (Attention Inbox)</span>
+                  <span class="badge badge--failed">3 待处理</span>
+                </div>
+                <span style="font-size:11px;color:var(--text-tertiary);">按优先级排序: 失败 > 待审批 > 异常波峰</span>
+              </div>
+
+              <div class="inbox-list">
+                <!-- Item 1: 错误阻断 (静态红线) -->
+                <div class="inbox-item inbox-item--error">
+                  <div style="display:flex;align-items:center;gap:12px;">
+                    <span class="u-dot u-dot--failed"></span>
+                    <div>
+                      <div style="font-weight:600;font-size:13px;color:var(--text-primary);">
+                        子代理沙箱越界拦截: <code>subagent-8402-sandbox-escape</code>
+                      </div>
+                      <div style="font-size:11.5px;color:var(--text-tertiary);margin-top:2px;">
+                        [E4012] 尝试访问宿主受限命名空间 <code>/sys/kernel/debug</code>，已被 seccomp 立即截获
+                      </div>
+                    </div>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span class="u-num" style="font-size:11px;color:var(--text-tertiary);">3分钟前</span>
+                    <a href="01-chat.html" class="btn btn-secondary btn-sm">定位会话</a>
+                  </div>
+                </div>
+
+                <!-- Item 2: 待审批 (琥珀色) -->
+                <div class="inbox-item inbox-item--warning">
+                  <div style="display:flex;align-items:center;gap:12px;">
+                    <span class="u-dot" style="background-color:var(--accent-amber);box-shadow:0 0 10px rgba(245,158,11,0.5);"></span>
+                    <div>
+                      <div style="font-weight:600;font-size:13px;color:var(--text-primary);">
+                        特权配置变更待授权: <code>write_to_file /etc/agos/secrets.env</code>
+                      </div>
+                      <div style="font-size:11.5px;color:var(--text-tertiary);margin-top:2px;">
+                        会话 #8402 申请更新 Redis 主从哨兵配置，涉及生产环境变量覆盖
+                      </div>
+                    </div>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span class="badge" style="background-color:rgba(245, 158, 11, 0.15);color:var(--accent-amber);">需人工批准</span>
+                    <a href="01-chat.html" class="btn btn-primary btn-sm">前往审批</a>
+                  </div>
+                </div>
+
+                <!-- Item 3: 运行中活跃 Swarm (共息呼吸蓝) -->
+                <div class="inbox-item inbox-item--running">
+                  <div style="display:flex;align-items:center;gap:12px;">
+                    <span class="u-dot u-dot--running"></span>
+                    <div>
+                      <div style="font-weight:600;font-size:13px;color:var(--text-primary);">
+                        Swarm 批次 #BATCH-8402 正在执行并发审计 (5/8 完成)
+                      </div>
+                      <div style="font-size:11.5px;color:var(--text-tertiary);margin-top:2px;">
+                        当前节点: <code>redis-cluster-failover</code> 正在重放主从切换压测
+                      </div>
+                    </div>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span class="u-num" style="font-size:11px;color:var(--state-running);font-weight:700;">12.8s 运行中</span>
+                    <a href="03-lineage.html" class="btn btn-secondary btn-sm">查看谱系</a>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- 3. 高密度会话矩阵 (High-Density Session Matrix) -->
+            <section style="display:flex;flex-direction:column;gap:12px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <span style="font-size:13.5px;font-weight:700;">活跃会话遥测矩阵</span>
+                <span class="u-num" style="font-size:11px;color:var(--text-tertiary);">实时排班表 · 共 24 条记录</span>
+              </div>
+
+              <div class="telemetry-table-wrap">
+                <table class="telemetry-table">
+                  <thead>
+                    <tr>
+                      <th style="width:40px;">状态</th>
+                      <th>会话主题 / 任务</th>
+                      <th style="width:140px;">主力模型</th>
+                      <th style="width:120px;" class="u-num">Token 水位</th>
+                      <th style="width:90px;" class="u-num">延时 P95</th>
+                      <th style="width:100px;">更新时间</th>
+                      <th style="width:80px;text-align:right;">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><span class="u-dot u-dot--running"></span></td>
+                      <td>
+                        <div style="font-weight:600;">分布式认证令牌轮转与流式事件管道重构</div>
+                        <div style="font-size:11px;color:var(--text-tertiary);">Swarm #BATCH-8402 8 节点并发执行中</div>
+                      </td>
+                      <td><span class="u-chip is-on">DeepSeek-V3</span></td>
+                      <td class="u-num" style="font-weight:700;color:var(--state-running);">38.4k (30%)</td>
+                      <td class="u-num">240ms</td>
+                      <td class="u-num">刚刚</td>
+                      <td style="text-align:right;"><a href="01-chat.html" class="btn btn-ghost btn-sm">接入</a></td>
+                    </tr>
+
+                    <tr>
+                      <td><span class="u-dot u-dot--done"></span></td>
+                      <td>
+                        <div style="font-weight:600;">PostgreSQL DataConnect 模式迁移回归</div>
+                        <div style="font-size:11px;color:var(--text-tertiary);">14 条迁移脚本全部验证通过，0 冲突</div>
+                      </td>
+                      <td><span class="u-chip">Claude-3.5</span></td>
+                      <td class="u-num">52.1k (41%)</td>
+                      <td class="u-num">310ms</td>
+                      <td class="u-num">1小时前</td>
+                      <td style="text-align:right;"><a href="01-chat.html" class="btn btn-ghost btn-sm">回放</a></td>
+                    </tr>
+
+                    <tr>
+                      <td><span class="u-dot u-dot--failed"></span></td>
+                      <td>
+                        <div style="font-weight:600;color:var(--state-failed);">Seccomp 宿主内核隔离逃逸巡检</div>
+                        <div style="font-size:11px;color:var(--state-failed);">[E4012] 宿主命名空间隔离拒绝，已记入审计</div>
+                      </td>
+                      <td><span class="u-chip">DeepSeek-V3</span></td>
+                      <td class="u-num">84.0k (65%)</td>
+                      <td class="u-num">420ms</td>
+                      <td class="u-num">3小时前</td>
+                      <td style="text-align:right;"><a href="01-chat.html" class="btn btn-ghost btn-sm">排查</a></td>
+                    </tr>
+
+                    <tr>
+                      <td><span class="u-dot u-dot--done"></span></td>
+                      <td>
+                        <div style="font-weight:600;">AgOS 遥测甲板设计系统 Token 提取</div>
+                        <div style="font-size:11px;color:var(--text-tertiary);">完成 6 个动效常量与深浅双模式 CSS 变量抽离</div>
+                      </td>
+                      <td><span class="u-chip u-chip--purple">Kimi-K1.5</span></td>
+                      <td class="u-num">19.8k (15%)</td>
+                      <td class="u-num">180ms</td>
+                      <td class="u-num">昨天</td>
+                      <td style="text-align:right;"><a href="01-chat.html" class="btn btn-ghost btn-sm">查看</a></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <!-- 4. 机房机架集群 (Fleet Server Blades) -->
+            <section style="display:flex;flex-direction:column;gap:12px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <span style="font-size:13.5px;font-weight:700;">物理机房机架阵列 (4 Nodes Active)</span>
+                <span class="u-chip" style="color:var(--state-done);border-color:var(--state-done-border);">100% HEALTHY</span>
+              </div>
+
+              <div class="fleet-rack-grid">
+                <div class="fleet-rack-card">
+                  <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <span style="font-weight:600;font-family:var(--font-mono);">BLADE-01 (Orchestrator)</span>
+                    <span class="u-dot u-dot--running"></span>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--text-tertiary);">
+                    <span>CPU: 42%</span>
+                    <span>MEM: 3.2G / 16G</span>
+                    <span class="u-num">P95: 12ms</span>
+                  </div>
+                </div>
+
+                <div class="fleet-rack-card">
+                  <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <span style="font-weight:600;font-family:var(--font-mono);">BLADE-02 (Swarm Worker Alpha)</span>
+                    <span class="u-dot u-dot--running"></span>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--text-tertiary);">
+                    <span>CPU: 78%</span>
+                    <span>MEM: 8.4G / 16G</span>
+                    <span class="u-num">P95: 18ms</span>
+                  </div>
+                </div>
+
+                <div class="fleet-rack-card">
+                  <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <span style="font-weight:600;font-family:var(--font-mono);">BLADE-03 (Swarm Worker Beta)</span>
+                    <span class="u-dot u-dot--done"></span>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--text-tertiary);">
+                    <span>CPU: 14% (Idle)</span>
+                    <span>MEM: 1.8G / 16G</span>
+                    <span class="u-num">P95: 8ms</span>
+                  </div>
+                </div>
+
+                <div class="fleet-rack-card">
+                  <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <span style="font-weight:600;font-family:var(--font-mono);">BLADE-04 (Sandbox Gateway)</span>
+                    <span class="u-dot u-dot--done"></span>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--text-tertiary);">
+                    <span>CPU: 22%</span>
+                    <span>MEM: 2.1G / 16G</span>
+                    <span class="u-num">P95: 6ms</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+          </div>
+
+          <!-- =================================================================
+               视图 B: 初始冷启模式 (Sparse Mode - 专门设计的就绪待机状态)
+               ================================================================= -->
+          <div id="view-sparse-mode" style="display:none;flex-direction:column;gap:26px;">
+            
+            <!-- 1. 冷启待机 KPI 矩阵 -->
+            <section class="kpi-grid">
+              <div class="u-kpi-card">
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                  <span class="u-microlabel">集群状态</span>
+                  <span class="u-dot u-dot--running"></span>
+                </div>
+                <div class="u-kpi-val u-num">待机就绪</div>
+                <div class="u-kpi-sub">
+                  <span style="color:var(--state-done);font-weight:600;">1 节点健康在线</span>
+                  <span class="u-num">0 活跃会话</span>
+                </div>
+              </div>
+
+              <div class="u-kpi-card">
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                  <span class="u-microlabel">MCP 技能注册表</span>
+                  <span class="u-chip is-on" style="height:16px;">100% 挂载</span>
+                </div>
+                <div class="u-kpi-val u-num">14 <span style="font-size:14px;color:var(--text-tertiary);font-weight:500;">/ 14 启用</span></div>
+                <div class="u-kpi-sub">
+                  <span>工具全域可用</span>
+                  <span class="u-num">0 挂起</span>
+                </div>
+              </div>
+
+              <div class="u-kpi-card">
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                  <span class="u-microlabel">本月消耗</span>
+                  <span class="u-chip">DeepSeek</span>
+                </div>
+                <div class="u-kpi-val u-num">0.12 <span style="font-size:14px;color:var(--text-tertiary);font-weight:500;">M Tokens</span></div>
+                <div class="u-kpi-sub">
+                  <span>预算余量 99.8%</span>
+                  <span class="u-num">费用极低</span>
+                </div>
+              </div>
+
+              <div class="u-kpi-card">
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                  <span class="u-microlabel">安全策略模式</span>
+                  <span class="u-chip u-chip--purple">CivStrip v2</span>
+                </div>
+                <div class="u-kpi-val u-num" style="color:var(--state-done);">严格防御</div>
+                <div class="u-kpi-sub">
+                  <span>特权写入需人工授权</span>
+                  <span class="u-num">0 越界</span>
+                </div>
+              </div>
+            </section>
+
+            <!-- 2. 系统健康就绪清单 (解决数据少时空旷无锚点的问题) -->
+            <section class="readiness-card">
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <div>
+                  <h2 style="font-size:14.5px;font-weight:700;">系统冷启环境巡检清单 (System Readiness)</h2>
+                  <p style="font-size:12px;color:var(--text-tertiary);margin-top:2px;">所有核心微内核、沙箱管道与 RPC 网关均已处于最佳工作状态。</p>
+                </div>
+                <span class="badge badge--done">ALL CHECKS PASSED</span>
+              </div>
+
+              <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:12px;">
+                <div class="readiness-item">
+                  <div style="display:flex;align-items:center;gap:10px;">
+                    <span class="u-dot u-dot--done"></span>
+                    <span style="font-weight:600;">Typert Gateway RPC (:3091)</span>
+                  </div>
+                  <span class="u-num" style="color:var(--state-done);font-size:11.5px;font-weight:600;">0.8ms 响应</span>
+                </div>
+
+                <div class="readiness-item">
+                  <div style="display:flex;align-items:center;gap:10px;">
+                    <span class="u-dot u-dot--done"></span>
+                    <span style="font-weight:600;">Seccomp 沙箱隔离层</span>
+                  </div>
+                  <span style="color:var(--state-done);font-size:11.5px;font-weight:600;">严格激活</span>
+                </div>
+
+                <div class="readiness-item">
+                  <div style="display:flex;align-items:center;gap:10px;">
+                    <span class="u-dot u-dot--done"></span>
+                    <span style="font-weight:600;">WebSocket 多路复用信道 (426 WS)</span>
+                  </div>
+                  <span style="color:var(--state-done);font-size:11.5px;font-weight:600;">全双工监听</span>
+                </div>
+
+                <div class="readiness-item">
+                  <div style="display:flex;align-items:center;gap:10px;">
+                    <span class="u-dot u-dot--done"></span>
+                    <span style="font-weight:600;">本地存储空间 (/var/lib/agos)</span>
+                  </div>
+                  <span class="u-num" style="color:var(--text-tertiary);font-size:11.5px;">1.2G / 50G (98% 空闲)</span>
+                </div>
+              </div>
+            </section>
+
+            <!-- 3. 快速启动建议卡片 (Quick Action Deck) -->
+            <section style="display:flex;flex-direction:column;gap:14px;">
+              <span style="font-size:13.5px;font-weight:700;">推荐初始工作流</span>
+
+              <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));gap:14px;">
+                <a href="01-chat.html" class="link-card fleet-rack-card" style="cursor:pointer;border-color:var(--border-bold);">
+                  <div style="display:flex;align-items:center;gap:8px;font-weight:700;color:var(--state-running);">
+                    <span>🚀 启动代码库架构安全巡检</span>
+                  </div>
+                  <div style="font-size:12px;color:var(--text-secondary);line-height:1.5;">
+                    一键拉起 8 节点并发 Swarm 编队，自动化审计 Token 刷新、并发竞争与沙箱边界。
+                  </div>
+                  <span class="btn btn-primary btn-sm" style="align-self:flex-start;margin-top:4px;">立即启动 →</span>
+                </a>
+
+                <a href="01-chat.html" class="link-card fleet-rack-card" style="cursor:pointer;">
+                  <div style="display:flex;align-items:center;gap:8px;font-weight:700;color:var(--text-primary);">
+                    <span>⚡ 创建通用代码重构会话</span>
+                  </div>
+                  <div style="font-size:12px;color:var(--text-secondary);line-height:1.5;">
+                    基于 DeepSeek-V3 / Claude 3.5 双模型混编，对指定目录进行模块化重构。
+                  </div>
+                  <span class="btn btn-secondary btn-sm" style="align-self:flex-start;margin-top:4px;">新建会话 →</span>
+                </a>
+
+                <a href="03-lineage.html" class="link-card fleet-rack-card" style="cursor:pointer;">
+                  <div style="display:flex;align-items:center;gap:8px;font-weight:700;color:var(--accent-purple);">
+                    <span>🧬 查看历史谱系与共息波形</span>
+                  </div>
+                  <div style="font-size:12px;color:var(--text-secondary);line-height:1.5;">
+                    进入智能体谱系甲板，观测全局 2400ms 锁相同步呼吸心跳与团队拓扑。
+                  </div>
+                  <span class="btn btn-secondary btn-sm" style="align-self:flex-start;margin-top:4px;">进入谱系 →</span>
+                </a>
+              </div>
+            </section>
+
+          </div>
+
+        </div>
+      </main>
+
+    </div>
+  </div>
+
+  <script src="js/agos-core.js"></script>
+</body>
+</html>

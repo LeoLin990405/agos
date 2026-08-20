@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgOS 前端静态原型总览 | Prototype Showcase</title>
+  <link rel="stylesheet" href="css/agos-tokens.css">
+  <link rel="stylesheet" href="css/agos-layout.css">
+  <link rel="stylesheet" href="css/agos-deck.css">
+  <style>
+    .index-stage {
+      flex: 1;
+      overflow-y: auto;
+      padding: 40px 56px 100px 56px;
+      display: flex;
+      flex-direction: column;
+      gap: 36px;
+      max-width: 1240px;
+      margin: 0 auto;
+    }
+
+    .hero-banner {
+      background: linear-gradient(135deg, rgba(0, 166, 255, 0.14) 0%, rgba(16, 185, 129, 0.08) 100%);
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      padding: 36px 40px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3), var(--shadow-card);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero-banner::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, #00a6ff 0%, #10b981 100%);
+    }
+
+    .portal-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 22px;
+    }
+
+    .portal-card {
+      background-color: var(--bg-layer-2);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 26px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      text-decoration: none;
+      color: inherit;
+      box-shadow: var(--shadow-card);
+      transition: transform var(--u-dur-fast) var(--u-ease-swift), border-color var(--u-dur-fast) ease, box-shadow var(--u-dur-fast) ease;
+    }
+
+    .portal-card:hover {
+      transform: translateY(-4px);
+      border-color: var(--state-running-border);
+      box-shadow: 0 12px 36px rgba(0, 166, 255, 0.2), var(--shadow-card);
+    }
+
+    .spec-block {
+      background-color: var(--bg-layer-2);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 26px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      box-shadow: var(--shadow-card);
+    }
+
+    .spec-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12.5px;
+    }
+
+    .spec-table th {
+      padding: 10px 14px;
+      text-align: left;
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--text-tertiary);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .spec-table td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border-dim);
+    }
+  </style>
+</head>
+<body class="u-grid-bg">
+
+  <div class="app-container">
+    <!-- 全局导航 Rail -->
+    <aside class="app-rail">
+      <a href="index.html" class="app-rail-logo" title="AgOS 遥测甲板">AG</a>
+      
+      <a href="01-chat.html" class="rail-btn" title="对话流">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      </a>
+
+      <a href="02-console.html" class="rail-btn" title="控制台概览">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+      </a>
+
+      <a href="03-lineage.html" class="rail-btn" title="智能体谱系">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+      </a>
+
+      <div class="rail-spacer"></div>
+
+      <button class="rail-btn" data-action="toggle-theme" title="切换深浅主题">
+        <span data-theme-icon>🌙</span>
+      </button>
+    </aside>
+
+    <!-- 主展示区 -->
+    <main class="app-stage">
+      <!-- 顶栏 -->
+      <header class="app-topbar">
+        <div class="topbar-left">
+          <div class="topbar-title-wrap">
+            <span class="topbar-title">AgOS 静态可点原型交付导航 (Phase 1)</span>
+            <span class="u-chip is-on">Geist 字体 · 曜石甲板 · 零构建</span>
+          </div>
+        </div>
+
+        <div class="topbar-right">
+          <button class="btn btn-primary btn-sm" data-action="toggle-theme">
+            <span data-theme-indicator>🌙 深色模式</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- 导览正文 -->
+      <div class="index-stage">
+        
+        <!-- Hero Banner -->
+        <section class="hero-banner">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span class="u-dot u-dot--running" style="width:10px;height:10px;"></span>
+            <span class="u-microlabel" style="color:var(--state-running);font-size:11px;">AgOS SPA Frontend Prototype · Luxury Studio Grade</span>
+          </div>
+          <h1 style="font-size:28px;font-weight:800;letter-spacing:-0.035em;color:var(--text-primary);">
+            遥测甲板 (Telemetry Deck) + 共息 (Sym-Respiration)
+          </h1>
+          <p style="font-size:14px;color:var(--text-secondary);line-height:1.6;max-width:920px;">
+            结合 GitHub 顶级前端设计技能（Anthropic <code>frontend-design</code>、Vercel <code>web-design-guidelines</code>、Jakub Krehel <code>better-ui</code>）全面重构：融合了 Geist 精确排印、多阶镜面高光、激光四态灯语与全局 2400ms 同相位共息呼吸。
+          </p>
+        </section>
+
+        <!-- 3 大页面直达卡片 -->
+        <section style="display:flex;flex-direction:column;gap:16px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <h2 style="font-size:17px;font-weight:800;letter-spacing:-0.02em;">交付原型页面直达 (Click to Open)</h2>
+            <span style="font-size:12px;color:var(--text-tertiary);">双击任意 HTML 文件均可本地独立运行</span>
+          </div>
+
+          <div class="portal-grid">
+            
+            <!-- 页面 1: 01-chat.html -->
+            <a href="01-chat.html" class="portal-card">
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <div style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:15.5px;color:var(--state-running);">
+                  <span>💬 01-chat.html</span>
+                </div>
+                <span class="badge badge--running">对话流</span>
+              </div>
+              <p style="font-size:13px;color:var(--text-secondary);line-height:1.55;">
+                侧栏会话矩阵 + 真实感消息流 + 思维链 (CoT) + <strong>三色微光 Terminal Bash 卡</strong> + Diff 补丁卡 + <strong>8 行四态 Swarm 批次卡</strong> + <strong>特权审批面板</strong> + 流式中指示器 + 输入底座。
+              </p>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <span class="u-chip">8行四态 Swarm</span>
+                <span class="u-chip">特权审批面板</span>
+                <span class="u-chip">CivStrip 治理</span>
+              </div>
+              <span class="btn btn-primary btn-sm" style="align-self:flex-start;margin-top:auto;">进入对话页 →</span>
+            </a>
+
+            <!-- 页面 2: 02-console.html -->
+            <a href="02-console.html" class="portal-card">
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <div style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:15.5px;color:var(--accent-cyan);">
+                  <span>📊 02-console.html</span>
+                </div>
+                <span class="badge" style="background-color:rgba(6, 182, 212, 0.12);color:var(--accent-cyan);border:1px solid rgba(6, 182, 212, 0.3);">控制台概览</span>
+              </div>
+              <p style="font-size:13px;color:var(--text-secondary);line-height:1.55;">
+                <strong>38px Hero KPI 读数</strong> + <strong>注意力收件箱 (Attention Inbox)</strong> + 高密度会话矩阵 + 机房机架。<strong>支持「⚡ 满载生产」与「🌱 初始冷启」双密度即时切换</strong>。
+              </p>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <span class="u-chip">Hero KPI</span>
+                <span class="u-chip">注意力收件箱</span>
+                <span class="u-chip">双密度切换</span>
+              </div>
+              <span class="btn btn-primary btn-sm" style="align-self:flex-start;margin-top:auto;">进入控制台 →</span>
+            </a>
+
+            <!-- 页面 3: 03-lineage.html -->
+            <a href="03-lineage.html" class="portal-card">
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <div style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:15.5px;color:var(--accent-purple);">
+                  <span>🧬 03-lineage.html</span>
+                </div>
+                <span class="badge" style="background-color:rgba(168, 85, 247, 0.12);color:var(--accent-purple);border:1px solid rgba(168, 85, 247, 0.3);">智能体谱系</span>
+              </div>
+              <p style="font-size:13px;color:var(--text-secondary);line-height:1.55;">
+                根调度器与 Swarm 批次父子电路血缘拓扑 + <strong>2400ms 全局共息同频心跳监视器</strong> + <strong>三段挡位式级联展开详情</strong> (状态/任务/产物日志)。
+              </p>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <span class="u-chip">电路父子引线</span>
+                <span class="u-chip">共息同频心跳</span>
+                <span class="u-chip">三段级联展开</span>
+              </div>
+              <span class="btn btn-primary btn-sm" style="align-self:flex-start;margin-top:auto;">进入谱系页 →</span>
+            </a>
+
+          </div>
+        </section>
+
+        <!-- GitHub 前端设计 Skills 索引与参考 -->
+        <section class="spec-block">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="u-dot u-dot--running"></span>
+            <h2 style="font-size:15px;font-weight:700;">GitHub 顶尖前端设计 Skills 参考与集成规范</h2>
+          </div>
+
+          <table class="spec-table">
+            <thead>
+              <tr>
+                <th>Skill 来源</th>
+                <th>核心设计指导与军规</th>
+                <th>在本项目的落地体现</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style="font-weight:600;"><code>anthropics/skills</code><br><span style="font-size:11px;color:var(--text-tertiary);">frontend-design</span></td>
+                <td>拒绝 AI 廉价通用模板；确立极度鲜明的视觉态度（曜石航电遥测）；引入大字符排印与镜面高光层级。</td>
+                <td><span class="badge badge--done">38px Hero KPI / 镜面边框</span></td>
+              </tr>
+              <tr>
+                <td style="font-weight:600;"><code>jakubkrehel/skills</code><br><span style="font-size:11px;color:var(--text-tertiary);">better-ui / typography</span></td>
+                <td>光学对齐、微交互按压阻尼 (90ms tick)、次像素发光多层阴影、Geist 无衬线与等宽字体排印。</td>
+                <td><span class="badge badge--done">Geist 字体栈 / 激光灯晕</span></td>
+              </tr>
+              <tr>
+                <td style="font-weight:600;"><code>vercel-labs/agent-skills</code><br><span style="font-size:11px;color:var(--text-tertiary);">web-design-guidelines</span></td>
+                <td>可访问性与色彩对比度严格核验；数字全面等宽 (tabular-nums)；动效仅限 transform/opacity 并支持降级。</td>
+                <td><span class="badge badge--done">Tabular-nums / 动效降级</span></td>
+              </tr>
+              <tr>
+                <td style="font-weight:600;"><code>julianoczkowski/designer-skills</code><br><span style="font-size:11px;color:var(--text-tertiary);">design-tokens</span></td>
+                <td>层级化 Design Tokens，将色彩、间距、圆角与动效周期（2400ms 共息）参数化抽离。</td>
+                <td><span class="badge badge--done">agos-tokens.css</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <script src="js/agos-core.js"></script>
+</body>
+</html>

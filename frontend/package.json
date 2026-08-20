@@ -1,20 +1,30 @@
 {
   "name": "agos-frontend",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "AgOS 前端:dsh 的自有 SPA(遥测甲板+共息)。P0 = 契约客户端。",
+  "description": "AgOS 前端: dsh 的自有 SPA (遥测甲板 + 共息)。",
   "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "smoke": "tsx scripts/smoke.ts",
     "vendor:diff": "sh scripts/vendor-diff.sh"
   },
   "dependencies": {
+    "clsx": "^2.1.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "zod": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
     "tsx": "^4.20.0",
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "vite": "^6.2.0"
   }
 }
