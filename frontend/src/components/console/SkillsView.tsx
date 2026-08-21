@@ -1,94 +1,155 @@
 import React, { useState } from 'react';
-import { Chip } from '@/components/ui/Chip';
-import { Dot } from '@/components/ui/Dot';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { fetchJsonResource, useResource } from '@/lib/useResource';
+import { filterSkillFindings, parseSkillsPayload, type SkillAuditRoot, type SkillFinding, type SkillsPayload } from './skills-model';
 
-export const SkillsView: React.FC = () => {
-  const [filterQuery, setFilterQuery] = useState('');
+const panelStyle: React.CSSProperties = {
+  borderTop: '1px solid var(--border-subtle)',
+  padding: '16px 0',
+};
 
-  const skills = [
-    { id: 'view_file', category: 'Read', desc: '查看工作区与系统本地文件内容，支持分片与二进制感知', loaded: true },
-    { id: 'run_command', category: 'Exec', desc: '在受控 Seccomp 沙箱中执行 Bash 命令，支持后台守护与超时监控', loaded: true },
-    { id: 'write_to_file', category: 'Write', desc: '原子化写入新文件或覆盖现有文件，附带元数据校验', loaded: true },
-    { id: 'replace_file_content', category: 'Write', desc: '单块精确代码补丁替换，保证行号与空格完全对齐', loaded: true },
-    { id: 'search_web', category: 'Search', desc: '执行外部全网实时检索，返回结构化摘要与引用来源', loaded: true },
-    { id: 'read_url_content', category: 'Read', desc: '无头 HTTP 抓取公开网页并转为 Markdown 语料', loaded: true },
-    { id: 'grep_search', category: 'Search', desc: '利用 ripgrep 极速正则检索代码库模式与符号', loaded: true },
-    { id: 'find_by_name', category: 'Search', desc: '利用 fd 快速文件名与通配符目录扫描', loaded: true },
-    { id: 'list_dir', category: 'Read', desc: '列出目录子级文件、大小与递归子项数', loaded: true },
-    { id: 'manage_task', category: 'Task', desc: '管理后台守护进程，支持 list / kill / send_input / status', loaded: true },
-    { id: 'invoke_subagent', category: 'Agent', desc: '拉起特化子代理执行隔离任务，支持模型独立配置', loaded: true },
-    { id: 'define_subagent', category: 'Agent', desc: '动态定义并注册会话期特化子代理类型与系统提示词', loaded: true },
-    { id: 'ask_question', category: 'Interaction', desc: '向用户渲染交互式单选/多选决策模态框 (input_required)', loaded: true },
-    { id: 'schedule', category: 'Timer', desc: '配置一次性毫秒定时器或标准 Cron 周期调度任务', loaded: true },
-  ];
+const quietText: React.CSSProperties = {
+  color: 'var(--text-tertiary)',
+  fontSize: '12px',
+  lineHeight: 1.6,
+};
 
-  const filtered = skills.filter(
-    (s) =>
-      s.id.toLowerCase().includes(filterQuery.toLowerCase()) ||
-      s.desc.toLowerCase().includes(filterQuery.toLowerCase()) ||
-      s.category.toLowerCase().includes(filterQuery.toLowerCase())
+const fetchSkills = async (url: string, signal: AbortSignal): Promise<SkillsPayload> =>
+  parseSkillsPayload(await fetchJsonResource<unknown>(url, signal));
+
+function failureText(status: number | undefined, message: string): string {
+  return `${status === undefined ? '' : `HTTP ${status} · `}${message}`;
+}
+
+function FindingRow({ finding }: { finding: SkillFinding }) {
+  const state = finding.sev === 'error' ? 'failed' : finding.sev === 'warn' ? 'running' : 'queued';
+  return (
+    <li style={{ display: 'grid', gridTemplateColumns: '88px minmax(120px, 180px) 1fr', gap: '12px', alignItems: 'start', padding: '8px 0', borderTop: '1px solid var(--border-dim)', fontSize: '12px' }}>
+      <Badge state={state}>{finding.sev || '未分级'}</Badge>
+      <span className="u-num" style={{ color: 'var(--text-secondary)', overflowWrap: 'anywhere' }}>{finding.check || '未采集'}</span>
+      <span style={{ minWidth: 0 }}>
+        {finding.skill && <strong style={{ display: 'block', color: 'var(--text-primary)', overflowWrap: 'anywhere' }}>{finding.skill}</strong>}
+        {finding.msg && <span style={{ color: 'var(--text-secondary)', lineHeight: 1.5 }}>{finding.msg}</span>}
+      </span>
+    </li>
   );
+}
+
+function AuditRoot({ audit, query }: { audit: SkillAuditRoot; query: string }) {
+  if (audit.error) {
+    return (
+      <section style={panelStyle} aria-label={audit.root}>
+        <code style={{ color: 'var(--text-primary)', overflowWrap: 'anywhere' }}>{audit.root}</code>
+        <p role="alert" style={{ ...quietText, color: 'var(--state-failed)', margin: '8px 0 0' }}>{audit.error}</p>
+      </section>
+    );
+  }
+
+  const findings = Array.isArray(audit.findings) ? audit.findings : undefined;
+  const visible = findings === undefined ? undefined : filterSkillFindings(findings, query);
+  const skills = typeof audit.skills === 'number' ? audit.skills : undefined;
+  const errors = typeof audit.counts?.error === 'number' ? audit.counts.error : undefined;
+  const warnings = typeof audit.counts?.warn === 'number' ? audit.counts.warn : undefined;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+    <section style={panelStyle} aria-label={audit.root}>
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+        <code style={{ color: 'var(--text-primary)', overflowWrap: 'anywhere', marginRight: 'auto' }}>{audit.root}</code>
+        <Badge state="queued">技能 {skills ?? '未采集'}</Badge>
+        <Badge state={errors === undefined ? 'queued' : errors > 0 ? 'failed' : 'done'}>错误 {errors ?? '未采集'}</Badge>
+        <Badge state={warnings === undefined ? 'queued' : warnings > 0 ? 'running' : 'done'}>警告 {warnings ?? '未采集'}</Badge>
+      </div>
+
+      {visible === undefined ? (
+        <p style={{ ...quietText, margin: '10px 0 0' }}>审计未返回检查明细。</p>
+      ) : visible.length === 0 ? (
+        <p style={{ ...quietText, margin: '10px 0 0' }}>
+          {query.trim() === '' ? '当前根没有发现问题。' : '当前筛选没有匹配项。'}
+        </p>
+      ) : (
+        <ul style={{ listStyle: 'none', padding: 0, margin: '12px 0 0' }}>
+          {visible.map((finding, index) => <FindingRow key={`${finding.skill ?? ''}:${finding.check ?? ''}:${index}`} finding={finding} />)}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+export const SkillsView: React.FC = () => {
+  const [query, setQuery] = useState('');
+  const resource = useResource<SkillsPayload>({ url: '/api/agos/skills', fetcher: fetchSkills });
+  const payload = resource.data;
+  const roots = payload?.roots;
+  const isBusy = resource.status === 'idle' || resource.status === 'loading';
+  const isRefreshing = resource.status === 'loading' && payload !== undefined;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+      <header style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
         <div>
-          <h2 style={{ fontSize: '16px', fontWeight: 800 }}>MCP 技能与工具注册表 (Skills Catalog)</h2>
-          <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
-            数据源: <code>/api/agos/skills</code> + <code>skill.list</code> · 14 项核心工具全量挂载
-          </p>
+          <h2 style={{ fontSize: '16px', fontWeight: 800, margin: 0 }}>技能审计</h2>
+          <p style={{ ...quietText, margin: '4px 0 0' }}>只读数据源 <code>/api/agos/skills</code></p>
         </div>
-
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <input
-            type="text"
-            placeholder="搜索技能名称 / 分类..."
-            className="form-input"
-            style={{ width: '220px', height: '30px', padding: '4px 10px', fontSize: '11.5px' }}
-            value={filterQuery}
-            onChange={(e) => setFilterQuery(e.target.value)}
-          />
-        </div>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '14px' }}>
-        {filtered.map((s) => (
-          <div
-            key={s.id}
-            style={{
-              backgroundColor: 'var(--bg-layer-2)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: '10px',
-              padding: '16px',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'space-between',
-              gap: '10px',
-              boxShadow: 'var(--shadow-card)',
-            }}
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <label>
+            <span className="u-microlabel" style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clipPath: 'inset(50%)' }}>筛选审计结果</span>
+            <input
+              type="search"
+              placeholder="筛选检查、技能或消息"
+              className="form-input"
+              style={{ width: '220px', height: '32px' }}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
+          <Button
+            size="sm"
+            disabled={isBusy}
+            onClick={() => resource.refresh('/api/agos/skills?refresh=1')}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Dot state="done" size={6} />
-                <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text-primary)' }}>
-                  {s.id}
-                </span>
-              </div>
-              <Chip variant="purple">{s.category}</Chip>
-            </div>
+            {isBusy ? '审计中…' : '重新审计'}
+          </Button>
+        </div>
+      </header>
 
-            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-              {s.desc}
-            </div>
+      {(resource.status === 'idle' || resource.status === 'loading') && payload === undefined && (
+        <p aria-live="polite" style={quietText}>正在读取技能审计结果…</p>
+      )}
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid var(--border-dim)', paddingTop: '8px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
-              <span>状态: <strong style={{ color: 'var(--state-done)' }}>100% HEALTHY</strong></span>
-              <span className="u-num">0 异常调用</span>
-            </div>
-          </div>
-        ))}
-      </div>
+      {resource.status === 'error' && resource.error && payload === undefined && (
+        <div role="alert" style={{ ...panelStyle, color: 'var(--state-failed)', fontSize: '12px' }}>
+          <p style={{ margin: '0 0 10px' }}><code>/api/agos/skills</code> 未响应：{failureText(resource.error.status, resource.error.message)}</p>
+          <Button size="sm" onClick={() => resource.refresh()}>重试</Button>
+        </div>
+      )}
+
+      {resource.status === 'degraded' && resource.error && payload !== undefined && (
+        <div role="status" style={{ padding: '9px 12px', border: '1px solid var(--state-running-border)', borderRadius: '6px', color: 'var(--text-secondary)', fontSize: '12px' }}>
+          暂时无法更新，保留 {resource.at ? new Date(resource.at).toLocaleString() : '上次'} 的结果：{failureText(resource.error.status, resource.error.message)}
+        </div>
+      )}
+
+      {payload?.error && (
+        <div role="alert" style={{ ...panelStyle, color: 'var(--state-failed)', fontSize: '12px', lineHeight: 1.6 }}>
+          {payload.error}
+          {payload.librarian && <div style={{ color: 'var(--text-tertiary)', marginTop: '4px' }}><code>{payload.librarian}</code></div>}
+        </div>
+      )}
+
+      {payload && !payload.error && roots?.length === 0 && (
+        <div style={panelStyle}>
+          <p style={{ ...quietText, margin: 0 }}>没有可审计的技能根。服务端只检查已存在的配置根。</p>
+          {payload.librarian && <p style={{ ...quietText, margin: '6px 0 0' }}>审计器：<code>{payload.librarian}</code></p>}
+        </div>
+      )}
+
+      {payload && !payload.error && roots !== undefined && roots.length > 0 && (
+        <div aria-busy={isRefreshing}>
+          {roots.map((root, index) => <AuditRoot key={`${root.root}:${index}`} audit={root} query={query} />)}
+          {payload.at && <p className="u-num" style={{ ...quietText, margin: '8px 0 0' }}>审计时间 {new Date(payload.at).toLocaleString()}</p>}
+        </div>
+      )}
     </div>
   );
 };

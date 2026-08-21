@@ -21,7 +21,10 @@ import { Dot } from '@/components/ui/Dot';
 import type { StateLamp } from '@/design-system/tokens';
 import type { MainTab } from '@/components/layout/AppRail';
 import { fetchPresets, sessionsStore, type PresetInfo, type SessionSummaryRow } from '@/stores/live';
+import { formatRelative } from '@/lib/time';
 import '@/design-system/empty-state.css';
+
+export { formatRelative } from '@/lib/time';
 
 /** 最近会话渲染上限(与 CSS 注释里的级联上限 N=6 一致)。 */
 const RECENT_LIMIT = 6;
@@ -34,15 +37,6 @@ const anim = (index: number): React.CSSProperties => ({ '--es-i': index } as Rea
  * <1 分 = 刚刚 / <60 分 = N 分钟前 / <24 时 = N 小时前 / 否则 N 天前。
  * 无效时间戳(0 / NaN / 负数)返回空串,由调用方决定是否渲染。
  */
-export function formatRelative(timestamp: number, now: number = Date.now()): string {
-  if (!Number.isFinite(timestamp) || timestamp <= 0) return '';
-  const diff = now - timestamp;
-  if (diff < 60_000) return '刚刚';
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
-  return `${Math.floor(diff / 86_400_000)} 天前`;
-}
-
 // ── presets 的 external store(数据源仍是 live.ts 的 fetchPresets)──────────────
 // live.ts 只暴露一次性的 fetchPresets(),没有 preset store;这里做模块级缓存 +
 // 订阅壳,保证 useSyncExternalStore 语义与引用稳定,且整个应用只拉一次。

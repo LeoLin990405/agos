@@ -17,6 +17,7 @@ import type { MuxFrame } from '../contract/api/index.ts'
 import type { PromptContentPart, RpcRequest } from '../contract/api/index.ts'
 import { createFold, type Fold } from '../fold/fold.ts'
 import type { FoldedConversation } from '../fold/model.ts'
+import { createRefCountedPoller } from './ref-counted-polling.ts'
 
 export const agos = createAgosClient({})
 
@@ -108,6 +109,8 @@ const convoEmitter = createEmitter()
 const conversations = new Map<string, ConvoEntry>()
 let activeSessionId: string | undefined
 let streamOnline = false
+export type LiveConnectionPhase = 'idle' | 'connecting' | 'online' | 'offline'
+let liveConnectionPhase: LiveConnectionPhase = 'idle'
 let muxStarted = false
 let stopMux: (() => void) | undefined
 /** approvalId → 该 approval/requested 帧的 rpcId(respond 用)。 */
@@ -194,17 +197,23 @@ async function rebuildFromHistory(id: string): Promise<void> {
 function ensureMux(): void {
   if (muxStarted) return
   muxStarted = true
+  liveConnectionPhase = 'connecting'
+  convoEmitter.emit()
   stopMux = watchStream(
     (signal) => agos.mux(signal, () => {
       // 流开通(首连或重连):流先行已就绪,现在才安全重拉 history。
       streamOnline = true
+      liveConnectionPhase = 'online'
       for (const id of conversations.keys()) void rebuildFromHistory(id)
       convoEmitter.emit()
     }),
     onMuxFrame,
-    () => { streamOnline = false; convoEmitter.emit() },
+    () => { streamOnline = false; liveConnectionPhase = 'offline'; convoEmitter.emit() },
   )
 }
+
+/** Start the shared events.mux even before a first session exists. */
+export function ensureLiveConnection(): void { ensureMux() }
 
 export function openConversation(id: string): void {
   ensureMux()
@@ -216,7 +225,13 @@ export function openConversation(id: string): void {
   convoEmitter.emit()
 }
 
-export function closeMux(): void { stopMux?.(); muxStarted = false; streamOnline = false }
+export function closeMux(): void {
+  stopMux?.()
+  muxStarted = false
+  streamOnline = false
+  liveConnectionPhase = 'idle'
+  convoEmitter.emit()
+}
 
 export const conversationStore = {
   subscribe(l: Listener): () => void { return convoEmitter.subscribe(l) },
@@ -231,6 +246,12 @@ export const conversationStore = {
 export const streamStore = {
   subscribe(l: Listener): () => void { return convoEmitter.subscribe(l) },
   getSnapshot(): boolean { return streamOnline },
+}
+
+/** Deterministic events.mux connection phase for honest loading/error UI. */
+export const liveConnectionStore = {
+  subscribe(l: Listener): () => void { return convoEmitter.subscribe(l) },
+  getSnapshot(): LiveConnectionPhase { return liveConnectionPhase },
 }
 
 export async function sendPrompt(sessionId: string, text: string): Promise<{ ok: boolean, error?: string }> {
@@ -273,7 +294,6 @@ export interface TelemetryState {
 
 const telemetryEmitter = createEmitter()
 let telemetryState: TelemetryState = { overview: undefined, progress: undefined, at: 0 }
-let telemetryTimer: ReturnType<typeof setInterval> | undefined
 
 async function refreshTelemetry(): Promise<void> {
   const next: TelemetryState = { ...telemetryState, at: Date.now() }
@@ -295,13 +315,22 @@ async function refreshTelemetry(): Promise<void> {
   telemetryEmitter.emit()
 }
 
+const telemetryPolling = createRefCountedPoller({
+  run: () => { void refreshTelemetry() },
+  shouldRunScheduled: () => !document.hidden,
+  intervalMs: 10_000,
+  setIntervalFn: (callback, intervalMs) => setInterval(callback, intervalMs),
+  clearIntervalFn: (handle) => clearInterval(handle),
+})
+
 export const telemetryStore = {
   subscribe(l: Listener): () => void {
-    if (telemetryTimer === undefined) {
-      void refreshTelemetry()
-      telemetryTimer = setInterval(() => { if (!document.hidden) void refreshTelemetry() }, 10_000)
+    const unsubscribe = telemetryEmitter.subscribe(l)
+    const stopPolling = telemetryPolling.acquire()
+    return () => {
+      unsubscribe()
+      stopPolling()
     }
-    return telemetryEmitter.subscribe(l)
   },
   getSnapshot(): TelemetryState { return telemetryState },
 }
@@ -549,3 +578,6 @@ export function watchHostArchivedSessions(
     stop()
   }
 }
+
+// Pure selector export for the unified node:test suite.
+export { deriveSwarmProgress }

@@ -1,150 +1,190 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Dot } from '@/components/ui/Dot';
-import { Chip } from '@/components/ui/Chip';
 import { Button } from '@/components/ui/Button';
-import { StateLamp } from '@/design-system/tokens';
+import { formatRelative } from '@/lib/time';
+import {
+  ensureLiveConnection,
+  liveConnectionStore,
+  refreshSessions,
+  sessionsStore,
+  type SessionSummaryRow,
+} from '@/stores/live';
+import { deriveSessionsSurface } from './sessions-view-state';
+import type { StateLamp } from '@/design-system/tokens';
 
 export interface SessionsViewProps {
   onSelectSession?: (id: string) => void;
 }
 
+function sessionLamp(row: SessionSummaryRow): StateLamp {
+  if (row.running) return 'running';
+  if (row.blank) return 'queued';
+  return 'done';
+}
+
+const QuietState: React.FC<{ title: string; detail: React.ReactNode }> = ({ title, detail }) => (
+  <div
+    role="status"
+    style={{
+      padding: '44px 24px',
+      textAlign: 'center',
+      border: '1px dashed var(--border-subtle)',
+      borderRadius: '12px',
+      color: 'var(--text-tertiary)',
+    }}
+  >
+    <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '7px' }}>
+      {title}
+    </div>
+    <div style={{ fontSize: '12.5px' }}>{detail}</div>
+  </div>
+);
+
 export const SessionsView: React.FC<SessionsViewProps> = ({ onSelectSession }) => {
   const [filterQuery, setFilterQuery] = useState('');
+  const sessions = useSyncExternalStore(sessionsStore.subscribe, sessionsStore.getSnapshot);
+  const connection = useSyncExternalStore(liveConnectionStore.subscribe, liveConnectionStore.getSnapshot);
 
-  const sessions = [
-    {
-      id: 'sess-8402',
-      state: 'running' as StateLamp,
-      title: '分布式认证令牌轮转与流式事件管道重构',
-      cwd: '/Users/leo/Documents/kimi/workspace/agos-frontend',
-      model: 'DeepSeek-V3',
-      turns: 8,
-      steps: 34,
-      tokens: 38420,
-      cost: '¥ 0.28',
-      updatedAt: '刚刚',
-    },
-    {
-      id: 'sess-8399',
-      state: 'done' as StateLamp,
-      title: 'PostgreSQL DataConnect 模式迁移回归',
-      cwd: '/Users/leo/Documents/kimi/workspace/db-layer',
-      model: 'Claude-3.5',
-      turns: 14,
-      steps: 52,
-      tokens: 52100,
-      cost: '¥ 1.45',
-      updatedAt: '1小时前',
-    },
-    {
-      id: 'sess-8390',
-      state: 'failed' as StateLamp,
-      title: 'Seccomp 宿主内核隔离逃逸巡检',
-      cwd: '/Users/leo/Documents/kimi/workspace/sandbox',
-      model: 'DeepSeek-V3',
-      turns: 22,
-      steps: 88,
-      tokens: 84000,
-      cost: '¥ 0.58',
-      updatedAt: '3小时前',
-    },
-    {
-      id: 'sess-8382',
-      state: 'done' as StateLamp,
-      title: 'AgOS 遥测甲板设计系统 Token 提取',
-      cwd: '/Users/leo/Documents/kimi/workspace/agos-frontend',
-      model: 'Kimi-K1.5',
-      turns: 5,
-      steps: 19,
-      tokens: 19800,
-      cost: '¥ 0.12',
-      updatedAt: '昨天',
-    },
-    {
-      id: 'sess-8370',
-      state: 'queued' as StateLamp,
-      title: 'WebSocket 事件多路复用连接池压测',
-      cwd: '/Users/leo/Documents/kimi/workspace/mux-net',
-      model: 'Qwen-2.5',
-      turns: 18,
-      steps: 64,
-      tokens: 41200,
-      cost: '¥ 0.32',
-      updatedAt: '2天前',
-    },
-  ];
+  useEffect(() => {
+    ensureLiveConnection();
+  }, []);
 
-  const filtered = sessions.filter(
-    (s) =>
-      s.title.toLowerCase().includes(filterQuery.toLowerCase()) ||
-      s.id.toLowerCase().includes(filterQuery.toLowerCase())
-  );
+  const filtered = useMemo(() => {
+    const query = filterQuery.trim().toLocaleLowerCase();
+    if (query === '') return sessions.rows;
+    return sessions.rows.filter((row) => [row.title, row.sessionId, row.cwd]
+      .some((value) => value.toLocaleLowerCase().includes(query)));
+  }, [filterQuery, sessions.rows]);
+
+  const surface = deriveSessionsSurface({
+    rowCount: sessions.rows.length,
+    loadedAt: sessions.loadedAt,
+    error: sessions.error,
+    connection,
+  });
+  const loadedRelative = formatRelative(sessions.loadedAt);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ display: 'flex', alignItems: 'end', justifyContent: 'space-between', gap: '16px' }}>
         <div>
-          <h2 style={{ fontSize: '16px', fontWeight: 800 }}>全量会话高密度审计矩阵</h2>
+          <h2 style={{ fontSize: '16px', fontWeight: 800 }}>会话</h2>
           <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
-            覆盖 Token 水位、步长 (Steps)、推理费用与工作区 CWD 归属
+            数据源: <code>session.list</code> 与 <code>events.mux</code>
           </p>
         </div>
-
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <input
-            type="text"
-            placeholder="过滤会话主题 / ID..."
-            className="form-input"
-            style={{ width: '220px', height: '30px', padding: '4px 10px', fontSize: '11.5px' }}
-            value={filterQuery}
-            onChange={(e) => setFilterQuery(e.target.value)}
-          />
-        </div>
+        <input
+          type="search"
+          aria-label="过滤会话"
+          placeholder="按主题、ID 或工作目录过滤"
+          className="form-input"
+          style={{ width: '250px', height: '32px', padding: '4px 10px', fontSize: '11.5px' }}
+          value={filterQuery}
+          onChange={(event) => setFilterQuery(event.target.value)}
+        />
       </div>
 
-      <div className="telemetry-table-wrap">
-        <table className="telemetry-table">
-          <thead>
-            <tr>
-              <th style={{ width: '40px' }}>状态</th>
-              <th>会话 ID / 主题 / CWD</th>
-              <th style={{ width: '130px' }}>主力模型</th>
-              <th style={{ width: '90px' }} className="u-num">轮次 / 步骤</th>
-              <th style={{ width: '110px' }} className="u-num">Token 吞吐</th>
-              <th style={{ width: '90px' }} className="u-num">预估费用</th>
-              <th style={{ width: '100px' }}>更新时间</th>
-              <th style={{ width: '110px', textAlign: 'right' }}>快捷操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((s) => (
-              <tr key={s.id}>
-                <td><Dot state={s.state} /></td>
-                <td>
-                  <div style={{ fontWeight: 600, color: s.state === 'failed' ? 'var(--state-failed)' : 'var(--text-primary)' }}>
-                    {s.title}
-                  </div>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10.5px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
-                    #{s.id} · {s.cwd}
-                  </div>
-                </td>
-                <td><Chip active={s.state === 'running'}>{s.model}</Chip></td>
-                <td className="u-num">{s.turns} / {s.steps}</td>
-                <td className="u-num" style={s.state === 'running' ? { color: 'var(--state-running)', fontWeight: 700 } : undefined}>
-                  {(s.tokens / 1000).toFixed(1)}k
-                </td>
-                <td className="u-num" style={{ color: 'var(--accent-amber)', fontWeight: 600 }}>{s.cost}</td>
-                <td className="u-num">{s.updatedAt}</td>
-                <td style={{ textAlign: 'right' }}>
-                  <Button variant="ghost" size="sm" onClick={() => onSelectSession?.(s.id)}>
-                    接入 →
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {surface.kind === 'loading' && <QuietState title="正在读取会话" detail="等待 session.list 返回。" />}
+
+      {surface.kind === 'error' && (
+        <QuietState
+          title="会话列表读取失败"
+          detail={(
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
+              <span><code>session.list</code> 未答复: {sessions.error}</span>
+              <Button variant="ghost" size="sm" onClick={() => { void refreshSessions(); }}>重试</Button>
+            </span>
+          )}
+        />
+      )}
+
+      {surface.kind === 'empty' && surface.reason === 'connecting' && (
+        <QuietState
+          title="正在连接事件信道"
+          detail={<>会话列表已读取，正在等待 <code>events.mux</code>。</>}
+        />
+      )}
+
+      {surface.kind === 'empty' && surface.reason === 'offline' && (
+        <QuietState
+          title="事件信道未连接"
+          detail={<>当前无法确认实时状态；<code>events.mux</code> 尚未建立连接。</>}
+        />
+      )}
+
+      {surface.kind === 'empty' && surface.reason === 'online' && (
+        <QuietState
+          title="暂无会话"
+          detail={<>宿主已连接，<code>session.list</code> 返回了空列表。</>}
+        />
+      )}
+
+      {surface.kind === 'rows' && (
+        <>
+          {(surface.notice === 'refresh-error' || surface.notice === 'offline') && (
+            <div
+              role="status"
+              style={{
+                padding: '9px 12px',
+                border: '1px solid var(--accent-amber)',
+                borderRadius: '8px',
+                color: 'var(--text-secondary)',
+                fontSize: '12px',
+              }}
+            >
+              {surface.notice === 'refresh-error'
+                ? <>会话刷新失败，保留{loadedRelative !== '' ? `${loadedRelative}读取` : '上次读取'}的数据: {sessions.error}</>
+                : <>事件信道未连接；显示{loadedRelative !== '' ? `${loadedRelative}读取` : '上次读取'}的列表，运行状态可能不是最新。</>}
+            </div>
+          )}
+          {surface.notice === 'connecting' && (
+            <div role="status" style={{ color: 'var(--text-tertiary)', fontSize: '12px' }}>
+              正在连接 <code>events.mux</code>；当前继续显示 session.list 返回的会话。
+            </div>
+          )}
+
+          {filtered.length > 0 && <div className="telemetry-table-wrap">
+            <table className="telemetry-table">
+              <thead>
+                <tr>
+                  <th style={{ width: '54px' }}>状态</th>
+                  <th>主题 / 会话 ID / 工作目录</th>
+                  <th style={{ width: '150px' }}>Agent preset</th>
+                  <th style={{ width: '110px' }}>更新时间</th>
+                  <th style={{ width: '90px', textAlign: 'right' }}>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((row) => {
+                  const relative = formatRelative(row.updatedAt);
+                  return (
+                    <tr key={row.sessionId}>
+                      <td><Dot state={sessionLamp(row)} /></td>
+                      <td>
+                        <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{row.title}</div>
+                        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10.5px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
+                          #{row.sessionId}{row.cwd !== '' ? ` · ${row.cwd}` : ''}
+                        </div>
+                      </td>
+                      <td>{row.agentPreset !== '' ? row.agentPreset : '未采集'}</td>
+                      <td>{relative !== '' ? relative : '未采集'}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        <Button variant="ghost" size="sm" onClick={() => onSelectSession?.(row.sessionId)}>
+                          接入
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>}
+
+          {filtered.length === 0 && (
+            <QuietState title="没有匹配的会话" detail="调整过滤条件后再试。" />
+          )}
+        </>
+      )}
     </div>
   );
 };

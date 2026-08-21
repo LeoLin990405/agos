@@ -1,194 +1,298 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState, useSyncExternalStore } from 'react';
 import { SymMonitor } from '@/components/lineage/SymMonitor';
-import { RootNodeCard } from '@/components/lineage/RootNodeCard';
 import { LineageJobTree } from '@/components/lineage/LineageJobTree';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Chip } from '@/components/ui/Chip';
-import { useSyncExternalStore } from 'react';
+import { Button } from '@/components/ui/Button';
 import { telemetryStore } from '@/stores/live';
+import { useResource } from '@/lib/useResource';
+import {
+  foldLineageHistory,
+  type FoldedLineageCall,
+  type LineageHistoryRecord,
+} from './lineage-history';
 import type { LineageJobItem } from '@/components/lineage/LineageJobTree';
 import type { StateLamp } from '@/design-system/tokens';
 
-const LAMP: Record<string, { lamp: StateLamp, label: string }> = {
-  queued: { lamp: 'queued', label: '等待中' }, running: { lamp: 'running', label: '处理中' },
-  completed: { lamp: 'done', label: '已完成' }, failed: { lamp: 'failed', label: '未成功' },
+const LAMP: Record<string, { lamp: StateLamp; label: string }> = {
+  queued: { lamp: 'queued', label: '等待中' },
+  running: { lamp: 'running', label: '处理中' },
+  completed: { lamp: 'done', label: '已完成' },
+  failed: { lamp: 'failed', label: '未成功' },
   aborted: { lamp: 'failed', label: '已中止' },
 };
-const fmtDur = (ms: unknown): string => typeof ms !== 'number' ? '--' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 
-interface RealBatch { callId: string, description: string, kind: string, rows: Record<string, unknown>[] }
+interface RealBatch {
+  callId: string;
+  parentSessionId: string | undefined;
+  rows: Record<string, unknown>[];
+}
 
-function toJob(r: Record<string, unknown>): LineageJobItem {
-  const st = LAMP[String(r['status'] ?? 'queued')] ?? LAMP['queued']!;
+interface LineageHistoryResponse {
+  day: string;
+  records: LineageHistoryRecord[];
+  truncated: boolean;
+  error?: string;
+}
+
+function fmtDur(ms: unknown): string {
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return '未采集';
+  if (ms < 1_000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) return `${(ms / 1_000).toFixed(1)}s`;
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.round((ms % 60_000) / 1_000);
+  return `${minutes}m ${seconds}s`;
+}
+
+function formatDay(value: Date = new Date()): string {
+  const part = (n: number): string => String(n).padStart(2, '0');
+  return `${value.getFullYear()}${part(value.getMonth() + 1)}${part(value.getDate())}`;
+}
+
+function dayForInput(day: string): string {
+  return `${day.slice(0, 4)}-${day.slice(4, 6)}-${day.slice(6, 8)}`;
+}
+
+function dayFromInput(day: string): string {
+  return day.replaceAll('-', '');
+}
+
+function shiftDay(day: string, offset: number): string {
+  const year = Number(day.slice(0, 4));
+  const month = Number(day.slice(4, 6));
+  const date = Number(day.slice(6, 8));
+  const value = new Date(year, month - 1, date, 12);
+  value.setDate(value.getDate() + offset);
+  return formatDay(value);
+}
+
+function formatAt(at: number | undefined): string {
+  if (at === undefined) return '未采集';
+  return new Date(at).toLocaleString('zh-CN', { hour12: false });
+}
+
+function toJob(row: Record<string, unknown>): LineageJobItem {
+  const status = String(row['status'] ?? '');
+  const lamp = LAMP[status] ?? { lamp: 'queued' as const, label: '未采集' };
   const roleBits = [
-    r['role'] != null ? `🎭 ${String(r['role'])}` : '',
-    r['forked'] != null && r['forked'] !== '' ? `⤴ ${String(r['forked'])}` : '',
-    typeof r['depth'] === 'number' && (r['depth'] as number) > 1 ? `⛓ ${String(r['depth'])}` : '',
-  ].filter((x) => x !== '').join(' ');
-  const metrics: { label: string, value: string }[] = [];
-  if (typeof r['queuePosition'] === 'number') metrics.push({ label: '队列位次', value: `#${String(r['queuePosition'])}` });
-  if (r['host'] != null) metrics.push({ label: '主机', value: String(r['host']) });
-  if (r['provider'] != null) metrics.push({ label: 'Provider', value: String(r['provider']) });
+    row['role'] != null ? `🎭 ${String(row['role'])}` : '',
+    row['forked'] != null && row['forked'] !== '' ? `⤴ ${String(row['forked'])}` : '',
+    typeof row['depth'] === 'number' && row['depth'] > 1 ? `⛓ ${String(row['depth'])}` : '',
+  ].filter(Boolean).join(' ');
+  const metrics: { label: string; value: string }[] = [];
+  if (typeof row['queuePosition'] === 'number') metrics.push({ label: '队列位次', value: `#${row['queuePosition']}` });
+  if (row['host'] != null) metrics.push({ label: '主机', value: String(row['host']) });
+  if (row['provider'] != null) metrics.push({ label: 'Provider', value: String(row['provider']) });
+  const index = row['index'] != null ? String(row['index']) : '';
   return {
-    id: String(r['agentId'] ?? r['index'] ?? ''),
-    name: String(r['item'] ?? r['type'] ?? `#${String(r['index'])}`).slice(0, 80),
-    role: roleBits !== '' ? roleBits : String(r['type'] ?? ''),
-    model: String(r['model'] ?? ''), duration: fmtDur(r['elapsedMs']),
-    state: st.lamp, badgeText: st.label, metrics,
-    targetPrompt: String(r['item'] ?? ''),
-    logs: r['error'] != null ? [String(r['error'])] : [],
-    defaultOpen: r['status'] === 'failed',
+    id: String(row['agentId'] ?? index),
+    name: String(row['item'] ?? row['type'] ?? (index !== '' ? `#${index}` : '未采集')).slice(0, 80),
+    role: roleBits !== '' ? roleBits : String(row['type'] ?? '未采集'),
+    model: String(row['model'] ?? '未采集'),
+    duration: fmtDur(row['elapsedMs']),
+    state: lamp.lamp,
+    badgeText: lamp.label,
+    metrics,
+    targetPrompt: String(row['item'] ?? '未采集'),
+    logs: row['error'] != null ? [String(row['error'])] : [],
+    defaultOpen: status === 'failed',
   };
 }
 
-export const LineageView: React.FC = () => {
-  const [tab, setTab] = useState<'live' | 'history'>('live');
-  const telemetry = useSyncExternalStore(telemetryStore.subscribe, telemetryStore.getSnapshot);
-  const realBatches: RealBatch[] = (telemetry.progress?.calls ?? []).map((c) => ({
-    callId: String(c['callId'] ?? ''), description: String(c['description'] ?? '批次'),
-    kind: String(c['kind'] ?? 'swarm'),
-    rows: Array.isArray(c['rows']) ? c['rows'] as Record<string, unknown>[] : [],
-  }));
-  const anyRunning = realBatches.some((b) => b.rows.some((r) => r['status'] === 'running'));
-  if (tab === 'live' && telemetry.at > 0) {
-    // 真后端在:渲染真实谱系(空=诚实空态),mock 只留给无后端 demo
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <h2 style={{ fontSize: '16px', fontWeight: 800 }}>智能体任务谱系与血缘拓扑 (Lineage)</h2>
-            <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
-              数据源: <code>/api/swarm/progress</code> · 10s 轮询 · 全局 2400ms 锁相
-            </p>
-          </div>
-          <SegmentedControl value={tab} onChange={setTab} options={[
-            { value: 'live', label: `实时谱系 (${realBatches.length} 批次)` },
-            { value: 'history', label: '历史档案' },
-          ]} />
+const QuietState: React.FC<{ title: string; detail: React.ReactNode }> = ({ title, detail }) => (
+  <div
+    role="status"
+    style={{ padding: '44px 24px', textAlign: 'center', border: '1px dashed var(--border-subtle)', borderRadius: '12px', color: 'var(--text-tertiary)' }}
+  >
+    <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '7px' }}>{title}</div>
+    <div style={{ fontSize: '12.5px' }}>{detail}</div>
+  </div>
+);
+
+function terminalSummary(rows: Record<string, unknown>[]): string {
+  const terminal = rows.filter((row) => ['completed', 'failed', 'aborted'].includes(String(row['status'] ?? ''))).length;
+  return `${terminal}/${rows.length} 已结束`;
+}
+
+const HistoryCall: React.FC<{ call: FoldedLineageCall }> = ({ call }) => {
+  const statusLabel = call.state === 'unclosed'
+    ? '未收尾'
+    : call.state === 'orphaned-end'
+      ? '起始记录缺席'
+      : '已结束';
+  return (
+    <details
+      style={{ backgroundColor: 'var(--bg-layer-2)', border: '1px solid var(--border-subtle)', borderRadius: '8px', padding: '14px 18px' }}
+    >
+      <summary style={{ cursor: 'pointer', listStylePosition: 'outside' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', marginLeft: '4px', flexWrap: 'wrap' }}>
+          <strong style={{ fontFamily: 'var(--font-mono)', fontSize: '13px' }}>{call.callId}</strong>
+          <Chip variant={call.state === 'unclosed' ? 'amber' : 'default'}>{statusLabel}</Chip>
+          <span className="u-num" style={{ color: 'var(--text-tertiary)', fontSize: '11.5px' }}>
+            {terminalSummary(call.rows)}
+          </span>
+        </span>
+      </summary>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '13px', paddingTop: '12px', borderTop: '1px solid var(--border-dim)' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', color: 'var(--text-secondary)', fontSize: '11.5px' }}>
+          <span>开始: <span className="u-num">{formatAt(call.startedAt)}</span></span>
+          <span>结束: <span className="u-num">{formatAt(call.endedAt)}</span></span>
+          <span>耗时: <span className="u-num">{call.state === 'unclosed' ? '未收尾' : fmtDur(call.durationMs)}</span></span>
+          <span>父会话: <span style={{ fontFamily: 'var(--font-mono)' }}>{call.parentSessionId ?? '未采集'}</span></span>
         </div>
-        {anyRunning && <SymMonitor bpm={25.0} periodMs={2400} driftMs={0.1} />}
-        {realBatches.length === 0 && (
-          <div style={{ padding: '48px 24px', textAlign: 'center', border: '1px dashed var(--border-subtle)', borderRadius: '12px', color: 'var(--text-tertiary)' }}>
-            <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '8px' }}>谱系待机</div>
-            <div style={{ fontSize: '12.5px' }}>最近 10 分钟没有 swarm / civ / fleet / delegate 派单。发起一个批次,血缘拓扑会在这里生长。</div>
+        {call.rows.length === 0 ? (
+          <div style={{ color: 'var(--text-tertiary)', fontSize: '12px' }}>该快照没有子任务行。</div>
+        ) : (
+          <div className="telemetry-table-wrap">
+            <table className="telemetry-table">
+              <thead>
+                <tr><th>子任务</th><th>状态</th><th>模型</th><th>主机</th></tr>
+              </thead>
+              <tbody>
+                {call.rows.map((row, index) => (
+                  <tr key={`${String(row['agentId'] ?? row['index'] ?? index)}:${index}`}>
+                    <td>{String(row['item'] ?? row['type'] ?? row['agentId'] ?? row['index'] ?? '未采集').slice(0, 100)}</td>
+                    <td>{LAMP[String(row['status'] ?? '')]?.label ?? '未采集'}</td>
+                    <td>{String(row['model'] ?? '未采集')}</td>
+                    <td>{String(row['host'] ?? '未采集')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
-        {realBatches.map((b) => {
-          const done = b.rows.filter((r) => r['status'] === 'completed').length;
-          const pct = b.rows.length > 0 ? Math.round((done / b.rows.length) * 100) : 0;
-          return (
-            <LineageJobTree key={b.callId}
-              batchId={b.callId.startsWith('host:') ? 'HOST 派单' : b.callId.slice(-8)}
-              title={b.description.slice(0, 80)} categoryTag={b.kind}
-              completedSummary={`${done}/${b.rows.length} 完成 (${pct}%)`} duration=""
-              isRunningBranch={b.rows.some((r) => r['status'] === 'running')}
-              jobs={b.rows.map(toJob)} />
-          );
-        })}
       </div>
-    );
-  }
+    </details>
+  );
+};
+
+export const LineageView: React.FC = () => {
+  const [tab, setTab] = useState<'live' | 'history'>('live');
+  const [day, setDay] = useState(() => formatDay());
+  const telemetry = useSyncExternalStore(telemetryStore.subscribe, telemetryStore.getSnapshot);
+  const history = useResource<LineageHistoryResponse>({
+    url: tab === 'history' ? `/api/swarm/history?day=${day}&limit=200` : null,
+    enabled: tab === 'history',
+  });
+
+  const realBatches = useMemo<RealBatch[]>(() => (telemetry.progress?.calls ?? []).map((call) => ({
+    callId: String(call['callId'] ?? ''),
+    parentSessionId: typeof call['parentSessionId'] === 'string' ? call['parentSessionId'] : undefined,
+    rows: Array.isArray(call['rows']) ? call['rows'] as Record<string, unknown>[] : [],
+  })).filter((batch) => batch.callId !== ''), [telemetry.progress]);
+  const currentHistory = history.data?.day === day ? history.data : undefined;
+  const foldedHistory = useMemo(
+    () => foldLineageHistory(currentHistory?.records ?? []),
+    [currentHistory?.records],
+  );
+  const anyRunning = realBatches.some((batch) => batch.rows.some((row) => row['status'] === 'running'));
+  const today = formatDay();
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
         <div>
-          <h2 style={{ fontSize: '16px', fontWeight: 800 }}>智能体任务谱系与血缘拓扑 (Lineage)</h2>
+          <h2 style={{ fontSize: '16px', fontWeight: 800 }}>智能体任务谱系与血缘拓扑</h2>
           <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
-            数据源: <code>/api/swarm/progress</code> + <code>/api/civ/runs</code> · 全局 2400ms 锁相
+            数据源: <code>{tab === 'live' ? '/api/swarm/progress' : '/api/swarm/history'}</code>
           </p>
         </div>
-
-        <SegmentedControl
-          value={tab}
-          onChange={setTab}
-          options={[
-            { value: 'live', label: '实时谱系 (2 批次)' },
-            { value: 'history', label: '历史档案 (18 批次)' },
-          ]}
-        />
+        <SegmentedControl value={tab} onChange={setTab} options={[
+          { value: 'live', label: telemetry.progress === undefined ? '实时谱系' : `实时谱系 (${realBatches.length})` },
+          { value: 'history', label: currentHistory === undefined ? '历史档案' : `历史档案 (${foldedHistory.length})` },
+        ]} />
       </div>
 
-      {tab === 'live' ? (
+      {tab === 'live' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
-          {/* 1. 心跳监视器 */}
-          <SymMonitor bpm={25.0} periodMs={2400} driftMs={0.1} />
-
-          {/* 2. 根节点 */}
-          <RootNodeCard
-            name="@orchestrator-main (根调度中枢)"
-            model="DeepSeek-V3 · 671B"
-            sessionRole="主控制会话"
-            description="正在协调 2 个并行 Swarm 批次任务，分发 12 个特化任务子代理"
-            duration="18.4s"
-            spawnedCount={12}
-          />
-
-          {/* 3. 批次 1 */}
-          <LineageJobTree
-            batchId="BATCH-8402"
-            title="认证矩阵与边界安全审计 (8 节点并发)"
-            categoryTag="安全巡检 · Civ 多数决"
-            completedSummary="5/8 完成 (62.5%)"
-            duration="12.8s"
-            isRunningBranch={true}
-            jobs={[
-              {
-                id: 'job-1',
-                name: 'redis-cluster-failover',
-                role: '🎭⛓ 故障注入',
-                model: 'DeepSeek-V3',
-                duration: '12.8s (处理中)',
-                state: 'running',
-                badgeText: 'RUNNING',
-                defaultOpen: true,
-                metrics: [
-                  { label: '内存占用', value: '48MB' },
-                  { label: '网络 I/O', value: '2.4 MB/s' },
-                  { label: '演练阶段', value: 'Sentinel Switchover' },
-                ],
-                targetPrompt: '模拟 Redis Master 节点网络断开 500ms，验证会话令牌在哨兵重选期间的分布式租约与降级表现。',
-                logs: [
-                  '[18:42:22] INFO Sent SIGSTOP to redis-master-01',
-                  '[18:42:23] INFO Sentinel promoted replica redis-slave-02 to master (elapsed: 142ms)',
-                  '[18:42:24] SUCCESS Token rotation retry loop captured failover without request drop',
-                ],
-              },
-              {
-                id: 'job-2',
-                name: 'sandbox-escape-probe',
-                role: '🎭⛓ 越界探针',
-                model: 'DeepSeek-V3',
-                duration: '8.9s (未成功)',
-                state: 'failed',
-                badgeText: 'BLOCKED',
-                metrics: [
-                  { label: '退出代码', value: 'E4012 (SECCOMP_DENIED)' },
-                  { label: '隔离级别', value: 'Namespace + Chroot' },
-                ],
-                targetPrompt: '尝试对宿主设备 /dev/kmem 发起 probe，触发安全防护策略并被内核 seccomp 强行挂起。',
-                logs: ['[AUDIT_LOG] Operation forbidden by host policy. Subagent terminated safely.'],
-              },
-            ]}
-          />
+          {telemetry.at === 0 && (
+            <QuietState title="实时谱系尚未采集" detail={<>正在等待 <code>/api/swarm/progress</code>。</>} />
+          )}
+          {telemetry.at > 0 && telemetry.progress === undefined && (
+            <QuietState title="实时谱系不可用" detail={<><code>/api/swarm/progress</code> 尚未返回可用数据。</>} />
+          )}
+          {telemetry.progress !== undefined && (
+            <>
+              {anyRunning && <SymMonitor bpm={25} periodMs={2400} driftMs={0.1} />}
+              {realBatches.length === 0 && (
+                <QuietState title="谱系待机" detail="接口返回空调用集；当前没有可展示的 swarm 派单。" />
+              )}
+              {realBatches.map((batch) => {
+                const completed = batch.rows.filter((row) => row['status'] === 'completed').length;
+                const percent = batch.rows.length > 0 ? Math.round((completed / batch.rows.length) * 100) : 0;
+                return (
+                  <LineageJobTree
+                    key={batch.callId}
+                    batchId={batch.callId.startsWith('host:') ? batch.callId.slice(5) : batch.callId}
+                    title={batch.parentSessionId !== undefined ? `父会话 ${batch.parentSessionId}` : batch.callId}
+                    categoryTag={batch.callId.startsWith('host:') ? '宿主委派' : '未采集'}
+                    completedSummary={`${completed}/${batch.rows.length} 完成 (${percent}%)`}
+                    duration="未采集"
+                    isRunningBranch={batch.rows.some((row) => row['status'] === 'running')}
+                    jobs={batch.rows.map(toJob)}
+                  />
+                );
+              })}
+            </>
+          )}
         </div>
-      ) : (
+      )}
+
+      {tab === 'history' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <div style={{ backgroundColor: 'var(--bg-layer-2)', border: '1px solid var(--border-subtle)', borderRadius: '8px', padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: '13.5px' }}>BATCH-8390: 全量微服务 gRPC 端口模糊测试 (16 节点)</div>
-              <div style={{ fontSize: '11.5px', color: 'var(--text-tertiary)', marginTop: '2px' }}>归档时间: 2026-08-19 22:14:00 · 耗时 4m 12s · 0 漏洞</div>
-            </div>
-            <Chip>已归档</Chip>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <Button variant="ghost" size="sm" onClick={() => setDay((value) => shiftDay(value, -1))}>前一天</Button>
+            <input
+              type="date"
+              aria-label="谱系历史日期"
+              className="form-input"
+              max={dayForInput(today)}
+              value={dayForInput(day)}
+              onChange={(event) => {
+                const next = dayFromInput(event.target.value);
+                if (/^\d{8}$/.test(next) && next <= today) setDay(next);
+              }}
+            />
+            <Button variant="ghost" size="sm" disabled={day >= today} onClick={() => setDay((value) => shiftDay(value, 1))}>后一天</Button>
+            <Button variant="ghost" size="sm" onClick={() => history.refresh()}>重新读取</Button>
           </div>
 
-          <div style={{ backgroundColor: 'var(--bg-layer-2)', border: '1px solid var(--border-subtle)', borderRadius: '8px', padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: '13.5px' }}>BATCH-8384: Rust 宏系统内存布局与对齐分析 (8 节点)</div>
-              <div style={{ fontSize: '11.5px', color: 'var(--text-tertiary)', marginTop: '2px' }}>归档时间: 2026-08-19 18:30:12 · 耗时 1m 45s · 产物已合入</div>
-            </div>
-            <Chip>已归档</Chip>
-          </div>
+          {currentHistory === undefined && history.status !== 'error' && history.status !== 'degraded' && (
+            <QuietState title="正在读取谱系历史" detail={`日期: ${dayForInput(day)}`} />
+          )}
+          {currentHistory === undefined && (history.status === 'error' || history.status === 'degraded') && (
+            <QuietState
+              title="谱系历史读取失败"
+              detail={<><code>/api/swarm/history</code> 未答复{history.error?.status !== undefined ? ` (HTTP ${history.error.status})` : ''}: {history.error?.message ?? '请求失败'}</>}
+            />
+          )}
+
+          {currentHistory !== undefined && (
+            <>
+              {(history.status === 'degraded' || currentHistory.error !== undefined) && (
+                <div role="status" style={{ padding: '9px 12px', border: '1px solid var(--accent-amber)', borderRadius: '8px', color: 'var(--text-secondary)', fontSize: '12px' }}>
+                  {currentHistory.error !== undefined
+                    ? <>日志读取错误: {currentHistory.error}</>
+                    : <>刷新失败，保留 {formatAt(history.at)} 的数据{history.error?.status !== undefined ? ` (HTTP ${history.error.status})` : ''}: {history.error?.message}</>}
+                </div>
+              )}
+              {currentHistory.truncated && (
+                <div role="status" style={{ padding: '9px 12px', border: '1px solid var(--accent-amber)', borderRadius: '8px', color: 'var(--text-secondary)', fontSize: '12px' }}>
+                  当日日志已达上限，更早的记录未写入。
+                </div>
+              )}
+              {history.status === 'loading' && (
+                <div role="status" style={{ color: 'var(--text-tertiary)', fontSize: '12px' }}>正在刷新，当前继续显示上次结果。</div>
+              )}
+              {currentHistory.error === undefined && foldedHistory.length === 0 && (
+                <QuietState
+                  title="当日没有谱系记录"
+                  detail={<><code>~/.dsh/logs/swarm/lineage-{day}.jsonl</code> 不存在或为空。运行一次 swarm 工具后会产生真实记录。</>}
+                />
+              )}
+              {foldedHistory.map((call) => <HistoryCall key={call.callId} call={call} />)}
+            </>
+          )}
         </div>
       )}
     </div>

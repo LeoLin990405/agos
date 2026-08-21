@@ -10,7 +10,10 @@
  */
 import React from 'react';
 import { Button } from '@/components/ui/Button';
+import { clampReplayValue } from './replay-model';
 import '@/design-system/replay-scrubber.css';
+
+export { clampReplayValue } from './replay-model';
 
 export interface ReplayScrubberProps {
   /** 仅用于生成稳定且互不冲突的控件 id(同页多会话时不撞车)。 */
@@ -23,16 +26,6 @@ export interface ReplayScrubberProps {
   onChange: (next: number) => void;
   /** 「跳到最新」回调。 */
   onLive: () => void;
-}
-
-/** 把任意输入收进 [1, total];非有限数按「最新」处理。纯函数,便于测试。 */
-export function clampReplayValue(value: number, total: number): number {
-  if (total < 1) return 1;
-  if (!Number.isFinite(value)) return total;
-  const rounded = Math.round(value);
-  if (rounded < 1) return 1;
-  if (rounded > total) return total;
-  return rounded;
 }
 
 /** 刻度稀疏到能看清才画。上限 40:再密 1px 竖线就糊成一片灰。 */

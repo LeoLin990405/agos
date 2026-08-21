@@ -4,17 +4,6 @@ import { Dot } from '@/components/ui/Dot';
 import { Chip } from '@/components/ui/Chip';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
-import { GoalBanner } from '@/components/chat/GoalBanner';
-import { ReasoningBlock } from '@/components/chat/ReasoningBlock';
-import { TerminalCard } from '@/components/ui/TerminalCard';
-import { DiffCard } from '@/components/ui/DiffCard';
-import { SwarmBatchCard } from '@/components/chat/SwarmBatchCard';
-import { TeamCard } from '@/components/chat/TeamCard';
-import { MemoryCard } from '@/components/chat/MemoryCard';
-import { PlanCard } from '@/components/chat/PlanCard';
-import { TodoBar } from '@/components/chat/TodoBar';
-import { ApprovalPanel } from '@/components/chat/ApprovalPanel';
-import { QuestionPanel } from '@/components/chat/QuestionPanel';
 import { CommandDeck, type CommandDeckMessage } from '@/components/chat/CommandDeck';
 import type { ImageAttachmentDraft } from '@/components/chat/ImageAttachments';
 import { VisionArbiterCard, type VisionArbiterCardState } from '@/components/chat/VisionArbiterCard';
@@ -47,6 +36,8 @@ import '@/design-system/session-menu.css';
 import {
   canHostOpenPath,
   conversationStore,
+  ensureLiveConnection,
+  liveConnectionStore,
   openConversation,
   openHostPath,
   refreshSessions,
@@ -61,6 +52,7 @@ import {
 import { LiveTranscript, useTranscriptItemCount, type OptimisticImageMessage } from '@/pages/chat-transcript';
 import { AgosComputer } from '@/components/stage/AgosComputer';
 import { ReplayScrubber } from '@/components/stage/ReplayScrubber';
+import { deriveChatConnectionState } from '@/pages/chat-connection-state';
 
 /** DeepSeek 原生四模式 id → 名(agentPreset.list 实测)。 */
 const PRESET_NAMES: Record<string, string> = { standard: '标准模式', code: 'PTC 模式', minimal: '极简模式', cordis: '创造模式' };
@@ -109,15 +101,13 @@ export const ChatPage: React.FC<{
   onNavigateConsole?: () => void;
   onNavigateGraph?: (nodeId?: string) => void;
 }> = ({ onNavigateConsole, onNavigateGraph }) => {
-  const [activeSessionId, setActiveSessionId] = useState('1');
+  const [activeSessionId, setActiveSessionId] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [isNewSessionOpen, setIsNewSessionOpen] = useState(false);
   const [pendingPresetId, setPendingPresetId] = useState<string | undefined>(undefined);
   const [isComputerOpen, setIsComputerOpen] = useState(false);
   // undefined = 跟随最新(唯一的「实时」表示法);数字 = 回卷到第 N 项
   const [replayValue, setReplayValue] = useState<number | undefined>(undefined);
-  const [activeModel, setActiveModel] = useState('DeepSeek-V3');
-  const [hasGoal, setHasGoal] = useState(true);
   const [optimisticImageMessages, setOptimisticImageMessages] = useState<OptimisticImageMessage[]>([]);
   const [visionCards, setVisionCards] = useState<LocalVisionCard[]>([]);
   const [sessionMeta, setSessionMeta] = useState<SessionMetaSnapshot>(EMPTY_SESSION_META);
@@ -142,6 +132,7 @@ export const ChatPage: React.FC<{
   const mutationVersionsRef = useRef(new Map<string, number>());
   const menuReturnFocusRef = useRef<HTMLElement | null>(null);
   const deleteReturnFocusRef = useRef<HTMLElement | null>(null);
+  const canCreateSessionRef = useRef(false);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -155,7 +146,9 @@ export const ChatPage: React.FC<{
 
   // 侧栏「新会话」按钮与 ⌘K 走同一入口:CustomEvent → 打开建会话弹窗
   useEffect(() => {
-    const open = (): void => setIsNewSessionOpen(true);
+    const open = (): void => {
+      if (canCreateSessionRef.current) setIsNewSessionOpen(true);
+    };
     const onKey = (e: KeyboardEvent): void => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); open(); }
     };
@@ -170,8 +163,21 @@ export const ChatPage: React.FC<{
   // 订阅真实 stores
   const liveSessions = useSyncExternalStore(sessionsStore.subscribe, sessionsStore.getSnapshot);
   const isStreamOnline = useSyncExternalStore(streamStore.subscribe, streamStore.getSnapshot);
+  const liveConnectionPhase = useSyncExternalStore(liveConnectionStore.subscribe, liveConnectionStore.getSnapshot);
 
-  const liveMode = liveSessions.rows.length > 0;
+  useEffect(() => {
+    ensureLiveConnection();
+  }, []);
+
+  const chatConnectionState = deriveChatConnectionState({
+    sessionsLoadedAt: liveSessions.loadedAt,
+    sessionsError: liveSessions.error,
+    sessionCount: liveSessions.rows.length,
+    muxPhase: liveConnectionPhase,
+  });
+  const disconnectedService = liveConnectionPhase === 'offline' ? 'events.mux' : 'session.list';
+  const liveMode = chatConnectionState === 'ready';
+  canCreateSessionRef.current = chatConnectionState === 'empty' || liveMode;
   const hasActiveLiveSession = liveMode
     && activeSessionId !== ''
     && liveSessions.rows.some((row) => row.sessionId === activeSessionId && !deletedSessionIds.has(row.sessionId));
@@ -250,7 +256,7 @@ export const ChatPage: React.FC<{
   // 回放:总项数来自 fold 快照;换会话时把回卷位置清掉,否则会把上一个会话的位置带过来
   const replayTotal = useTranscriptItemCount(activeSessionId);
   useEffect(() => { setReplayValue(undefined); }, [activeSessionId]);
-  // 有真后端时自动选中最近会话并打开(mock id '1' 不可用)
+  // 真连接就绪后自动选中最近会话并打开。
   useEffect(() => {
     if (!liveMode) return;
     const hidden = new Set([
@@ -273,58 +279,17 @@ export const ChatPage: React.FC<{
     }
   }, [activeSessionId, deletedSessionIds, hostArchive, liveMode, liveSessions.rows, sessionMeta.archived, sessionMeta.hostArchived]);
 
-  // 真实会话列表映射 (兼顾回退)
-  const defaultSessions: SessionListItem[] = [
-    {
-      id: '1',
-      title: '分布式认证令牌轮转与流式事件管道重构',
-      cwd: '/Users/leo/Projects/auth-matrix',
-      running: true,
-      meta: '8 轮 · 38.4k',
-      time: '刚刚',
-      updatedAt: Date.now(),
-    },
-    {
-      id: '2',
-      title: 'PostgreSQL DataConnect 模式迁移回归',
-      cwd: '/Users/leo/Projects/dataconnect',
-      running: false,
-      meta: '14 轮 · 52.1k',
-      time: '1小时前',
-      updatedAt: Date.now() - 3_600_000,
-    },
-    {
-      id: '3',
-      title: 'Seccomp 宿主内核隔离逃逸巡检',
-      cwd: '/Users/leo/Projects/security',
-      running: false,
-      meta: '22 轮 · 84.0k',
-      time: '3小时前',
-      updatedAt: Date.now() - 10_800_000,
-    },
-    {
-      id: '4',
-      title: 'AgOS 遥测甲板设计系统 Token 提取',
-      cwd: '/Users/leo/Documents/kimi/workspace/agos-frontend',
-      running: false,
-      meta: '5 轮 · 19.8k',
-      time: '昨天',
-      updatedAt: Date.now() - 86_400_000,
-    },
-  ];
-
-  const renderedSessions: SessionListItem[] =
-    liveSessions.rows.length > 0
-      ? liveSessions.rows.filter((r) => !deletedSessionIds.has(r.sessionId)).map((r) => ({
-          id: r.sessionId,
-          title: titleOverrides[r.sessionId] ?? r.title,
-          cwd: r.cwd,
-          running: r.running,
-          meta: `${r.turns} 轮 · ${(r.tokens / 1000).toFixed(1)}k`,
-          time: formatSessionRelativeTime(r.updatedAt),
-          updatedAt: r.updatedAt,
-        }))
-      : defaultSessions;
+  const renderedSessions: SessionListItem[] = liveSessions.rows
+    .filter((r) => !deletedSessionIds.has(r.sessionId))
+    .map((r) => ({
+      id: r.sessionId,
+      title: titleOverrides[r.sessionId] ?? r.title,
+      cwd: r.cwd,
+      running: r.running,
+      meta: `${r.turns} 轮 · ${(r.tokens / 1000).toFixed(1)}k`,
+      time: formatSessionRelativeTime(r.updatedAt),
+      updatedAt: r.updatedAt,
+    }));
 
   const effectiveHostArchivedIds = hostArchive.available
     ? hostArchive.sessionIds
@@ -531,7 +496,7 @@ export const ChatPage: React.FC<{
   };
 
   const handleSend = async (message: CommandDeckMessage) => {
-    if (liveMode && !hasActiveLiveSession) return { ok: false, error: '请先新建或选择会话' };
+    if (!liveMode || !hasActiveLiveSession) return { ok: false, error: '事件信道未就绪，请先连接并选择会话' };
     const result = await sendPromptParts(activeSessionId, message.parts);
     if (mountedRef.current && result.ok && message.images.length > 0) {
       setOptimisticImageMessages((previous) => [...previous, {
@@ -546,8 +511,7 @@ export const ChatPage: React.FC<{
   };
 
   /** 权限胶囊点击:滚到流内第一个「未决」审批面板。
-   *  已决面板渲染成 .pc-approval-resolved,所以 .approval-panel 只会命中待批的那些。
-   *  只在 liveMode 下动作 —— demo 态流里也有一张展示用的面板,不该被命中。 */
+   *  已决面板渲染成 .pc-approval-resolved,所以 .approval-panel 只会命中待批的那些。 */
   const handleFocusApproval = (): void => {
     if (!liveMode) return;
     document.querySelector('.chat-scroll-view .approval-panel')
@@ -560,7 +524,7 @@ export const ChatPage: React.FC<{
   };
 
   const handleAnalyzeImage = (image: ImageAttachmentDraft) => {
-    if (liveMode && !hasActiveLiveSession) return;
+    if (!liveMode || !hasActiveLiveSession) return;
     const id = localId('vision');
     const controller = new AbortController();
     visionControllersRef.current.set(id, controller);
@@ -708,12 +672,16 @@ export const ChatPage: React.FC<{
       <aside className="session-sidebar" aria-label="会话侧栏">
         <div className="session-sidebar-header">
           <div className="session-sidebar-heading">
-            <span className="u-microlabel">会话 ({renderedSessions.length})</span>
+            <span className="u-microlabel">
+              会话{chatConnectionState === 'ready' || chatConnectionState === 'empty' ? ` (${renderedSessions.length})` : ''}
+            </span>
             <Button
               variant="primary"
               size="sm"
               style={{ padding: '0 10px', gap: '4px' }}
               aria-label="新建会话"
+              disabled={chatConnectionState === 'connecting' || chatConnectionState === 'disconnected'}
+              title={chatConnectionState === 'disconnected' ? 'events.mux 未连接，当前无法新建会话' : undefined}
               onClick={() => setIsNewSessionOpen(true)}
             >
               <span style={{ fontSize: '14px', lineHeight: 1 }}>+</span>
@@ -731,6 +699,7 @@ export const ChatPage: React.FC<{
               placeholder="搜索标题、目录或对话内容..."
               maxLength={500}
               value={searchQuery}
+              disabled={chatConnectionState !== 'ready'}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
@@ -741,53 +710,68 @@ export const ChatPage: React.FC<{
         </div>
 
         <div className="session-list-scroll">
-          {sectionedSessions.pinned.length > 0 && (
-            <section className="session-section" aria-labelledby="session-pinned-heading">
-              <div className="session-section-heading" id="session-pinned-heading">
-                <span className="u-microlabel">置顶</span>
-                <span className="u-num">{sectionedSessions.pinned.length}</span>
-              </div>
-              {sectionedSessions.pinned.map((session) => renderSessionRow(session, { pinned: true }))}
-            </section>
+          {chatConnectionState === 'connecting' && (
+            <div className="session-empty-note" role="status">正在连接宿主事件信道…</div>
           )}
-
-          <section className="session-section" aria-labelledby="session-recent-heading">
-            <div className="session-section-heading" id="session-recent-heading">
-              <span className="u-microlabel">最近</span>
-              <span className="u-num">{sectionedSessions.recent.length}</span>
+          {chatConnectionState === 'disconnected' && (
+            <div className="session-empty-note" role="alert">
+              {disconnectedService === 'events.mux'
+                ? 'events.mux 未连接，会话与事件暂不可读。'
+                : 'session.list 未连接，会话列表暂不可读。'}
             </div>
-            {sectionedSessions.recent.map((session) => renderSessionRow(session))}
-            {sectionedSessions.recent.length === 0 && sectionedSessions.pinned.length === 0 && (
-              <div className="session-empty-note">没有匹配的会话</div>
+          )}
+          {chatConnectionState === 'empty' && (
+            <div className="session-empty-note" role="status">还没有会话。使用“新建会话”开始。</div>
+          )}
+          {chatConnectionState === 'ready' && (<>
+            {sectionedSessions.pinned.length > 0 && (
+              <section className="session-section" aria-labelledby="session-pinned-heading">
+                <div className="session-section-heading" id="session-pinned-heading">
+                  <span className="u-microlabel">置顶</span>
+                  <span className="u-num">{sectionedSessions.pinned.length}</span>
+                </div>
+                {sectionedSessions.pinned.map((session) => renderSessionRow(session, { pinned: true }))}
+              </section>
             )}
-          </section>
 
-          <section className="session-section" aria-labelledby="session-archived-heading">
-            <button
-              type="button"
-              className="session-archive-toggle"
-              aria-expanded={archivedExpanded}
-              aria-controls="session-archived-list"
-              onClick={() => setArchivedExpanded((expanded) => !expanded)}
-            >
-              <span className="u-microlabel" id="session-archived-heading">已归档 ({sectionedSessions.archived.length})</span>
-              <svg className="session-archive-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
-                <path d="m9 18 6-6-6-6" />
-              </svg>
-            </button>
-            <div
-              id="session-archived-list"
-              className="session-archive-body"
-              style={{ height: archivedExpanded ? `${sectionedSessions.archived.length * 68}px` : '0px' }}
-              aria-hidden={!archivedExpanded}
-            >
-              {archivedExpanded && sectionedSessions.archived.map((session) => renderSessionRow(session, { archived: true }))}
-            </div>
-          </section>
+            <section className="session-section" aria-labelledby="session-recent-heading">
+              <div className="session-section-heading" id="session-recent-heading">
+                <span className="u-microlabel">最近</span>
+                <span className="u-num">{sectionedSessions.recent.length}</span>
+              </div>
+              {sectionedSessions.recent.map((session) => renderSessionRow(session))}
+              {sectionedSessions.recent.length === 0 && sectionedSessions.pinned.length === 0 && (
+                <div className="session-empty-note">没有匹配的会话</div>
+              )}
+            </section>
 
-          {sessionActionError !== undefined && (
-            <div className="session-action-error" role="alert">{sessionActionError}</div>
-          )}
+            <section className="session-section" aria-labelledby="session-archived-heading">
+              <button
+                type="button"
+                className="session-archive-toggle"
+                aria-expanded={archivedExpanded}
+                aria-controls="session-archived-list"
+                onClick={() => setArchivedExpanded((expanded) => !expanded)}
+              >
+                <span className="u-microlabel" id="session-archived-heading">已归档 ({sectionedSessions.archived.length})</span>
+                <svg className="session-archive-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+                  <path d="m9 18 6-6-6-6" />
+                </svg>
+              </button>
+              <div
+                id="session-archived-list"
+                className="session-archive-body"
+                style={{ height: archivedExpanded ? `${sectionedSessions.archived.length * 68}px` : '0px' }}
+                aria-hidden={!archivedExpanded}
+              >
+                {archivedExpanded && sectionedSessions.archived.map((session) => renderSessionRow(session, { archived: true }))}
+              </div>
+            </section>
+
+            {sessionActionError !== undefined && (
+              <div className="session-action-error" role="alert">{sessionActionError}</div>
+            )}
+          </>)}
         </div>
       </aside>
 
@@ -823,21 +807,25 @@ export const ChatPage: React.FC<{
       )}
 
       {/* 舞台 Stage */}
-      <main className={`app-stage${isEmptyConversation ? ' is-empty' : ''}`}>
+      <main className={`app-stage${isEmptyConversation || chatConnectionState !== 'ready' ? ' is-empty' : ''}`}>
         <AppTopbar
           title={liveMode
             ? (renderedSessions.find((x) => x.id === activeSessionId)?.title ?? 'AgOS 对话甲板')
-            : '分布式认证令牌轮转与流式事件管道重构'}
+            : chatConnectionState === 'connecting'
+              ? '正在连接 AgOS'
+              : chatConnectionState === 'disconnected'
+                ? `${disconnectedService} 未连接`
+                : 'AgOS 对话甲板'}
           badge={liveMode
             ? (() => { const p = liveSessions.rows.find((x) => x.sessionId === activeSessionId)?.agentPreset ?? ''; const n = PRESET_NAMES[p] ?? p; return n !== '' ? <Chip active>{n}</Chip> : undefined; })()
-            : <Chip active>{activeModel} · 671B</Chip>}
+            : undefined}
           rightActions={
             <>
 
               <div className="telemetry-pill">
                 <span className="u-microlabel">RPC 管道</span>
-                <span className="val" style={{ color: isStreamOnline ? 'var(--state-done)' : 'var(--state-running)', fontSize: '10.5px' }}>
-                  ● {isStreamOnline ? 'ONLINE WS' : 'OFFLINE'}
+                <span className="val" style={{ color: isStreamOnline ? 'var(--state-done)' : chatConnectionState === 'connecting' ? 'var(--state-running)' : 'var(--state-failed)', fontSize: '10.5px' }}>
+                  ● {isStreamOnline ? 'ONLINE WS' : chatConnectionState === 'connecting' ? 'CONNECTING' : 'OFFLINE'}
                 </span>
               </div>
 
@@ -854,202 +842,31 @@ export const ChatPage: React.FC<{
           }
         />
 
-        {/* 顶部目标横幅 */}
-        {hasGoal && !liveMode && (  /* goal.* 未接线,mock 横幅只在 demo 态 */
-          <GoalBanner
-            goalId="GOAL-8402"
-            title="完成分布式认证租约升级并完成 8 节点 Swarm 攻防 Fuzzing 回归"
-            progressPercent={65}
-            onClear={() => setHasGoal(false)}
-          />
-        )}
-
-        {/* 消息滚动流:真后端=fold 真渲染;无后端=展示 mock(demo 态) */}
+        {/* 消息滚动流只呈现 fold 真值或明确的连接/空状态。 */}
         <div className="chat-scroll-view">
-          {isEmptyConversation ? (
+          {chatConnectionState === 'connecting' ? (
+            <div className="es-tagline" role="status">正在连接宿主事件信道 events.mux…</div>
+          ) : chatConnectionState === 'disconnected' ? (
+            <div className="es-hero" role="alert">
+              <div className="es-logotype">{disconnectedService} 未连接</div>
+              <div className="es-tagline">
+                {disconnectedService === 'events.mux'
+                  ? '宿主事件信道不可达，当前无法读取会话列表与实时事件。'
+                  : '宿主会话接口未响应，当前无法确认会话列表；实时输入已停用。'}
+              </div>
+              <div className="es-tagline">在终端重启本地服务：</div>
+              <code>pkill -f 'dsh web --port 3091'; sleep 3; nohup dsh web --port 3091 --no-open &gt;/tmp/dsh.log 2&gt;&amp;1 &amp;</code>
+            </div>
+          ) : chatConnectionState === 'empty' || isEmptyConversation ? (
             <EmptyStateHero />
-          ) : liveMode ? (
+          ) : (
             <LiveTranscript
               sessionId={activeSessionId}
               optimisticImageMessages={optimisticImageMessages}
               replayLimit={replayValue}
             />
-          ) : (<>
-          {/* 用户 Prompt */}
-          <div className="message-wrap">
-            <div className="message-user">
-              <div className="message-user-header">
-                <span style={{ fontWeight: 700, fontSize: '12.5px' }}>Leo (Architect)</span>
-                <span className="u-num" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>18:42:10</span>
-              </div>
-              <div style={{ fontSize: '13.5px', lineHeight: 1.6 }}>
-                请对 <code>auth-matrix</code> 模块执行深度安全审计与高并发回归。需要拉起 8 节点并发 Swarm 编队，覆盖 Token 重放、内存竞争、Redis Failover 及沙箱边界。最后将修复后的令牌轮转配置写入受保护环境。
-              </div>
-              <div className="user-attachments">
-                <Chip>📎 auth_matrix.go:L1-84</Chip>
-                <Chip>📎 jwt_verifier.rs</Chip>
-                <Chip>📎 cluster-prod.yaml</Chip>
-              </div>
-            </div>
-          </div>
-
-          {/* 助手消息 */}
-          <div className="message-wrap">
-            <div className="message-assistant">
-              <div className="assistant-meta">
-                <span style={{ fontWeight: 700, color: 'var(--state-running)', fontSize: '12px' }}>AgOS Core Agent</span>
-                <span>·</span>
-                <span className="u-num">耗时 4.2s</span>
-                <span>·</span>
-                <Chip variant="purple">Swarm Orchestrator</Chip>
-              </div>
-
-              {/* Todo 看板条 */}
-              <TodoBar
-                todos={[
-                  { content: '定位 18ms 并发竞争窗', status: 'completed' },
-                  { content: '引入分布式租约锁机制', status: 'completed' },
-                  { content: 'Swarm 8 节点攻防 Fuzzing 回归', status: 'in_progress' },
-                  { content: '记忆沉淀与架构图谱固化', status: 'pending' },
-                ]}
-              />
-
-              <ReasoningBlock duration="3.4s" tokens="1,420 tokens">
-                1. 分析了 <code>auth_matrix.go</code> 中的令牌刷新锁机制，发现并发更新时存在 18ms 的时间窗未加分布式互斥锁。<br />
-                2. 规划 8 节点并发 Swarm 编队 (#BATCH-8402)，分别派遣给独立的特化子代理进行 Fuzzing 和故障演练。<br />
-                3. 组建特化安全编队，并在完成审计后将经验固化为 Memory 节点写入知识图谱。
-              </ReasoningBlock>
-
-              <div style={{ fontSize: '13.5px', lineHeight: 1.6, color: 'var(--text-primary)' }}>
-                已为您编排 8 节点并发审计编队 <strong>#BATCH-8402</strong>。在启动 Swarm 前，已在本地隔离容器中通过基础单元测试，以下为测试回执与代码补丁：
-              </div>
-
-              {/* 1. 终端卡 */}
-              <TerminalCard
-                title="bash_exec: cargo test --package auth-matrix --lib"
-                command="cargo test --package auth-matrix --lib"
-                output={`running 18 tests\ntest token::tests::test_jwt_signature_verify ... ok\ntest token::tests::test_refresh_token_rotation ... ok\ntest matrix::tests::test_acl_permission_grant ... ok\ntest session::tests::test_store_concurrency ... ok\ntest result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.18s`}
-                duration="1.2s"
-                exitCode={0}
-              />
-
-              {/* 2. 代码 Diff 卡 */}
-              <DiffCard
-                filePath="pkg/auth/token_rotator.rs"
-                stats="+4 / -2 行"
-                lines={[
-                  { type: 'ctx', lineNo: 42, content: '    let current_token = self.store.get_token(session_id).await?;' },
-                  { type: 'del', lineNo: 43, content: '    if current_token.is_expired() {' },
-                  { type: 'del', lineNo: 44, content: '        return self.issue_new_token(session_id).await;' },
-                  { type: 'add', lineNo: 43, content: '    // 加分布式互斥租约，消除 18ms 并发竞争窗' },
-                  { type: 'add', lineNo: 44, content: '    let _lease = self.lock_manager.acquire_lease(session_id, Duration::from_millis(500)).await?;' },
-                  { type: 'add', lineNo: 45, content: '    if current_token.is_expired() {' },
-                  { type: 'add', lineNo: 46, content: '        return self.issue_new_token_atomic(session_id, _lease).await;' },
-                  { type: 'ctx', lineNo: 47, content: '    }' },
-                ]}
-              />
-
-              {/* 3. Team 编队卡 */}
-              <TeamCard
-                teamId="TEAM-SEC-ALPHA"
-                teamName="认证攻防特化编队"
-                leader="auth-crypto-auditor"
-                members={[
-                  { name: 'auth-crypto-auditor', role: 'Leader', model: 'Claude-3.5', status: 'done', currentAction: '已生成密钥对' },
-                  { name: 'token-replay-verifier', role: 'Fuzzer', model: 'Qwen-2.5', status: 'done', currentAction: '0 重放注入成功' },
-                  { name: 'redis-cluster-failover', role: 'Chaos', model: 'DeepSeek', status: 'running', currentAction: '哨兵重选压测中' },
-                ]}
-              />
-
-              {/* 4. Swarm 批次卡 (含 CivStrip 投票/晋升门) */}
-              <SwarmBatchCard
-                batchId="BATCH-8402"
-                title="8 节点并发安全巡检与契约回归"
-                completedCount={5}
-                totalCount={8}
-                isRunning={true}
-                civStats={{
-                  passed: '7/8 赞成',
-                  vetoed: 1,
-                  gateState: '⚠️ 晋升门阻塞 (等待特权授权)',
-                }}
-                rows={[
-                  { idx: '01', name: 'auth-crypto-auditor', role: '🎭⤴ 审计', provider: 'Claude-3.5', time: '1.2s', state: 'done', stateLabel: '已完成' },
-                  { idx: '02', name: 'token-replay-verifier', role: '🎭⛓ 重放', provider: 'Qwen-2.5', time: '2.4s', state: 'done', stateLabel: '已完成' },
-                  { idx: '03', name: 'session-store-race-check', role: '🎭⤴ 竞争', provider: 'DeepSeek', time: '3.1s', state: 'done', stateLabel: '已完成' },
-                  { idx: '04', name: 'event-mux-benchmark', role: '🎭 基准', provider: 'Local-7B', time: '4.5s', state: 'done', stateLabel: '已完成' },
-                  { idx: '05', name: 'jwt-leak-fuzzer', role: '🎭⤴ 模糊', provider: 'Claude-3.5', time: '5.2s', state: 'done', stateLabel: '已完成' },
-                  { idx: '06', name: 'redis-cluster-failover', role: '🎭⛓ 演练', provider: 'DeepSeek', time: '12.8s', state: 'running', stateLabel: '处理中' },
-                  { idx: '07', name: 'tls-handshake-loadtest', role: '🎭 压测', provider: 'Qwen-2.5', time: '--', state: 'queued', stateLabel: '等待中' },
-                  { idx: '08', name: 'sandbox-escape-probe', role: '🎭⛓ 探针', provider: 'DeepSeek', time: '8.9s', state: 'failed', stateLabel: '未成功' },
-                ]}
-              />
-
-              {/* 5. 记忆沉淀卡 (带新节点生长动效) */}
-              <MemoryCard
-                memoryId="mem-incident-redis-failover-race"
-                category="incident"
-                title="Redis 哨兵重选期间租约竞争修复"
-                description="沉淀了关于在 18ms 时间窗内通过 LockManager 强互斥租约消除 Token 重放风险的工程结论，已向图谱注入 3 条双链。"
-                wikilinks={['proj-swarm-orchestration', 'proj-dataconnect-postgres', 'ref-sym-respiration-spec']}
-                bytes={2750}
-                onOpenGraph={(id) => onNavigateGraph?.(id)}
-              />
-
-              {/* 6. 人工提问面板 (input_required 独立态) */}
-              <QuestionPanel
-                questionId="q-8402"
-                prompt="检测到集群共有 3 个备选 Redis 哨兵节点，请决策是否在演练中允许跨机房多活仲裁？"
-                options={[
-                  '允许跨机房多活仲裁 (推荐, 延时 +8ms, 高可用最高)',
-                  '仅限本地同机房 Failover (延时最低, 无跨域一致性保证)',
-                  '使用自建 Paxos 仲裁网关',
-                ]}
-              />
-
-              {/* 7. 特权审批面板 */}
-              <ApprovalPanel
-                title="特权操作审批请求: 写入受保护生产配置"
-                riskLevel="LEVEL 4 · 高风险"
-                actionSummary="write_to_file -> /etc/agos/secrets.env"
-                diffSnippet={[
-                  '+ AGOS_AUTH_MUTEX_LEASE_MS=500',
-                  '+ AGOS_REDIS_FAILOVER_CLUSTER_NODES="10.0.4.11:6379,10.0.4.12:6379"',
-                ]}
-              />
-
-              {/* 流式指示器 */}
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  marginTop: '6px',
-                  padding: '10px 14px',
-                  backgroundColor: 'var(--bg-layer-2)',
-                  borderRadius: '8px',
-                  border: '1px solid var(--border-subtle)',
-                  boxShadow: 'var(--shadow-card)',
-                }}
-              >
-                <div className="stream-live-indicator">
-                  <Dot state="running" />
-                  <span style={{ fontWeight: 600 }}>正在汇聚 Redis Failover 遥测探针与内核阻断日志...</span>
-                  <span className="stream-cursor" />
-                </div>
-                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span className="u-num" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-                    74.2 tok/s · 18.4s
-                  </span>
-                  <Button variant="danger" size="sm" style={{ height: '22px', padding: '0 8px' }}>
-                    中止
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </>)}
-          {visionCards.filter((card) => card.sessionId === activeSessionId).map((card) => (
+          )}
+          {liveMode && visionCards.filter((card) => card.sessionId === activeSessionId).map((card) => (
             <div className="message-wrap" key={card.id}>
               <VisionArbiterCard
                 imageName={card.imageName}
@@ -1082,24 +899,34 @@ export const ChatPage: React.FC<{
           />
         )}
 
-        <ProgressDock />
+        {liveMode && <ProgressDock />}
 
-        {(!liveMode || hasActiveLiveSession) ? (
-          <CommandDeck sessionId={hasActiveLiveSession ? activeSessionId : undefined}
+        {liveMode && hasActiveLiveSession ? (
+          <CommandDeck sessionId={activeSessionId}
             onSend={handleSend}
             onAnalyzeImage={handleAnalyzeImage}
             onFocusApproval={handleFocusApproval}
           />
         ) : (
           <div className="session-no-active" role="status">
-            <span>没有可用会话，请先选择或新建会话。</span>
-            <Button variant="primary" size="sm" aria-label="新建可用会话" onClick={() => setIsNewSessionOpen(true)}>
-              新建会话
-            </Button>
+            <span>
+              {chatConnectionState === 'connecting'
+                ? '正在连接 events.mux，输入将在连接完成后可用。'
+                : chatConnectionState === 'disconnected'
+                  ? `输入已停用：${disconnectedService} 未连接，发送内容无法安全送达宿主。`
+                  : chatConnectionState === 'empty'
+                    ? '当前没有会话可接收输入，请先新建会话。'
+                    : '没有可用会话，请先选择或新建会话。'}
+            </span>
+            {(chatConnectionState === 'empty' || chatConnectionState === 'ready') && (
+              <Button variant="primary" size="sm" aria-label="新建可用会话" onClick={() => setIsNewSessionOpen(true)}>
+                新建会话
+              </Button>
+            )}
           </div>
         )}
 
-        {isEmptyConversation && (
+        {(chatConnectionState === 'empty' || isEmptyConversation) && (
           <div className="es-below-host">
             <EmptyStateBelow
               onSelectPreset={(presetId) => { setPendingPresetId(presetId); setIsNewSessionOpen(true); }}
