@@ -73,10 +73,30 @@ test('deriveConsole retains genuine zero values and real progress counts', () =>
   assert.equal(derived.skills, 0);
   assert.equal(derived.skillsWarn, 0);
   assert.equal(derived.skillsError, 0);
+  assert.equal(derived.skillsServedWarn, undefined);
   assert.equal(derived.progressLive, true);
   assert.equal(derived.sessionsLive, false);
 });
 
+test('deriveConsole surfaces servedToModel skill health separately from console-only', () => {
+  const derived = deriveConsole({
+    overview: {
+      skills: {
+        skills: 400,
+        warn: 95,
+        error: 0,
+        servedToModel: { skills: 384, warn: 91, error: 0 },
+        consoleOnly: { skills: 363, warn: 4, error: 0 },
+        consistency: { summary: '59 个 skill 在多根重复，其中 59 个内容不一致' },
+      },
+    },
+    progress: undefined,
+    at: 1,
+  }, { rows: [] });
+  assert.equal(derived.skillsServedWarn, 91);
+  assert.equal(derived.skillsConsoleWarn, 4);
+  assert.match(derived.skillsConsistency ?? '', /59 个/);
+});
 test('deriveConsole prefers the overview lineage call count when progress is absent', () => {
   const derived = deriveConsole({
     overview: { lineage: { calls: 7 } },

@@ -1,8 +1,24 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { fetchJsonResource, useResource } from '@/lib/useResource';
-import { filterSkillFindings, parseSkillsPayload, type SkillAuditRoot, type SkillFinding, type SkillsPayload } from './skills-model';
+import { conversationStore, fetchSkillList } from '@/stores/live';
+import {
+  clipDescription,
+  filterCatalog,
+  filterSkillFindings,
+  groupCatalogByCategory,
+  mergeRpcCatalog,
+  neverUsedCount,
+  parseSkillsPayload,
+  sortCatalog,
+  type SkillAuditRoot,
+  type SkillCatalogEntry,
+  type SkillFinding,
+  type SkillsPayload,
+  type SkillsSort,
+  type SkillsTab,
+} from './skills-model';
 
 const panelStyle: React.CSSProperties = {
   borderTop: '1px solid var(--border-subtle)',
@@ -56,6 +72,10 @@ function AuditRoot({ audit, query }: { audit: SkillAuditRoot; query: string }) {
     <section style={panelStyle} aria-label={audit.root}>
       <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
         <code style={{ color: 'var(--text-primary)', overflowWrap: 'anywhere', marginRight: 'auto' }}>{audit.root}</code>
+        <Badge state={audit.servedToModel ? 'running' : 'queued'}>
+          {audit.servedToModel ? '模型在用' : '控制台-only'}
+        </Badge>
+        {audit.rank != null && <Badge state="queued">rank {audit.rank}</Badge>}
         <Badge state="queued">技能 {skills ?? '未采集'}</Badge>
         <Badge state={errors === undefined ? 'queued' : errors > 0 ? 'failed' : 'done'}>错误 {errors ?? '未采集'}</Badge>
         <Badge state={warnings === undefined ? 'queued' : warnings > 0 ? 'running' : 'done'}>警告 {warnings ?? '未采集'}</Badge>
@@ -76,27 +96,98 @@ function AuditRoot({ audit, query }: { audit: SkillAuditRoot; query: string }) {
   );
 }
 
+function CatalogRow({
+  row,
+  usage,
+}: {
+  row: SkillCatalogEntry;
+  usage: { count: number; lastAt: number } | undefined;
+}) {
+  const count = usage?.count ?? 0;
+  const lastAt = usage?.lastAt;
+  return (
+    <li style={{ display: 'grid', gridTemplateColumns: 'minmax(140px, 220px) 1fr auto', gap: '12px', alignItems: 'start', padding: '10px 0', borderTop: '1px solid var(--border-dim)', fontSize: '12px' }}>
+      <div>
+        <strong style={{ color: 'var(--text-primary)', overflowWrap: 'anywhere' }}>{row.name}</strong>
+        <div style={{ marginTop: '6px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+          <Badge state={row.modelInvocable ? 'done' : 'queued'}>{row.modelInvocable ? '模型可调' : '仅用户'}</Badge>
+          {row.shadowed && <Badge state={row.drifted ? 'running' : 'queued'}>{row.drifted ? '遮蔽·漂移' : '遮蔽'}</Badge>}
+          {row.pathsGateCandidate && <Badge state="queued">paths 候选</Badge>}
+          {!row.servedToModel && <Badge state="queued">未进模型根</Badge>}
+        </div>
+      </div>
+      <p style={{ margin: 0, color: 'var(--text-secondary)', lineHeight: 1.55 }}>{clipDescription(row.description || '（无 description）')}</p>
+      <div className="u-num" style={{ color: 'var(--text-tertiary)', textAlign: 'right', whiteSpace: 'nowrap' }}>
+        {count === 0 ? (
+          <span>从未调用</span>
+        ) : (
+          <>
+            <div>×{count}</div>
+            {lastAt ? <div>{new Date(lastAt).toLocaleString()}</div> : null}
+          </>
+        )}
+      </div>
+    </li>
+  );
+}
+
 export const SkillsView: React.FC = () => {
   const [query, setQuery] = useState('');
+  const [tab, setTab] = useState<SkillsTab>('catalog');
+  const [sort, setSort] = useState<SkillsSort>('name');
+  const [rpcOverlay, setRpcOverlay] = useState<Array<{ name: string; description: string; whenToUse?: string; modelInvocable: boolean }>>([]);
   const resource = useResource<SkillsPayload>({ url: '/api/agos/skills', fetcher: fetchSkills });
   const payload = resource.data;
   const roots = payload?.roots;
   const isBusy = resource.status === 'idle' || resource.status === 'loading';
   const isRefreshing = resource.status === 'loading' && payload !== undefined;
 
+  useEffect(() => {
+    const sessionId = conversationStore.activeSessionId();
+    if (!sessionId) {
+      setRpcOverlay([]);
+      return;
+    }
+    let cancelled = false;
+    void fetchSkillList(sessionId).then((rows) => {
+      if (!cancelled) setRpcOverlay(rows);
+    });
+    return () => { cancelled = true; };
+  }, [payload?.at]);
+
+  const catalogBase = payload?.catalog ?? [];
+  const catalogMerged = useMemo(
+    () => mergeRpcCatalog(catalogBase, rpcOverlay),
+    [catalogBase, rpcOverlay],
+  );
+  const filtered = useMemo(
+    () => sortCatalog(filterCatalog(catalogMerged, query), sort, payload?.usage),
+    [catalogMerged, query, sort, payload?.usage],
+  );
+  const groups = useMemo(() => groupCatalogByCategory(filtered), [filtered]);
+  const unused = neverUsedCount(catalogMerged, payload?.usage);
+  const consistency = payload?.consistency;
+  const budget = payload?.budget;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
       <header style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
         <div>
-          <h2 style={{ fontSize: '16px', fontWeight: 800, margin: 0 }}>技能审计</h2>
-          <p style={{ ...quietText, margin: '4px 0 0' }}>只读数据源 <code>/api/agos/skills</code></p>
+          <h2 style={{ fontSize: '16px', fontWeight: 800, margin: 0 }}>技能库</h2>
+          <p style={{ ...quietText, margin: '4px 0 0' }}>
+            目录来自根并集审计；会话内 <code>skill.list</code> 可覆盖 modelInvocable
+          </p>
         </div>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '4px' }}>
+            <Button size="sm" onClick={() => setTab('catalog')} disabled={tab === 'catalog'}>目录</Button>
+            <Button size="sm" onClick={() => setTab('audit')} disabled={tab === 'audit'}>审计</Button>
+          </div>
           <label>
-            <span className="u-microlabel" style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clipPath: 'inset(50%)' }}>筛选审计结果</span>
+            <span className="u-microlabel" style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clipPath: 'inset(50%)' }}>搜索技能</span>
             <input
               type="search"
-              placeholder="筛选检查、技能或消息"
+              placeholder={tab === 'catalog' ? '搜索名称或描述' : '筛选检查、技能或消息'}
               className="form-input"
               style={{ width: '220px', height: '32px' }}
               value={query}
@@ -108,13 +199,31 @@ export const SkillsView: React.FC = () => {
             disabled={isBusy}
             onClick={() => resource.refresh('/api/agos/skills?refresh=1')}
           >
-            {isBusy ? '审计中…' : '重新审计'}
+            {isBusy ? '加载中…' : '重新扫描'}
           </Button>
         </div>
       </header>
 
+      {consistency?.summary && (
+        <div
+          role="status"
+          style={{
+            padding: '10px 12px',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '6px',
+            background: 'var(--bg-elevated, transparent)',
+            color: 'var(--text-secondary)',
+            fontSize: '12px',
+            lineHeight: 1.55,
+          }}
+        >
+          {consistency.summary}
+          <span style={{ color: 'var(--text-tertiary)' }}> — 只报告，不自动合并。</span>
+        </div>
+      )}
+
       {(resource.status === 'idle' || resource.status === 'loading') && payload === undefined && (
-        <p aria-live="polite" style={quietText}>正在读取技能审计结果…</p>
+        <p aria-live="polite" style={quietText}>正在读取技能库…</p>
       )}
 
       {resource.status === 'error' && resource.error && payload === undefined && (
@@ -137,16 +246,86 @@ export const SkillsView: React.FC = () => {
         </div>
       )}
 
-      {payload && !payload.error && roots?.length === 0 && (
-        <div style={panelStyle}>
-          <p style={{ ...quietText, margin: 0 }}>没有可审计的技能根。服务端只检查已存在的配置根。</p>
-          {payload.librarian && <p style={{ ...quietText, margin: '6px 0 0' }}>审计器：<code>{payload.librarian}</code></p>}
+      {payload && !payload.error && tab === 'catalog' && (
+        <div aria-busy={isRefreshing} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+            <Badge state="queued">共 {catalogMerged.length}</Badge>
+            <Badge state="queued">从未调用 {unused}</Badge>
+            {budget?.indexTokensEstimate != null && (
+              <Badge state={(budget.indexTokensEstimate ?? 0) > (budget.indexBudgetTarget ?? 1000) ? 'running' : 'done'}>
+                索引≈{budget.indexTokensEstimate} tok / 目标 {budget.indexBudgetTarget ?? 1000}
+              </Badge>
+            )}
+            <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+              排序
+              <select
+                className="form-input"
+                style={{ height: '28px' }}
+                value={sort}
+                onChange={(event) => setSort(event.target.value as SkillsSort)}
+              >
+                <option value="name">名称</option>
+                <option value="recent">最近用过</option>
+                <option value="never">从未用过优先</option>
+              </select>
+            </label>
+          </div>
+
+          <p style={{ ...quietText, margin: 0 }}>
+            「从未用过」是使用率信号，不是删除判决。
+            {payload.usageMeta?.note ? ` ${payload.usageMeta.note}` : ''}
+          </p>
+
+          {budget?.topExpensiveDescriptions && budget.topExpensiveDescriptions.length > 0 && (
+            <section style={panelStyle} aria-label="索引预算">
+              <h3 style={{ fontSize: '13px', margin: '0 0 8px', fontWeight: 700 }}>索引预算 · Top 描述成本</h3>
+              <p style={{ ...quietText, margin: '0 0 8px' }}>
+                业界压缩实验：description −48% 后约 86% 表现持平或变好。此处只建议，不改 frontmatter。
+              </p>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: '12px' }}>
+                {budget.topExpensiveDescriptions.slice(0, 8).map((row) => (
+                  <li key={row.name} style={{ padding: '4px 0', color: 'var(--text-secondary)', display: 'flex', gap: '10px' }}>
+                    <code style={{ color: 'var(--text-primary)' }}>{row.name}</code>
+                    <span className="u-num">{row.descChars} 字符</span>
+                    <span style={{ color: 'var(--text-tertiary)' }}>建议压约 {row.suggestedCompressPct ?? 48}%</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {groups.length === 0 ? (
+            <p style={quietText}>没有匹配的技能。</p>
+          ) : (
+            groups.map((group) => (
+              <section key={group.category} style={panelStyle} aria-label={group.category}>
+                <h3 style={{ fontSize: '13px', margin: 0, fontWeight: 700 }}>
+                  {group.category}
+                  <span className="u-num" style={{ ...quietText, marginLeft: '8px' }}>{group.items.length}</span>
+                </h3>
+                <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0 0' }}>
+                  {group.items.map((row) => (
+                    <CatalogRow key={row.name} row={row} usage={payload.usage?.[row.name]} />
+                  ))}
+                </ul>
+              </section>
+            ))
+          )}
+
+          {payload.at && <p className="u-num" style={{ ...quietText, margin: 0 }}>扫描时间 {new Date(payload.at).toLocaleString()}</p>}
         </div>
       )}
 
-      {payload && !payload.error && roots !== undefined && roots.length > 0 && (
+      {payload && !payload.error && tab === 'audit' && (
         <div aria-busy={isRefreshing}>
-          {roots.map((root, index) => <AuditRoot key={`${root.root}:${index}`} audit={root} query={query} />)}
+          {roots?.length === 0 ? (
+            <div style={panelStyle}>
+              <p style={{ ...quietText, margin: 0 }}>没有可审计的技能根。服务端只检查已存在的配置根。</p>
+              {payload.librarian && <p style={{ ...quietText, margin: '6px 0 0' }}>审计器：<code>{payload.librarian}</code></p>}
+            </div>
+          ) : (
+            roots?.map((root, index) => <AuditRoot key={`${root.root}:${index}`} audit={root} query={query} />)
+          )}
           {payload.at && <p className="u-num" style={{ ...quietText, margin: '8px 0 0' }}>审计时间 {new Date(payload.at).toLocaleString()}</p>}
         </div>
       )}

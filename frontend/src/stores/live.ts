@@ -349,6 +349,32 @@ export async function fetchPresets(): Promise<PresetInfo[]> {
   })).filter((p) => p.id !== '')
 }
 
+export interface SkillListEntry {
+  name: string
+  description: string
+  whenToUse?: string
+  modelInvocable: boolean
+}
+
+/** skill.list RPC — session-scoped catalog; empty on failure (console falls back to FS audit). */
+export async function fetchSkillList(sessionId: string): Promise<SkillListEntry[]> {
+  if (!sessionId) return []
+  try {
+    const res = await agos.call('skill.list', { sessionId: sessionId as never })
+    if (!res.result.ok) return []
+    const v = res.result.value as unknown as Record<string, unknown>
+    const list = (v['skills'] ?? []) as Record<string, unknown>[]
+    return list.map((row) => ({
+      name: String(row['name'] ?? ''),
+      description: String(row['description'] ?? ''),
+      whenToUse: row['whenToUse'] !== undefined ? String(row['whenToUse']) : undefined,
+      modelInvocable: row['modelInvocable'] !== false,
+    })).filter((row) => row.name !== '')
+  } catch {
+    return []
+  }
+}
+
 export interface ModelGroup { provider: string, models: { id: string, name: string }[] }
 export interface SessionModels { current: { provider: string, model: string } | undefined, groups: ModelGroup[] }
 export async function fetchSessionModels(sessionId: string): Promise<SessionModels> {

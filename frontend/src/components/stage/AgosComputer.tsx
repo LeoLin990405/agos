@@ -1,15 +1,17 @@
 /**
  * AgosComputer /「AgOS 的电脑」右侧面板(P1-6,对标 Manus's computer)。
  *
- * 数据来源全部是既有 store,没有新增任何 fetch:
+ * 数据来源:
  * - conversationStore.getSnapshot(sessionId).snapshot  → fold 快照(items)
  * - swarmProgressStore.getSnapshot()                   → 运行中批次进度(复用 telemetry 轮询)
+ * - GET /api/agos/session-memory?sessionId=             → 本机会话短期记忆
  *
- * 本地三个 tab 的内容都由纯 selector 从 fold 快照派生:
+ * 本地前三个 tab 的内容由纯 selector 从 fold 快照派生:
  * ① 终端   selectTerminalEntries  bash/terminal 族工具的命令与输出,最新在下,自动滚到底
  * ② 文件   selectFileEntries      write/edit/read 族工具触及的文件路径去重 + 次数
  * ③ 子代理 selectSubagentBatches  本会话发起的 swarm 批次逐行(Wide Research 对位物)
- * 远端模式额外出现 ④ 产物,展示远端工作区实际存在且可流式下载的文件。
+ * ④ 会话记忆 读取当前本机会话异步提炼出的短期记忆。
+ * 远端模式保持终端/文件/子代理/产物四个 tab,不伪造本机会话记忆。
  *
  * 本地与远端 store 始终都订阅,只在渲染时选择来源；远端绝不混入本地 swarm。
  * 拿不到数据就渲染一行安静的空态说明,绝不编造。
@@ -18,6 +20,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { Dot } from '@/components/ui/Dot';
 import { SegmentedControl, type SegmentedOption } from '@/components/ui/SegmentedControl';
 import { ArtifactPane } from '@/components/fleet/ArtifactPane';
+import { SessionMemoryPane } from './SessionMemoryPane';
 import {
   conversationStore,
   remoteRunKey,
@@ -43,16 +46,21 @@ export * from './agos-computer-model';
    7. 组件
    ========================================================================== */
 
-export type AgosComputerTab = 'terminal' | 'files' | 'subagents' | 'artifacts';
+export type AgosComputerTab = 'terminal' | 'files' | 'subagents' | 'memory' | 'artifacts';
 
-const LOCAL_TAB_OPTIONS: SegmentedOption<AgosComputerTab>[] = [
+const CORE_TAB_OPTIONS: SegmentedOption<AgosComputerTab>[] = [
   { value: 'terminal', label: '终端' },
   { value: 'files', label: '文件' },
   { value: 'subagents', label: '子代理' },
 ];
 
+const LOCAL_TAB_OPTIONS: SegmentedOption<AgosComputerTab>[] = [
+  ...CORE_TAB_OPTIONS,
+  { value: 'memory', label: '会话记忆' },
+];
+
 const REMOTE_TAB_OPTIONS: SegmentedOption<AgosComputerTab>[] = [
-  ...LOCAL_TAB_OPTIONS,
+  ...CORE_TAB_OPTIONS,
   { value: 'artifacts', label: '产物' },
 ];
 
@@ -192,11 +200,15 @@ export const AgosComputer: React.FC<{
     [live, remote, snapshot],
   );
 
-  const visibleTab = remote === undefined && tab === 'artifacts' ? 'terminal' : tab;
+  const visibleTab = remote === undefined
+    ? tab === 'artifacts' ? 'terminal' : tab
+    : tab === 'memory' ? 'terminal' : tab;
   const tabOptions = remote === undefined ? LOCAL_TAB_OPTIONS : REMOTE_TAB_OPTIONS;
 
   useEffect(() => {
-    if (remote === undefined && tab === 'artifacts') setTab('terminal');
+    if ((remote === undefined && tab === 'artifacts') || (remote !== undefined && tab === 'memory')) {
+      setTab('terminal');
+    }
   }, [remote, tab]);
 
   // 终端语义:最新在下,内容增长时贴底。签名把流式增量也算进去。
@@ -271,6 +283,7 @@ export const AgosComputer: React.FC<{
         {visibleTab === 'terminal' && <TerminalPane entries={terminal} />}
         {visibleTab === 'files' && <FilesPane entries={files} />}
         {visibleTab === 'subagents' && <SubagentsPane batches={batches} />}
+        {visibleTab === 'memory' && remote === undefined && <SessionMemoryPane sessionId={localSessionId} />}
         {visibleTab === 'artifacts' && remote !== undefined && (
           <ArtifactPane host={remote.host} runId={remote.runId} />
         )}

@@ -1,4 +1,4 @@
-import React, { useId, useState } from 'react';
+import React, { useId, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Chip } from '@/components/ui/Chip';
 import { Dot } from '@/components/ui/Dot';
@@ -7,6 +7,7 @@ import {
   type ArbitratedVisionResponse,
   type VisionPanelEntry,
 } from './vision-arbiter-api';
+import { countDivergentLines, markDivergentLines } from './vision-diff';
 
 export type VisionArbiterCardState = 'running' | 'done' | 'failed' | 'cancelled';
 
@@ -62,6 +63,12 @@ export const VisionArbiterCard: React.FC<VisionArbiterCardProps> = ({
   const [expanded, setExpanded] = useState(defaultExpanded);
   const conclusionId = useId();
   const entries = result?.panel ?? panel ?? [];
+  /* W4 分歧视图:三家答案逐行对照(纯前端,零模型),不到半数家持有的行高亮。 */
+  const markedPanels = useMemo(
+    () => markDivergentLines(entries.map((entry) => (entry.ok ? entry.text : undefined))),
+    [entries],
+  );
+  const divergentTotal = useMemo(() => countDivergentLines(markedPanels), [markedPanels]);
   const placeholders = entries.length === 0 && state === 'running'
     ? DEFAULT_VISION_PANEL.map((provider) => ({ provider }))
     : [];
@@ -85,6 +92,7 @@ export const VisionArbiterCard: React.FC<VisionArbiterCardProps> = ({
               <Chip active={state === 'running'} variant={state === 'failed' ? 'red' : 'default'}>
                 {stateLabel}
               </Chip>
+              {divergentTotal > 0 && <Chip variant="amber">面板分歧 {divergentTotal} 行</Chip>}
               {result && <span className="u-num" style={{ color: 'var(--text-tertiary)', fontSize: '11px' }}>{formatMs(result.ms)}</span>}
             </div>
             <div
@@ -151,9 +159,28 @@ export const VisionArbiterCard: React.FC<VisionArbiterCardProps> = ({
               )}
               {entry.ok && entry.text && (
                 <details style={{ marginTop: '7px' }}>
-                  <summary style={{ color: 'var(--text-tertiary)', cursor: 'pointer', fontSize: '11px' }}>展开该家全文</summary>
+                  <summary style={{ color: 'var(--text-tertiary)', cursor: 'pointer', fontSize: '11px' }}>
+                    展开该家全文
+                    {(markedPanels[index] ?? []).some((line) => line.divergent) && (
+                      <span style={{ color: 'var(--accent-amber)' }}>
+                        {` · 分歧 ${(markedPanels[index] ?? []).filter((line) => line.divergent).length} 行`}
+                      </span>
+                    )}
+                  </summary>
                   <div style={{ color: 'var(--text-secondary)', fontSize: '11.5px', lineHeight: 1.55, marginTop: '6px', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-                    {entry.text}
+                    {(markedPanels[index] ?? []).map((line, lineIndex) => (
+                      <div
+                        key={lineIndex}
+                        style={line.divergent ? {
+                          borderLeft: '2px solid var(--accent-amber)',
+                          background: 'color-mix(in oklch, var(--accent-amber) 8%, transparent)',
+                          paddingLeft: '6px',
+                          borderRadius: '2px',
+                        } : undefined}
+                      >
+                        {line.text === '' ? ' ' : line.text}
+                      </div>
+                    ))}
                   </div>
                 </details>
               )}

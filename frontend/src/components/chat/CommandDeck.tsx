@@ -53,6 +53,13 @@ const MULTIMODAL_MESSAGE_MARKER = /\n?<!-- agos-image:([A-Za-z0-9-]+) -->/g;
 export const stripMultimodalMessageMarker = (text: string): string =>
   text.replace(MULTIMODAL_MESSAGE_MARKER, '');
 
+/* W5:消息带真图片块时,展示层收起 [图片 ×N] 占位(占位本身仍写进持久文本,
+   附件取不回时它是最后的现场说明)。 */
+const IMAGE_COUNT_PLACEHOLDER = /\n?\[图片 ×\d+\]/g;
+
+export const stripImagePlaceholder = (text: string): string =>
+  text.replace(IMAGE_COUNT_PLACEHOLDER, '');
+
 export function extractMultimodalMessageId(text: string): string | undefined {
   MULTIMODAL_MESSAGE_MARKER.lastIndex = 0;
   return MULTIMODAL_MESSAGE_MARKER.exec(text)?.[1];

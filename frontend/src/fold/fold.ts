@@ -13,7 +13,7 @@
  */
 import type {
   ApprovalItem, AssistantItem, ConversationItem, FoldDiagnostics, FoldedConversation,
-  FoldedHeader, SwarmProgressRow, ToolItem, UserItem,
+  FoldedHeader, ResultBlock, SwarmProgressRow, ToolItem, UserItem,
 } from './model.ts'
 
 /** 按设计忽略(计数但不产出)的事件类型 —— 显式登记,别让它们落进 unknown。 */
@@ -58,6 +58,40 @@ function pickText(content: unknown, type: string): string {
     .filter((b) => b['type'] === type && typeof b['text'] === 'string')
     .map((b) => b['text'] as string)
     .join('')
+}
+
+/**
+ * content[] 里抽**非 text** 块的引用元信息(W1):image/audio 等块在归约层
+ * 不再被丢弃。只留 {type, mediaType?, url?, path?, name?, attachment?} 引用,
+ * 不搬运二进制;附件经 attachmentId 走 session.attachment RPC 取原件。
+ * 本函数是纯增量:不改变 pickText 的任何行为(resultText 不变量所在)。
+ */
+function pickBlocks(content: unknown): ResultBlock[] {
+  if (!Array.isArray(content)) return []
+  const out: ResultBlock[] = []
+  for (const raw of content) {
+    const b = asObj(raw)
+    const type = asStr(b['type'])
+    if (type === undefined || type === 'text' || type === 'tool-result') continue
+    const att = asObj(b['attachment'])
+    const attachmentId = asStr(att['attachmentId'])
+    out.push({
+      type,
+      mediaType: asStr(b['mediaType']),
+      url: asStr(b['url']),
+      path: asStr(b['path']),
+      name: asStr(b['name']),
+      attachment: attachmentId === undefined ? undefined : {
+        attachmentId,
+        mediaType: asStr(att['mediaType']),
+        name: asStr(att['name']),
+        width: asNum(att['width']),
+        height: asNum(att['height']),
+        bytes: asNum(att['bytes']),
+      },
+    })
+  }
+  return out
 }
 
 export interface Fold {
@@ -130,11 +164,13 @@ export function createFold(): Fold {
         return
       }
       case 'user/message': {
+        const blocks = pickBlocks(data['content'])
         const item: UserItem = {
           kind: 'user', id: asStr(data['id']),
           text: pickText(data['content'], 'text'),
           at,
           sourceKind: asStr(asObj(data['source'])['kind']) ?? 'user',
+          ...(blocks.length > 0 ? { blocks } : {}),
         }
         items.push(item)
         return
@@ -215,6 +251,7 @@ export function createFold(): Fold {
         let callId: string | undefined
         let text = ''
         let isError = false
+        const blocks: ResultBlock[] = []
         if (Array.isArray(content)) {
           for (const block of content) {
             const b = asObj(block)
@@ -222,6 +259,7 @@ export function createFold(): Fold {
             callId = asStr(b['toolCallId']) ?? callId
             if (b['isError'] === true) isError = true
             text += pickText(b['content'], 'text')
+            blocks.push(...pickBlocks(b['content']))
           }
         }
         if (callId === undefined) { diagnostics.orphanToolResults += 1; return }
@@ -230,6 +268,7 @@ export function createFold(): Fold {
         tool.endAt = at
         tool.status = isError ? 'failed' : 'done'
         tool.resultText = text
+        if (blocks.length > 0) tool.resultBlocks = blocks
         return
       }
       case 'assistant/message': {

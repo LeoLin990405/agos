@@ -58,6 +58,41 @@ for (const file of sessionFiles(CORPUS)) {
   for (const n of Object.values(folded.diagnostics.ignored)) ignoredTotal += n
   const short = folded.header?.sessionId ?? file
 
+  // I6(W1):原始事件里含非 text 块的工具结果,fold 后必须有 resultBlocks;
+  // 独立从原始 JSONL 重新数一遍,与 fold 产物对账,不共用 fold 的内部逻辑。
+  {
+    const expectBlocks = new Set<string>()
+    for (const line of jsonl.split('\n')) {
+      const t = line.trim()
+      if (t === '' || !t.includes('"tool/result"')) continue
+      try {
+        const e = JSON.parse(t) as { data?: { message?: { content?: unknown } } }
+        const content = e.data?.message?.content
+        if (!Array.isArray(content)) continue
+        for (const block of content) {
+          if (typeof block !== 'object' || block === null) continue
+          const b = block as Record<string, unknown>
+          if (b['type'] !== 'tool-result' || typeof b['toolCallId'] !== 'string') continue
+          const inner = b['content']
+          if (Array.isArray(inner) && inner.some((x) => {
+            return typeof x === 'object' && x !== null
+              && (x as Record<string, unknown>)['type'] !== 'text'
+          })) expectBlocks.add(b['toolCallId'])
+        }
+      } catch { /* 坏行由 fold 侧计 parseErrors */ }
+    }
+    if (expectBlocks.size > 0) {
+      const withBlocks = new Set(
+        folded.items
+          .filter((i) => i.kind === 'tool' && i.resultBlocks !== undefined && i.resultBlocks.length > 0)
+          .map((i) => (i.kind === 'tool' ? i.callId : '')),
+      )
+      for (const callId of expectBlocks) {
+        if (!withBlocks.has(callId)) failures.push(`${short}: I6 工具结果的多模态块丢失 callId=${callId}`)
+      }
+    }
+  }
+
   // I1
   for (const [type, n] of Object.entries(folded.diagnostics.unknown)) {
     unknownAgg[type] = (unknownAgg[type] ?? 0) + n

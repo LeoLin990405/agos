@@ -15,6 +15,10 @@ export interface ConsoleDerived {
   running: number | undefined; failed: number | undefined; calls: number | undefined; rows: number | undefined;
   sessionsTotal: number | undefined; plansTotal: number | undefined; plansExecuted: number | undefined;
   skills: number | undefined; skillsWarn: number | undefined; skillsError: number | undefined;
+  /** Model-facing roots only — the number that matters for runtime health. */
+  skillsServedWarn: number | undefined; skillsServedError: number | undefined;
+  skillsConsoleWarn: number | undefined;
+  skillsConsistency: string | undefined;
   inbox: { id: string; type: 'error' | 'warning' | 'running'; title: string; description: string; timestamp: string; actionText: string }[];
   matrix: SessionSummaryRow[];
   progressLive: boolean;
@@ -96,6 +100,17 @@ export function deriveConsole(t: TelemetryState, s: { rows: SessionSummaryRow[];
     sessionsTotal: numAt(ov, 'sessions', 'total'),
     plansTotal: numAt(ov, 'plans', 'total'), plansExecuted: numAt(ov, 'plans', 'executed'),
     skills: numAt(ov, 'skills', 'skills'), skillsWarn: numAt(ov, 'skills', 'warn'), skillsError: numAt(ov, 'skills', 'error'),
+    skillsServedWarn: numAt(ov, 'skills', 'servedToModel', 'warn'),
+    skillsServedError: numAt(ov, 'skills', 'servedToModel', 'error'),
+    skillsConsoleWarn: numAt(ov, 'skills', 'consoleOnly', 'warn'),
+    skillsConsistency: (() => {
+      const skills = ov?.['skills'];
+      if (typeof skills !== 'object' || skills === null) return undefined;
+      const c = (skills as Record<string, unknown>)['consistency'];
+      if (typeof c !== 'object' || c === null) return undefined;
+      const summary = (c as Record<string, unknown>)['summary'];
+      return typeof summary === 'string' ? summary : undefined;
+    })(),
     inbox, matrix: s.rows.slice(0, 8),
     progressLive: t.progress !== undefined,
     sessionsLive: typeof s.loadedAt === 'number' && s.loadedAt > 0,
@@ -214,7 +229,9 @@ export const RealOverview: React.FC<{
   const hasPlans = live.plansTotal !== undefined || live.plansExecuted !== undefined;
   const hasSkills = live.skills !== undefined || live.skillsWarn !== undefined || live.skillsError !== undefined;
   const skillsDetail = [
-    live.skillsWarn === undefined ? undefined : `warn ${live.skillsWarn}`,
+    live.skillsServedWarn !== undefined ? `模型根 warn ${live.skillsServedWarn}` : undefined,
+    live.skillsConsoleWarn !== undefined ? `控制台-only warn ${live.skillsConsoleWarn}` : undefined,
+    live.skillsServedWarn === undefined && live.skillsWarn !== undefined ? `warn ${live.skillsWarn}` : undefined,
     live.skillsError === undefined ? undefined : `error ${live.skillsError}`,
   ].filter((value): value is string => value !== undefined).join(' · ');
 
@@ -252,7 +269,13 @@ export const RealOverview: React.FC<{
       <div className="instrument-cell">
         <div className="instrument-label">技能注册表</div>
         <div className="instrument-value">{metric(live.skills)}{hasSkills && <span className="instrument-unit">{skillsDetail || '审计结果未采集'}</span>}</div>
-        <div className="instrument-sub">{!hasSkills ? '进技能页触发 librarian 审计' : 'skill-librarian 双根审计'}</div>
+        <div className="instrument-sub">
+          {!hasSkills
+            ? '进技能页触发 librarian 审计'
+            : live.skillsConsistency
+              ? live.skillsConsistency
+              : '根并集审计 · 区分模型根与控制台-only'}
+        </div>
       </div>
     </section>
 

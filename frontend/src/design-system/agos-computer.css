@@ -324,6 +324,120 @@
   color: var(--state-failed);
 }
 
+/* ── ④ 会话记忆 ───────────────────────────────────────────────────── */
+.agc-memory {
+  display: flex;
+  flex-direction: column;
+}
+
+.agc-memory-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.agc-memory-total {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  color: var(--text-tertiary);
+  font-size: 11.5px;
+}
+
+.agc-memory-total strong {
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.agc-memory-notice,
+.agc-memory-sensitive {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--border-dim);
+  background-color: var(--bg-layer-2);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.agc-memory-sensitive {
+  display: block;
+  color: var(--text-tertiary);
+}
+
+.agc-memory-refresh-error {
+  margin: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--state-failed-border);
+  background-color: var(--state-failed-bg);
+  color: var(--state-failed);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.agc-memory-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.agc-memory-row {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.agc-memory-row:last-child {
+  border-bottom: 0;
+}
+
+.agc-memory-row-head,
+.agc-memory-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agc-memory-meta {
+  color: var(--text-tertiary);
+  font-size: 10.5px;
+}
+
+.agc-memory-text {
+  margin: 8px 0 7px;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.agc-memory-foot {
+  color: var(--text-dimmed);
+  font-size: 10.5px;
+}
+
+.agc-memory-state {
+  padding: 20px 16px;
+  color: var(--text-tertiary);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.agc-memory-state p {
+  margin: 0 0 10px;
+}
+
+.agc-memory-state.is-error {
+  color: var(--state-failed);
+}
+
 /* ── 运行态文字扫光(Kimi/Manus 配方;infinite 只给运行态)───────────── */
 .agc-status.is-running,
 .agc-term-state.is-running {

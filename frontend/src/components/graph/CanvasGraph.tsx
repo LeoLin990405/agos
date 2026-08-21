@@ -1,6 +1,6 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { MemoryNodeData, MemoryEdgeData } from './mock-graph-data';
-import { MemoryNodeType } from '@/design-system/tokens';
+import React, { useRef, useEffect } from 'react';
+import type { MemoryNodeData, MemoryEdgeData } from './mock-graph-data';
+import type { MemoryNodeType } from '@/design-system/tokens';
 
 interface SimNode extends MemoryNodeData {
   x: number;
@@ -20,11 +20,14 @@ const TYPE_COLORS: Record<MemoryNodeType, string> = {
   incident: '#ef8f8f',
 };
 
+const NO_MATCHED_NODES: ReadonlySet<string> = new Set();
+
 export interface CanvasGraphProps {
   nodes: MemoryNodeData[];
   edges: MemoryEdgeData[];
   selectedNodeId?: string;
   searchQuery?: string;
+  matchedNodeIds?: ReadonlySet<string>;
   typeFilter?: string;
   isSimulating?: boolean;
   onSelectNode: (node: MemoryNodeData | null) => void;
@@ -36,6 +39,7 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
   edges: rawEdges,
   selectedNodeId,
   searchQuery = '',
+  matchedNodeIds = NO_MATCHED_NODES,
   typeFilter = 'all',
   isSimulating = true,
   onSelectNode,
@@ -202,23 +206,41 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
         const src = nodeMap.get(edge.from);
         const tgt = nodeMap.get(edge.to);
         if (!src) return;
+        if (typeFilter !== 'all' && (src.type !== typeFilter || (tgt !== undefined && tgt.type !== typeFilter))) return;
 
         const isHighlighted = activeId
           ? (edge.from === activeId || edge.to === activeId)
           : false;
         const isDimmed = activeId ? !isHighlighted : false;
 
+        let endX: number;
+        let endY: number;
         ctx.beginPath();
         ctx.moveTo(src.x, src.y);
         if (tgt) {
-          ctx.lineTo(tgt.x, tgt.y);
+          const dx = tgt.x - src.x;
+          const dy = tgt.y - src.y;
+          const distance = Math.sqrt(dx * dx + dy * dy) || 1;
+          endX = tgt.x - (dx / distance) * (tgt.radius + 2);
+          endY = tgt.y - (dy / distance) * (tgt.radius + 2);
+          ctx.lineTo(endX, endY);
         } else {
           // 悬挂边向外发散示意
           const angle = (parseInt(src.id.replace(/\D/g, '') || '1', 10) % 8) * (Math.PI / 4);
-          ctx.lineTo(src.x + Math.cos(angle) * 45, src.y + Math.sin(angle) * 45);
+          endX = src.x + Math.cos(angle) * 45;
+          endY = src.y + Math.sin(angle) * 45;
+          ctx.lineTo(endX, endY);
         }
 
-        if (edge.dangling) {
+        if (edge.kind === 'supersedes') {
+          ctx.setLineDash([8, 3]);
+          ctx.strokeStyle = isHighlighted
+            ? 'rgba(239, 143, 143, 0.92)'
+            : isDimmed
+              ? 'rgba(239, 143, 143, 0.12)'
+              : `rgba(239, 143, 143, ${0.44 * appearT})`;
+          ctx.lineWidth = isHighlighted ? 2 : 1.25;
+        } else if (edge.dangling) {
           ctx.setLineDash([3, 4]);
           ctx.strokeStyle = isHighlighted
             ? '#f59e0b'
@@ -235,7 +257,28 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
           ctx.lineWidth = isHighlighted ? 1.4 : 0.7;
         }
         ctx.stroke();
+
+        // Supersedes is a directed invalidation relation. Its arrowhead points
+        // from the current record to the record it replaces.
+        if (edge.kind === 'supersedes') {
+          ctx.setLineDash([]);
+          const angle = Math.atan2(endY - src.y, endX - src.x);
+          const arrowSize = isHighlighted ? 7 : 5;
+          ctx.beginPath();
+          ctx.moveTo(endX, endY);
+          ctx.lineTo(
+            endX - Math.cos(angle - Math.PI / 6) * arrowSize,
+            endY - Math.sin(angle - Math.PI / 6) * arrowSize,
+          );
+          ctx.moveTo(endX, endY);
+          ctx.lineTo(
+            endX - Math.cos(angle + Math.PI / 6) * arrowSize,
+            endY - Math.sin(angle + Math.PI / 6) * arrowSize,
+          );
+          ctx.stroke();
+        }
       });
+      ctx.setLineDash([]);
 
       // 绘制节点 (Nodes)
       const nowMs = performance.now();
@@ -246,17 +289,15 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
         // 类型过滤
         if (typeFilter !== 'all' && node.type !== typeFilter) return;
 
-        const isMatchSearch =
-          !searchQuery ||
-          node.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          node.id.toLowerCase().includes(searchQuery.toLowerCase());
+        const hasSearch = searchQuery.trim() !== '';
+        const isMatchSearch = !hasSearch || matchedNodeIds.has(node.id);
 
-        const isHighlighted = activeId ? connectedSet.has(node.id) : isMatchSearch;
-        const isDimmed = (activeId && !connectedSet.has(node.id)) || (searchQuery && !isMatchSearch);
+        const isDimmed = activeId
+          ? !connectedSet.has(node.id)
+          : hasSearch && !isMatchSearch;
 
         const color = TYPE_COLORS[node.type] || '#679efe';
-        // isHighlighted 在无焦点时对全图为真(空搜索=全命中),只能用于"防变暗";
-        // 标签/白环必须用显式焦点(有 activeId 才有焦点)——否则全图开灯=乱。
+        // 标签和白环必须用显式焦点；无焦点时全图开灯会造成视觉噪声。
         const isFocus = activeId ? connectedSet.has(node.id) : false;
         const radius = node.radius * (isFocus ? 1.25 : 1);
 
@@ -280,12 +321,16 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
           ctx.lineWidth = 1.4;
           ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
           ctx.stroke();
+        } else if (hasSearch && isMatchSearch) {
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = 'rgba(127, 206, 155, 0.95)';
+          ctx.stroke();
         }
 
         // 标签文本 (高亮节点或出度大节点显示)
-        if ((isFocus || k > 1.5) && !isDimmed) { // Obsidian:标签只给焦点邻域或明显放大后
-          ctx.fillStyle = isFocus ? 'rgba(255,255,255,0.92)' : 'rgba(255, 255, 255, 0.45)';
-          ctx.font = `${isFocus ? '600 ' : ''}9.5px -apple-system, sans-serif`;
+        if ((isFocus || (hasSearch && isMatchSearch) || k > 1.5) && !isDimmed) { // Obsidian:标签只给焦点邻域或明显放大后
+          ctx.fillStyle = (isFocus || (hasSearch && isMatchSearch)) ? 'rgba(255,255,255,0.92)' : 'rgba(255, 255, 255, 0.45)';
+          ctx.font = `${(isFocus || (hasSearch && isMatchSearch)) ? '600 ' : ''}9.5px -apple-system, sans-serif`;
           ctx.textAlign = 'center';
           ctx.fillText(node.id, node.x, node.y + radius + 12);
         }
@@ -297,9 +342,7 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
 
     animId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(animId);
-    // 焦点/过滤变化 → 复热一点,让图轻微再排(Obsidian 同款手感)
-    return () => cancelAnimationFrame(animId);
-  }, [isSimulating, rawEdges, selectedNodeId, searchQuery, typeFilter]);
+  }, [isSimulating, matchedNodeIds, rawEdges, selectedNodeId, searchQuery, typeFilter]);
 
   // 自适应 Canvas 尺寸
   useEffect(() => {
@@ -328,6 +371,7 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
     const simNodes = simNodesRef.current;
     for (let i = simNodes.length - 1; i >= 0; i--) {
       const n = simNodes[i];
+      if (typeFilter !== 'all' && n.type !== typeFilter) continue;
       const dx = n.x - x;
       const dy = n.y - y;
       if (dx * dx + dy * dy <= (n.radius + 6) * (n.radius + 6)) {
@@ -380,6 +424,12 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
     isPanningRef.current = false;
   };
 
+  const handleMouseLeave = () => {
+    handleMouseUp();
+    hoveredNodeRef.current = null;
+    onHoverNode(null);
+  };
+
   const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
@@ -399,17 +449,54 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
     };
   };
 
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLCanvasElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onSelectNode(null);
+      return;
+    }
+    const visibleNodes = simNodesRef.current.filter((node) => {
+      if (typeFilter !== 'all' && node.type !== typeFilter) return false;
+      return searchQuery.trim() === '' || matchedNodeIds.has(node.id);
+    });
+    if (visibleNodes.length === 0) return;
+    const currentIndex = visibleNodes.findIndex((node) => node.id === selectedNodeId);
+    let nextIndex: number | undefined;
+    if (event.key === 'Home') nextIndex = 0;
+    else if (event.key === 'End') nextIndex = visibleNodes.length - 1;
+    else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % visibleNodes.length;
+    else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = currentIndex < 0 ? visibleNodes.length - 1 : (currentIndex - 1 + visibleNodes.length) % visibleNodes.length;
+    if (nextIndex === undefined) return;
+    event.preventDefault();
+    onSelectNode(visibleNodes[nextIndex] ?? null);
+  };
+
+  const selectedAccessibleNode = rawNodes.find((node) => node.id === selectedNodeId);
+
   return (
     <div className="graph-canvas-container">
       <canvas
         ref={canvasRef}
         className="graph-canvas"
+        role="application"
+        aria-roledescription="交互式记忆图谱"
+        aria-label={`记忆图谱，共 ${rawNodes.length} 个节点。使用方向键浏览，Home 或 End 跳转，Escape 清除选择。`}
+        tabIndex={0}
         onMouseMove={handleMouseMove}
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
+        onMouseLeave={handleMouseLeave}
         onWheel={handleWheel}
-      />
+        onKeyDown={handleKeyDown}
+      >
+        当前浏览器不支持 Canvas 记忆图谱。
+      </canvas>
+      <span
+        aria-live="polite"
+        style={{ position: 'absolute', width: '1px', height: '1px', padding: 0, margin: '-1px', overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 }}
+      >
+        {selectedAccessibleNode ? `已选择 ${selectedAccessibleNode.id}，类型 ${selectedAccessibleNode.sourceType}` : '未选择记忆节点'}
+      </span>
     </div>
   );
 };

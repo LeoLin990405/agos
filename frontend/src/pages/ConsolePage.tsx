@@ -7,10 +7,11 @@ import { SessionsView } from '@/components/console/SessionsView';
 import { LineageView } from '@/components/console/LineageView';
 import { PlansView } from '@/components/console/PlansView';
 import { SkillsView } from '@/components/console/SkillsView';
+import { CouncilLedgerView } from '@/components/console/CouncilLedgerView';
 import { TraceView } from '@/components/console/TraceView';
 import { overviewLamp, RealOverview, useConsoleLive } from '@/pages/console-live';
 
-export type ConsoleTab = 'overview' | 'fleet' | 'sessions' | 'lineage' | 'trace' | 'plans' | 'skills';
+export type ConsoleTab = 'overview' | 'fleet' | 'sessions' | 'lineage' | 'trace' | 'plans' | 'skills' | 'ledger';
 
 export interface ConsolePageProps {
   initialTab?: ConsoleTab;
@@ -108,6 +109,14 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
             <span className="u-num" style={{ fontSize: '11px' }}>{consoleLive.skills}</span>
           )}
         </button>
+
+        <button
+          type="button"
+          className={`console-nav-item ${activeTab === 'ledger' ? 'is-active' : ''}`}
+          onClick={() => setActiveTab('ledger')}
+        >
+          <span>读图台账</span>
+        </button>
       </nav>
 
       {/* 主展示区 */}
@@ -126,6 +135,8 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
               ? '轨迹时间流'
               : activeTab === 'plans'
               ? '计划与目标'
+              : activeTab === 'ledger'
+              ? '读图台账'
               : '技能注册表'
           }`}
           rightActions={
@@ -154,6 +165,7 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
           {activeTab === 'trace' && <TraceView onSelectSession={() => onNavigateChat?.()} />}
           {activeTab === 'plans' && <PlansView overviewTotal={overviewFresh ? consoleLive.plansTotal : undefined} />}
           {activeTab === 'skills' && <SkillsView />}
+          {activeTab === 'ledger' && <CouncilLedgerView />}
 
           {activeTab === 'overview' && (
             <RealOverview

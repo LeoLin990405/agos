@@ -24,7 +24,9 @@ import { agos, approvalRpc, conversationStore } from '@/stores/live';
 import type { ConversationItem, FoldedConversation, ToolItem } from '@/fold/model';
 import { RpcId } from '@/contract/api/rpc';
 import type { OptimisticImageAttachment } from '@/components/chat/ImageAttachments';
-import { extractMultimodalMessageId, stripMultimodalMessageMarker } from '@/components/chat/CommandDeck';
+import { extractMultimodalMessageId, stripImagePlaceholder, stripMultimodalMessageMarker } from '@/components/chat/CommandDeck';
+import { MediaBlocks } from '@/components/chat/MediaBlocks';
+import { mediaFromResultBlocks, mediaFromTool } from '@/components/chat/media-blocks';
 import '@/design-system/tool-timeline.css';
 import '@/design-system/replay-scrubber.css';
 
@@ -263,7 +265,7 @@ function prettyArgs(argsRaw: string): string {
   }
 }
 
-const ToolTimelineRow: React.FC<{ tool: ToolItem }> = ({ tool }) => {
+const ToolTimelineRow: React.FC<{ tool: ToolItem, sessionId: string }> = ({ tool, sessionId }) => {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [showAll, setShowAll] = useState(false);
@@ -294,6 +296,8 @@ const ToolTimelineRow: React.FC<{ tool: ToolItem }> = ({ tool }) => {
   };
 
   const stateClass = tool.status === 'running' ? ' is-running' : tool.status === 'failed' ? ' is-failed' : ' is-done';
+  /* W2:产物媒体(图片/音频)不进折叠体,直接在行下常驻可见 —— 播放器/图片是结果本体。 */
+  const mediaRefs = mediaFromTool(tool);
 
   return (
     <div className={`tl-item${stateClass}${open ? ' is-open' : ''}`}>
@@ -310,6 +314,11 @@ const ToolTimelineRow: React.FC<{ tool: ToolItem }> = ({ tool }) => {
         {duration !== undefined && <span className="tl-dur u-num">{duration}</span>}
         <ChevronIcon />
       </button>
+      {mediaRefs.length > 0 && (
+        <div style={{ padding: '2px 12px 8px 36px' }}>
+          <MediaBlocks refs={mediaRefs} sessionId={sessionId} />
+        </div>
+      )}
       <div className="tl-body" style={{ height: open ? `${bodyHeight}px` : 0 }}>
         {mounted && (
           <div className="tl-body-inner" ref={innerRef}>
@@ -342,10 +351,10 @@ const ToolTimelineRow: React.FC<{ tool: ToolItem }> = ({ tool }) => {
   );
 };
 
-const ToolTimelineGroup: React.FC<{ tools: readonly ToolItem[], keyPrefix: string }> = ({ tools, keyPrefix }) => (
+const ToolTimelineGroup: React.FC<{ tools: readonly ToolItem[], keyPrefix: string, sessionId: string }> = ({ tools, keyPrefix, sessionId }) => (
   <div className="tl-group">
     {tools.map((tool, i) => (
-      <ToolTimelineRow key={`${keyPrefix}:${i}:${tool.callId}`} tool={tool} />
+      <ToolTimelineRow key={`${keyPrefix}:${i}:${tool.callId}`} tool={tool} sessionId={sessionId} />
     ))}
   </div>
 );
@@ -487,6 +496,10 @@ function renderItem(
 ): React.ReactNode {
   if (item.kind === 'user') {
     if (item.sourceKind !== 'user') return null;
+    /* W1+W5:用户消息里的图片块(attachment 引用)真渲染;有真图时收起 [图片 ×N] 占位。 */
+    const userMedia = mediaFromResultBlocks(item.blocks);
+    const hasRealImages = userMedia.some((m) => m.kind === 'image');
+    const displayText = stripMultimodalMessageMarker(hasRealImages ? stripImagePlaceholder(item.text) : item.text);
     return (
       <div className="message-wrap" key={key}>
         <div className="message-user">
@@ -496,7 +509,10 @@ function renderItem(
               {item.at > 0 ? new Date(item.at).toLocaleTimeString('zh-CN', { hour12: false }) : ''}
             </span>
           </div>
-          <div style={{ fontSize: '14.5px', lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{stripMultimodalMessageMarker(item.text)}</div>
+          {displayText !== '' && (
+            <div style={{ fontSize: '14.5px', lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{displayText}</div>
+          )}
+          {userMedia.length > 0 && <MediaBlocks refs={userMedia} sessionId={sessionId} />}
           {optimisticImages.length > 0 && <OptimisticImageStrip images={optimisticImages} />}
         </div>
       </div>
@@ -578,7 +594,7 @@ function renderItem(
     }
     return (
       <div className="message-wrap tl-enter" key={key}>
-        <ToolTimelineGroup tools={[item]} keyPrefix={key} />
+        <ToolTimelineGroup tools={[item]} keyPrefix={key} sessionId={sessionId} />
       </div>
     );
   }
@@ -696,7 +712,7 @@ export const TranscriptBody: React.FC<TranscriptBodyProps> = ({
       }
       renderedItems.push(
         <div className="message-wrap tl-enter" key={`${sessionId}:${index}:timeline`}>
-          <ToolTimelineGroup tools={run} keyPrefix={`${sessionId}:${index}`} />
+          <ToolTimelineGroup tools={run} keyPrefix={`${sessionId}:${index}`} sessionId={sessionId} />
         </div>,
       );
       index = end - 1;

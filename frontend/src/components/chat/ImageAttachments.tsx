@@ -84,6 +84,23 @@ function isImageMediaType(value: string): value is ImageAttachmentMediaType {
   return (IMAGE_ATTACHMENT_MEDIA_TYPES as readonly string[]).includes(value);
 }
 
+/**
+ * W5 粘贴取图:files 优先;部分浏览器(如 Safari 截图粘贴)files 为空、
+ * 图片在 items 里 —— 逐项按 image/* getAsFile 兜底。mime 白名单由
+ * prepareImageFiles 统一校验,两条入口同一套口径。
+ */
+export function clipboardImageFiles(clipboardData: DataTransfer): File[] {
+  const fromFiles = Array.from(clipboardData.files ?? []);
+  if (fromFiles.length > 0) return fromFiles;
+  const out: File[] = [];
+  for (const item of Array.from(clipboardData.items ?? [])) {
+    if (item.kind !== 'file' || !item.type.startsWith('image/')) continue;
+    const file = item.getAsFile();
+    if (file !== null) out.push(file);
+  }
+  return out;
+}
+
 function formatBytes(bytes: number): string {
   return bytes >= 1024 * 1024
     ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
@@ -288,7 +305,7 @@ export const ImageAttachments = forwardRef<ImageAttachmentsHandle, ImageAttachme
   }, [publish]);
 
   const addClipboard = useCallback((clipboardData: DataTransfer): boolean => {
-    const files = Array.from(clipboardData.files);
+    const files = clipboardImageFiles(clipboardData);
     if (files.length === 0) return false;
     void addFiles(files);
     return true;

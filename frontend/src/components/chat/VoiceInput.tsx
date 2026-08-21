@@ -1,8 +1,35 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Dot } from '@/components/ui/Dot';
+import { computeLevel, createVadState, vadTick, VAD_DEFAULTS, type VadState } from './vad-model';
 
 export type VoiceInputStatus = 'idle' | 'recording' | 'transcribing' | 'error';
+
+/** W3:录音电平采样器(可注入,测试无需真实音频设备)。sample() 返回 0..1 RMS 电平。 */
+export interface VoiceLevelSampler {
+  sample: () => number;
+  dispose: () => void;
+}
+
+/** 浏览器默认采样器:Web Audio AnalyserNode 时域 RMS(零依赖)。拿不到 AudioContext 返回 null(降级为无 VAD/无电平条)。 */
+export const createAnalyserSampler = (stream: MediaStream): VoiceLevelSampler | null => {
+  const Ctor = (globalThis as { AudioContext?: typeof AudioContext }).AudioContext;
+  if (Ctor === undefined) return null;
+  try {
+    const ctx = new Ctor();
+    const source = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+    source.connect(analyser);
+    const buf = new Uint8Array(analyser.fftSize);
+    return {
+      sample: () => { analyser.getByteTimeDomainData(buf); return computeLevel(buf); },
+      dispose: () => { source.disconnect(); void ctx.close().catch(() => undefined); },
+    };
+  } catch {
+    return null;
+  }
+};
 
 export type VoiceInputFetch = (
   input: RequestInfo | URL,
@@ -36,6 +63,12 @@ export interface VoiceInputProps {
   minRecordingBytes?: number;
   /** The server caps the complete JSON request body, not the source Blob. */
   maxRequestBytes?: number;
+  /** W3:静音持续该毫秒数自动停止并提交(默认 1500;0 = 关闭自动停)。 */
+  silenceStopMs?: number;
+  /** W3:人声能量门限(RMS 0..1,默认 0.02)。 */
+  vadThreshold?: number;
+  /** W3:电平采样器注入点(测试/预览用);缺省用 AnalyserNode。 */
+  createLevelSampler?: (stream: MediaStream) => VoiceLevelSampler | null;
   disabled?: boolean;
   className?: string;
   labels?: Partial<VoiceInputLabels>;
@@ -185,6 +218,9 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
   minRecordingMs = DEFAULT_MIN_RECORDING_MS,
   minRecordingBytes = DEFAULT_MIN_RECORDING_BYTES,
   maxRequestBytes = DEFAULT_MAX_REQUEST_BYTES,
+  silenceStopMs = VAD_DEFAULTS.silenceMs,
+  vadThreshold = VAD_DEFAULTS.threshold,
+  createLevelSampler,
   disabled = false,
   className = '',
   labels: labelOverrides,
@@ -202,6 +238,24 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
   const mountedRef = useRef(true);
   const operationRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
+  // W3:电平采样 / VAD / 自动停
+  const [level, setLevel] = useState(0);
+  const samplerRef = useRef<VoiceLevelSampler | null>(null);
+  const levelTimerRef = useRef<number | null>(null);
+  const vadRef = useRef<VadState>(createVadState());
+  const stoppingRef = useRef(false);
+  const stopRecordingRef = useRef<() => void>(() => undefined);
+
+  /** 停采样器与电平定時器(录音结束/出错/卸载都走这里)。 */
+  const stopSampler = useCallback(() => {
+    if (levelTimerRef.current !== null) {
+      window.clearInterval(levelTimerRef.current);
+      levelTimerRef.current = null;
+    }
+    samplerRef.current?.dispose();
+    samplerRef.current = null;
+    setLevel(0);
+  }, []);
 
   useEffect(() => {
     onStatusChange?.(status);
@@ -221,6 +275,7 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
       mountedRef.current = false;
       operationRef.current += 1;
       abortRef.current?.abort();
+      stopSampler();
       const recorder = recorderRef.current;
       if (recorder) {
         recorder.ondataavailable = null;
@@ -323,6 +378,8 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
         if (recorder.state !== 'inactive') {
           try { recorder.stop(); } catch { /* Tracks are released below. */ }
         }
+        stopSampler();
+        stoppingRef.current = false;
         stopTracks(streamRef.current);
         streamRef.current = null;
         recorderRef.current = null;
@@ -335,6 +392,8 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
         const mime = recorder.mimeType || chunks[0]?.type || FALLBACK_MIME;
         const blob = new Blob(chunks, { type: mime });
 
+        stopSampler();
+        stoppingRef.current = false;
         stopTracks(streamRef.current);
         streamRef.current = null;
         recorderRef.current = null;
@@ -352,7 +411,33 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
       startedAtRef.current = Date.now();
       setElapsedMs(0);
       setStatus('recording');
+      stoppingRef.current = false;
+
+      // W3:电平采样 + 能量 VAD。reduced-motion 下采样率降到 2Hz(数据更新,非动画)。
+      vadRef.current = createVadState();
+      const sampler = (createLevelSampler ?? createAnalyserSampler)(stream);
+      samplerRef.current = sampler;
+      setLevel(0);
+      if (sampler !== null) {
+        const reduced = typeof globalThis.matchMedia === 'function'
+          && globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        levelTimerRef.current = window.setInterval(() => {
+          const active = samplerRef.current;
+          if (active === null) return;
+          const currentLevel = active.sample();
+          setLevel(currentLevel);
+          if (silenceStopMs > 0 && !stoppingRef.current) {
+            const tick = vadTick(vadRef.current, currentLevel, Date.now(), {
+              silenceMs: silenceStopMs,
+              threshold: vadThreshold,
+            });
+            vadRef.current = tick.state;
+            if (tick.shouldStop) stopRecordingRef.current();
+          }
+        }, reduced ? 500 : 66);
+      }
     } catch {
+      stopSampler();
       stopTracks(stream);
       streamRef.current = null;
       recorderRef.current = null;
@@ -361,6 +446,7 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
       startingRef.current = false;
     }
   }, [
+    createLevelSampler,
     createMediaRecorder,
     disabled,
     fail,
@@ -370,13 +456,17 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
     minRecordingBytes,
     minRecordingMs,
     runTranscription,
+    silenceStopMs,
     status,
+    stopSampler,
+    vadThreshold,
   ]);
 
   const stopRecording = useCallback(() => {
-    if (status !== 'recording') return;
+    if (status !== 'recording' || stoppingRef.current) return;
     const recorder = recorderRef.current;
     if (!recorder || recorder.state !== 'recording') {
+      stopSampler();
       stopTracks(streamRef.current);
       streamRef.current = null;
       recorderRef.current = null;
@@ -384,16 +474,24 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
       return;
     }
 
+    stoppingRef.current = true;
     setStatus('transcribing');
     try {
       recorder.stop();
     } catch (error) {
+      stoppingRef.current = false;
+      stopSampler();
       stopTracks(streamRef.current);
       streamRef.current = null;
       recorderRef.current = null;
       fail(error);
     }
-  }, [fail, status]);
+  }, [fail, status, stopSampler]);
+
+  // 自动停(VAD)经 ref 调最新 stopRecording,避免定时器闭包里吃过期状态。
+  useEffect(() => {
+    stopRecordingRef.current = stopRecording;
+  }, [stopRecording]);
 
   const handleRecordClick = useCallback(() => {
     if (status === 'recording') stopRecording();
@@ -436,6 +534,37 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
         {isRecording ? <Dot state="running" size={6} /> : <MicIcon />}
         <span>{isRecording ? `${labels.stop} ${formatElapsed(elapsedMs)}` : labels.record}</span>
       </Button>
+
+      {/* W3:实时电平条(transform-only,无颜色过渡;reduced-motion 下 2Hz 数据刷新) */}
+      {isRecording && (
+        <span
+          role="meter"
+          aria-label="录音电平"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(level * 100)}
+          title={silenceStopMs > 0 ? `说完停顿约 ${(silenceStopMs / 1000).toFixed(1)} 秒自动停止并转写` : '录音电平'}
+          style={{
+            display: 'inline-block',
+            width: '48px',
+            height: '4px',
+            borderRadius: '2px',
+            background: 'var(--border-dim)',
+            overflow: 'hidden',
+          }}
+        >
+          <span
+            style={{
+              display: 'block',
+              width: '100%',
+              height: '100%',
+              transformOrigin: 'left center',
+              transform: `scaleX(${Math.min(1, level * 3)})`,
+              background: 'var(--state-running)',
+            }}
+          />
+        </span>
+      )}
 
       <input
         ref={fileInputRef}

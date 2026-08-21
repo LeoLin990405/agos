@@ -26,6 +26,29 @@ export interface UserItem {
   at: number
   /** data.source.kind:'user'=真人;'plugin'/'skill-catalog' 等=系统注入(UI 可折叠)。 */
   sourceKind: string
+  /** 非 text 内容块(图片等)的引用元信息(W1);无则字段缺省。 */
+  blocks?: readonly ResultBlock[] | undefined
+}
+
+/** 宿主 attachments 存储的持久引用(session.attachment RPC 可取原件);只留引用,不带二进制。 */
+export interface AttachmentRef {
+  attachmentId: string
+  mediaType: string | undefined
+  name: string | undefined
+  width: number | undefined
+  height: number | undefined
+  bytes: number | undefined
+}
+
+/** 非 text 内容块的引用元信息(W1 多模态:归约层不再丢弃 image/audio 块)。 */
+export interface ResultBlock {
+  /** 原始块类型('image' / 'audio' / …),原样登记。 */
+  type: string
+  mediaType: string | undefined
+  url: string | undefined
+  path: string | undefined
+  name: string | undefined
+  attachment: AttachmentRef | undefined
 }
 
 export interface AssistantItem {
@@ -57,6 +80,8 @@ export interface ToolItem {
   status: 'running' | 'done' | 'failed'
   /** 结果文本(tool-result 嵌套 content 里的 text 拼接)。 */
   resultText: string | undefined
+  /** 结果里的非 text 块引用(W1:image/audio 等,只留元信息);无则字段缺省。 */
+  resultBlocks?: readonly ResultBlock[] | undefined
   /** swarm/progress 最新快照(仅 swarm 族调用有)。 */
   swarm: SwarmProgressRow[] | undefined
 }

@@ -1,0 +1,95 @@
+/* W2 媒体块(遥测甲板语汇:hairline 边框、微标签、等宽数字;无常驻动画) */
+
+.mb-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.mb-item {
+  margin: 0;
+}
+
+.mb-thumb {
+  display: block;
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-layer-1);
+  cursor: zoom-in;
+}
+
+.mb-thumb img {
+  display: block;
+  max-width: 240px;
+  max-height: 180px;
+  object-fit: contain;
+}
+
+.mb-caption {
+  display: block;
+  margin-top: 4px;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  line-height: 14px;
+  letter-spacing: 0.02em;
+}
+
+.mb-audio {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-layer-1);
+}
+
+.mb-audio audio {
+  width: 260px;
+  height: 32px;
+  display: block;
+}
+
+.mb-loading,
+.mb-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.mb-error {
+  color: var(--state-failed);
+  border-color: var(--state-failed-border);
+  background: var(--state-failed-bg);
+}
+
+.mb-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  background: color-mix(in oklch, var(--bg-base, #000) 62%, transparent);
+  cursor: zoom-out;
+}
+
+.mb-lightbox img {
+  max-width: 92vw;
+  max-height: 88vh;
+  border-radius: 10px;
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 24px 64px color-mix(in oklch, var(--bg-base, #000) 45%, transparent);
+  cursor: default;
+}

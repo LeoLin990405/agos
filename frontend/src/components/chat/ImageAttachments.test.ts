@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildPromptParts,
+  clipboardImageFiles,
   IMAGE_ATTACHMENT_MAX_BYTES,
   imageFileToAttachment,
   prepareImageFiles,
@@ -38,4 +39,25 @@ test('buildPromptParts preserves text and maps queue items to contract image par
     { type: 'text', text: 'inspect this' },
     { type: 'image', mediaType: 'image/jpeg', data: image.data, name: 'pixel.jpg' },
   ]);
+});
+
+test('clipboardImageFiles: files 优先,items 兜底(Safari 截图粘贴),非图片条目跳过', () => {
+  const png = new File(['px'], 'shot.png', { type: 'image/png' });
+  const viaFiles = clipboardImageFiles({ files: [png], items: [] } as unknown as DataTransfer);
+  assert.deepEqual(viaFiles, [png]);
+
+  const viaItems = clipboardImageFiles({
+    files: [],
+    items: [
+      { kind: 'string', type: 'text/plain', getAsFile: () => null },
+      { kind: 'file', type: 'image/png', getAsFile: () => png },
+    ],
+  } as unknown as DataTransfer);
+  assert.deepEqual(viaItems, [png]);
+
+  const textOnly = clipboardImageFiles({
+    files: [],
+    items: [{ kind: 'string', type: 'text/plain', getAsFile: () => null }],
+  } as unknown as DataTransfer);
+  assert.deepEqual(textOnly, []);
 });
