@@ -78,3 +78,16 @@
 - [x] 图片历史占位与 parts：纯函数测试断言 text + image parts、`[图片 ×N]` 与唯一回绑标记。
 - [x] 并发边界：纯函数回归覆盖发送期间 ASR 回填不丢稿；实现会在发送前等待图片 intake，清空/卸载以 generation 使迟到读取失效。
 - [x] 视觉正文：stub 首次返回紧凑 vision 结果、第二次返回只读台账，断言按 `imagePath` 补齐 panel 全文；台账失败回落紧凑结果。
+
+---
+
+## 五、2026-08-21 侧栏与会话管理
+
+- 品牌入口：rail 顶部改为 DeepSeek 原生鲸鱼 mark。`DeepSeekMark` 使用内联 SVG 与 `currentColor`，不依赖 SVG 内写死的黑白主题规则。
+- 会话语法：侧栏按「置顶 / 最近 / 已归档」分区。最近与已归档按 `updatedAt` 倒序；归档默认折叠，行收敛为标题、cwd 末段、轮次与相对时间三行。
+- 可逆元数据：置顶和 AgOS 归档调用 `/api/agos/session-meta/*`；宿主 `workspace.list().archivedSessionIds` 与 `host/archived-sessions-changed` 只读并入隐藏集合。AgOS 自己归档的会话可取消归档，宿主归档项只显示原因且不能伪造反向能力。
+- 会话操作：右键与行内 `⋯` 复用同一键盘菜单。重命名调用 `session.rename`，访达打开调用 `host.openPath`，复制只在 Clipboard API 可用时出现，删除调用可恢复的 `/api/agos/session/delete` 并有唯一危险确认框。
+- 搜索：输入停止 180ms 后优先调用 `session.search` 搜正文；每次请求都有 AbortController 与请求代次，旧响应不能覆盖新查询。RPC 缺席或失败时软降级为标题、cwd 和 session ID 的本地筛选。
+- 无能力不展示：未实现 `Mark as unread`、`Continue in new worktree`、`Copy deeplink`、`Open in new window`、`Remove from 项目`。原因分别是没有已读态、worktree 数据源、deeplink 协议、多窗宿主能力和按 workspace 分组模型。
+- 无障碍：菜单支持右键和触控入口、视口翻转、Esc / 外点 / 滚动关闭、方向键与 Enter，并在关闭后恢复触发点焦点。折叠归档不保留可 Tab 的隐藏控件；删除确认具备初始安全焦点、Tab 围栏与焦点恢复。
+- 离线纪律：会话元数据和删除测试全部注入 fake fetch；未发真实 `session.search`、`session.rename`、`host.openPath` 或任何模型调用。

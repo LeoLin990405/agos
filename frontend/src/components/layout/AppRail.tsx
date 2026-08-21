@@ -1,5 +1,6 @@
 import React from 'react';
 import { useTheme } from '@/design-system/theme-context';
+import { DeepSeekMark } from './DeepSeekMark';
 import './app-rail-grammar.css';
 
 export type MainTab = 'chat' | 'console' | 'graph' | 'settings';
@@ -36,9 +37,15 @@ export const AppRail: React.FC<AppRailProps> = ({
 
   return (
     <aside className="app-rail">
-      <div className="app-rail-logo" title="AgOS 遥测甲板" onClick={() => onSelectTab('chat')}>
-        AG
-      </div>
+      <button
+        type="button"
+        className="app-rail-logo"
+        title="返回 AgOS 对话"
+        aria-label="返回 AgOS 对话"
+        onClick={() => onSelectTab('chat')}
+      >
+        <DeepSeekMark size={24} />
+      </button>
 
       {/* ── 动词置顶:新会话 ─────────────────────────────── */}
       <div className="rail-verb-group">

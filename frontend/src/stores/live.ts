@@ -431,3 +431,121 @@ export async function fetchMemoryGraph(): Promise<MemoryGraphData | undefined> {
     }
   } catch { return undefined }
 }
+
+// ── 会话侧栏管理（仅新增导出；不改变既有 store / RPC 语义）──────────────
+export interface SessionSearchResult {
+  sessionIds: string[]
+  hasMore: boolean
+}
+
+/** 真正搜索会话正文；undefined 表示能力不可用，调用方应降级为标题/id 本地过滤。 */
+export async function searchSessions(
+  query: string,
+  signal?: AbortSignal,
+): Promise<SessionSearchResult | undefined> {
+  const normalized = query.trim()
+  if (normalized === '') return { sessionIds: [], hasMore: false }
+  try {
+    const response = await agos.call('session.search', { query: normalized }, signal)
+    if (!response.result.ok) return undefined
+    return {
+      sessionIds: response.result.value.items.map((item) => String(item.sessionId)),
+      hasMore: response.result.value.hasMore,
+    }
+  } catch (error) {
+    if (signal?.aborted) throw error
+    return undefined
+  }
+}
+
+/** 重命名并返回宿主最终接受的规范化标题。 */
+export async function renameSession(
+  sessionId: string,
+  title: string,
+): Promise<{ ok: true, title: string } | { ok: false, error: string }> {
+  try {
+    const response = await agos.call('session.rename', { sessionId: sessionId as never, title })
+    if (!response.result.ok) return { ok: false, error: JSON.stringify(response.result.error) }
+    void refreshSessions()
+    return { ok: true, title: response.result.value.title }
+  } catch (error) {
+    return { ok: false, error: String((error as Error)?.message ?? error) }
+  }
+}
+
+/** 宿主原生「在访达中显示」；只有 describe.canOpenPath 为真时调用。 */
+export async function openHostPath(path: string): Promise<{ ok: boolean, error?: string }> {
+  try {
+    const response = await agos.call('host.openPath', { path })
+    return response.result.ok
+      ? { ok: true }
+      : { ok: false, error: JSON.stringify(response.result.error) }
+  } catch (error) {
+    return { ok: false, error: String((error as Error)?.message ?? error) }
+  }
+}
+
+export async function canHostOpenPath(): Promise<boolean> {
+  try {
+    const response = await agos.call('host.describe', {})
+    return response.result.ok && response.result.value.canOpenPath
+  } catch {
+    return false
+  }
+}
+
+export interface HostArchivedSessionsSnapshot {
+  sessionIds: string[]
+  available: boolean
+  error?: string
+}
+
+/**
+ * 宿主归档只读观察器：workspace.list 给重连基线，host stream 推全量变更。
+ * 先开流再拉基线；若基线在更新帧之后返回，丢弃旧基线，避免反向覆盖。
+ */
+export function watchHostArchivedSessions(
+  listener: (snapshot: HostArchivedSessionsSnapshot) => void,
+): () => void {
+  let disposed = false
+  let changeVersion = 0
+  let baselineGeneration = 0
+
+  const loadBaseline = async (): Promise<void> => {
+    const generation = ++baselineGeneration
+    const requestedAtVersion = changeVersion
+    try {
+      const response = await agos.call('workspace.list', {})
+      if (disposed || generation !== baselineGeneration || requestedAtVersion !== changeVersion) return
+      if (!response.result.ok) {
+        listener({ sessionIds: [], available: false, error: JSON.stringify(response.result.error) })
+        return
+      }
+      listener({
+        sessionIds: response.result.value.archivedSessionIds.map(String),
+        available: true,
+      })
+    } catch (error) {
+      if (!disposed && generation === baselineGeneration && requestedAtVersion === changeVersion) {
+        listener({ sessionIds: [], available: false, error: String((error as Error)?.message ?? error) })
+      }
+    }
+  }
+
+  const stop = watchStream(
+    (signal, onOpen) => agos.host(signal, onOpen),
+    (frame) => {
+      const payload = frame.payload
+      if (payload.type !== 'host/archived-sessions-changed') return
+      changeVersion += 1
+      listener({ sessionIds: payload.archivedSessionIds.map(String), available: true })
+    },
+    () => { void loadBaseline() },
+  )
+  void loadBaseline()
+
+  return () => {
+    disposed = true
+    stop()
+  }
+}

@@ -4,6 +4,33 @@
    ========================================================================== */
 
 /* 动词组:新会话主按钮 + ⌘K 键帽 */
+.app-rail-logo {
+  padding: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  box-shadow: none;
+  letter-spacing: normal;
+  transition:
+    color 0.3s ease-in-out,
+    background-color 0.3s ease-in-out,
+    border-color 0.3s ease-in-out,
+    transform 0.3s ease-in-out;
+}
+
+.app-rail-logo:hover,
+.app-rail-logo:focus-visible {
+  color: var(--text-primary);
+  background-color: var(--bg-layer-2);
+  border-color: var(--border-subtle);
+  outline: none;
+}
+
+/* 本轮 impeccable 规则禁止活动态 side-stripe。 */
+.rail-btn.is-active::before {
+  display: none;
+}
+
 .rail-verb-group {
   display: flex;
   flex-direction: column;
@@ -71,6 +98,10 @@
 
 @media (prefers-reduced-motion: reduce) {
   .rail-btn.rail-new-session {
+    transition: none;
+  }
+
+  .app-rail-logo {
     transition: none;
   }
 }

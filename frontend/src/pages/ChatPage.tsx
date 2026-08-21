@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { AppTopbar, TopbarAction, TOPBAR_ICONS } from '@/components/layout/AppTopbar';
 import { Dot } from '@/components/ui/Dot';
 import { Chip } from '@/components/ui/Chip';
 import { Button } from '@/components/ui/Button';
+import { Modal } from '@/components/ui/Modal';
 import { GoalBanner } from '@/components/chat/GoalBanner';
 import { ReasoningBlock } from '@/components/chat/ReasoningBlock';
 import { TerminalCard } from '@/components/ui/TerminalCard';
@@ -25,11 +26,38 @@ import {
 } from '@/components/chat/vision-arbiter-api';
 import { NewSessionModal } from '@/components/chat/NewSessionModal';
 import { ProgressDock } from '@/components/chat/ProgressDock';
+import { SessionContextMenu, type MenuPoint } from '@/components/chat/SessionContextMenu';
+import {
+  basenameOfPath,
+  fetchSessionMeta,
+  formatSessionRelativeTime,
+  mergeArchivedSnapshot,
+  mergePinnedSnapshot,
+  partitionSessions,
+  pickFirstVisibleSession,
+  setSessionArchived,
+  setSessionPinned,
+  trashSession,
+  type SessionMetaSnapshot,
+} from '@/components/chat/session-management';
 import { EmptyStateHero, EmptyStateBelow } from '@/components/chat/EmptyState';
 import { NEW_SESSION_EVENT } from '@/components/layout/AppRail';
 import '@/design-system/chat-empty.css';
-import { StateLamp } from '@/design-system/tokens';
-import { sessionsStore, streamStore, conversationStore, sendPromptParts, openConversation } from '@/stores/live';
+import '@/design-system/session-menu.css';
+import {
+  canHostOpenPath,
+  conversationStore,
+  openConversation,
+  openHostPath,
+  refreshSessions,
+  renameSession,
+  searchSessions,
+  sendPromptParts,
+  sessionsStore,
+  streamStore,
+  watchHostArchivedSessions,
+  type HostArchivedSessionsSnapshot,
+} from '@/stores/live';
 import { LiveTranscript, useTranscriptItemCount, type OptimisticImageMessage } from '@/pages/chat-transcript';
 import { AgosComputer } from '@/components/stage/AgosComputer';
 import { ReplayScrubber } from '@/components/stage/ReplayScrubber';
@@ -40,12 +68,11 @@ const PRESET_NAMES: Record<string, string> = { standard: '标准模式', code: '
 interface SessionListItem {
   id: string;
   title: string;
-  preview: string;
-  state: StateLamp;
-  tag: string;
-  tagVariant?: 'purple' | 'amber';
+  cwd: string;
+  running: boolean;
   meta: string;
   time: string;
+  updatedAt: number;
 }
 
 interface LocalVisionCard {
@@ -63,6 +90,21 @@ interface LocalVisionCard {
 const localId = (prefix: string): string =>
   `${prefix}-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
 
+const EMPTY_SESSION_META: SessionMetaSnapshot = {
+  pinned: [],
+  archived: [],
+  hostArchived: [],
+  hostArchivedAvailable: false,
+};
+
+const EMPTY_HOST_ARCHIVE: HostArchivedSessionsSnapshot = { sessionIds: [], available: false };
+
+interface OpenSessionMenu {
+  sessionId: string;
+  point: MenuPoint;
+  returnFocus: HTMLElement;
+}
+
 export const ChatPage: React.FC<{
   onNavigateConsole?: () => void;
   onNavigateGraph?: (nodeId?: string) => void;
@@ -78,7 +120,28 @@ export const ChatPage: React.FC<{
   const [hasGoal, setHasGoal] = useState(true);
   const [optimisticImageMessages, setOptimisticImageMessages] = useState<OptimisticImageMessage[]>([]);
   const [visionCards, setVisionCards] = useState<LocalVisionCard[]>([]);
+  const [sessionMeta, setSessionMeta] = useState<SessionMetaSnapshot>(EMPTY_SESSION_META);
+  const [sessionMetaAvailable, setSessionMetaAvailable] = useState(false);
+  const [hostArchive, setHostArchive] = useState<HostArchivedSessionsSnapshot>(EMPTY_HOST_ARCHIVE);
+  const [canRevealPath, setCanRevealPath] = useState(false);
+  const [archivedExpanded, setArchivedExpanded] = useState(false);
+  const [remoteSearchIds, setRemoteSearchIds] = useState<string[] | undefined>(undefined);
+  const [searchMode, setSearchMode] = useState<'idle' | 'loading' | 'rpc' | 'fallback'>('idle');
+  const [titleOverrides, setTitleOverrides] = useState<Record<string, string>>({});
+  const [deletedSessionIds, setDeletedSessionIds] = useState<Set<string>>(() => new Set());
+  const [openSessionMenu, setOpenSessionMenu] = useState<OpenSessionMenu | undefined>(undefined);
+  const [renamingSessionId, setRenamingSessionId] = useState<string | undefined>(undefined);
+  const [renameDraft, setRenameDraft] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<SessionListItem | undefined>(undefined);
+  const [deletePending, setDeletePending] = useState(false);
+  const [metaMutationPending, setMetaMutationPending] = useState(false);
+  const [renameMutationPending, setRenameMutationPending] = useState(false);
+  const [sessionActionError, setSessionActionError] = useState<string | undefined>(undefined);
   const visionControllersRef = useRef(new Map<string, AbortController>());
+  const searchGenerationRef = useRef(0);
+  const mutationVersionsRef = useRef(new Map<string, number>());
+  const menuReturnFocusRef = useRef<HTMLElement | null>(null);
+  const deleteReturnFocusRef = useRef<HTMLElement | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -109,13 +172,80 @@ export const ChatPage: React.FC<{
   const isStreamOnline = useSyncExternalStore(streamStore.subscribe, streamStore.getSnapshot);
 
   const liveMode = liveSessions.rows.length > 0;
+  const hasActiveLiveSession = liveMode
+    && activeSessionId !== ''
+    && liveSessions.rows.some((row) => row.sessionId === activeSessionId && !deletedSessionIds.has(row.sessionId));
+
+  useEffect(() => {
+    if (!liveMode) return undefined;
+    let disposed = false;
+    const stopHostArchive = watchHostArchivedSessions((snapshot) => {
+      if (!disposed && mountedRef.current) setHostArchive(snapshot);
+    });
+    void fetchSessionMeta().then((snapshot) => {
+      if (!disposed && mountedRef.current) {
+        setSessionMeta(snapshot);
+        setSessionMetaAvailable(true);
+      }
+    }).catch(() => {
+      if (!disposed && mountedRef.current) setSessionMetaAvailable(false);
+    });
+    void canHostOpenPath().then((available) => {
+      if (!disposed && mountedRef.current) setCanRevealPath(available);
+    });
+    return () => {
+      disposed = true;
+      stopHostArchive();
+    };
+  }, [liveMode]);
+
+  useEffect(() => {
+    const query = searchQuery.trim();
+    const generation = ++searchGenerationRef.current;
+    const controller = new AbortController();
+    if (query === '') {
+      setRemoteSearchIds(undefined);
+      setSearchMode('idle');
+      return () => controller.abort();
+    }
+    if (!liveMode) {
+      setRemoteSearchIds(undefined);
+      setSearchMode('fallback');
+      return () => controller.abort();
+    }
+    setSearchMode('loading');
+    const timer = window.setTimeout(() => {
+      void searchSessions(query, controller.signal).then((result) => {
+        if (!mountedRef.current || generation !== searchGenerationRef.current) return;
+        if (result === undefined) {
+          setRemoteSearchIds(undefined);
+          setSearchMode('fallback');
+        } else {
+          setRemoteSearchIds(result.sessionIds);
+          setSearchMode('rpc');
+        }
+      }).catch(() => {
+        if (mountedRef.current && generation === searchGenerationRef.current && !controller.signal.aborted) {
+          setRemoteSearchIds(undefined);
+          setSearchMode('fallback');
+        }
+      });
+    }, 180);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [liveMode, searchQuery]);
 
   // 空态判定:当前会话已就绪但一条消息都没有(不是「后端有没有会话」)
   const convo = useSyncExternalStore(
     conversationStore.subscribe,
     useCallback(() => conversationStore.getSnapshot(activeSessionId), [activeSessionId])
   );
-  const isEmptyConversation = liveMode && convo.phase === 'live' && (convo.snapshot?.items.length ?? 0) === 0;
+  const isEmptyConversation = liveMode && (
+    !hasActiveLiveSession
+    || (convo.phase === 'live' && (convo.snapshot?.items.length ?? 0) === 0)
+  );
 
   // 回放:总项数来自 fold 快照;换会话时把回卷位置清掉,否则会把上一个会话的位置带过来
   const replayTotal = useTranscriptItemCount(activeSessionId);
@@ -123,80 +253,285 @@ export const ChatPage: React.FC<{
   // 有真后端时自动选中最近会话并打开(mock id '1' 不可用)
   useEffect(() => {
     if (!liveMode) return;
-    const exists = liveSessions.rows.some((r) => r.sessionId === activeSessionId);
+    const hidden = new Set([
+      ...sessionMeta.archived,
+      ...(hostArchive.available ? hostArchive.sessionIds : sessionMeta.hostArchived),
+    ]);
+    const exists = liveSessions.rows.some((r) => (
+      r.sessionId === activeSessionId
+      && !deletedSessionIds.has(r.sessionId)
+      && !hidden.has(r.sessionId)
+    ));
     if (!exists) {
-      const first = liveSessions.rows[0];
+      const first = pickFirstVisibleSession(
+        liveSessions.rows.map((row) => ({ ...row, id: row.sessionId })),
+        deletedSessionIds,
+        hidden,
+      );
       if (first !== undefined) { setActiveSessionId(first.sessionId); openConversation(first.sessionId); }
+      else if (activeSessionId !== '') setActiveSessionId('');
     }
-  }, [liveMode, liveSessions.rows, activeSessionId]);
+  }, [activeSessionId, deletedSessionIds, hostArchive, liveMode, liveSessions.rows, sessionMeta.archived, sessionMeta.hostArchived]);
 
   // 真实会话列表映射 (兼顾回退)
   const defaultSessions: SessionListItem[] = [
     {
       id: '1',
       title: '分布式认证令牌轮转与流式事件管道重构',
-      preview: '8 节点 Swarm 编队审计中: Redis Failover 模拟中...',
-      state: 'running',
-      tag: 'P0',
-      tagVariant: 'amber',
-      meta: '8 条消息 · 38.4k tok',
+      cwd: '/Users/leo/Projects/auth-matrix',
+      running: true,
+      meta: '8 轮 · 38.4k',
       time: '刚刚',
+      updatedAt: Date.now(),
     },
     {
       id: '2',
       title: 'PostgreSQL DataConnect 模式迁移回归',
-      preview: '数据表迁移脚本已执行完毕，0 冲突',
-      state: 'done',
-      tag: 'DB',
-      meta: '14 条消息 · 52.1k tok',
+      cwd: '/Users/leo/Projects/dataconnect',
+      running: false,
+      meta: '14 轮 · 52.1k',
       time: '1小时前',
+      updatedAt: Date.now() - 3_600_000,
     },
     {
       id: '3',
       title: 'Seccomp 宿主内核隔离逃逸巡检',
-      preview: '[E4012] 进程被内核 seccomp 截获，已阻断',
-      state: 'failed',
-      tag: 'SEC',
-      meta: '22 条消息 · 84.0k tok',
+      cwd: '/Users/leo/Projects/security',
+      running: false,
+      meta: '22 轮 · 84.0k',
       time: '3小时前',
+      updatedAt: Date.now() - 10_800_000,
     },
     {
       id: '4',
       title: 'AgOS 遥测甲板设计系统 Token 提取',
-      preview: '已产出 CSS Token 与共息心跳规范',
-      state: 'done',
-      tag: 'UI',
-      tagVariant: 'purple',
-      meta: '5 条消息 · 19.8k tok',
+      cwd: '/Users/leo/Documents/kimi/workspace/agos-frontend',
+      running: false,
+      meta: '5 轮 · 19.8k',
       time: '昨天',
+      updatedAt: Date.now() - 86_400_000,
     },
   ];
 
   const renderedSessions: SessionListItem[] =
     liveSessions.rows.length > 0
-      ? liveSessions.rows.map((r) => ({
+      ? liveSessions.rows.filter((r) => !deletedSessionIds.has(r.sessionId)).map((r) => ({
           id: r.sessionId,
-          title: r.title,
-          preview: r.cwd || '任务进行中...',
-          state: r.running ? 'running' : 'done',
-          tag: '',
+          title: titleOverrides[r.sessionId] ?? r.title,
+          cwd: r.cwd,
+          running: r.running,
           meta: `${r.turns} 轮 · ${(r.tokens / 1000).toFixed(1)}k`,
-          time: new Date(r.updatedAt).toLocaleTimeString(),
+          time: formatSessionRelativeTime(r.updatedAt),
+          updatedAt: r.updatedAt,
         }))
       : defaultSessions;
 
-  const filteredSessions = renderedSessions.filter(
-    (s) =>
-      s.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      s.id.toLowerCase().includes(searchQuery.toLowerCase())
+  const effectiveHostArchivedIds = hostArchive.available
+    ? hostArchive.sessionIds
+    : sessionMeta.hostArchived;
+  const hostArchivedIds = useMemo(() => new Set(effectiveHostArchivedIds), [effectiveHostArchivedIds]);
+  const archivedIds = useMemo(
+    () => new Set([...sessionMeta.archived, ...effectiveHostArchivedIds]),
+    [effectiveHostArchivedIds, sessionMeta.archived],
   );
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+  const remoteMatches = useMemo(() => new Set(remoteSearchIds ?? []), [remoteSearchIds]);
+  const filteredSessions = renderedSessions.filter((session) => {
+    if (normalizedSearch === '') return true;
+    const localMatch = session.title.toLowerCase().includes(normalizedSearch)
+      || session.id.toLowerCase().includes(normalizedSearch)
+      || session.cwd.toLowerCase().includes(normalizedSearch);
+    return localMatch || (searchMode === 'rpc' && remoteMatches.has(session.id));
+  });
+  const sectionedSessions = useMemo(
+    () => partitionSessions(filteredSessions, sessionMeta.pinned, archivedIds),
+    [archivedIds, filteredSessions, sessionMeta.pinned],
+  );
+
+  const findSessionOpenButton = (sessionId: string): HTMLButtonElement | null => {
+    const row = [...document.querySelectorAll<HTMLElement>('[data-session-id]')]
+      .find((element) => element.dataset['sessionId'] === sessionId);
+    return row?.querySelector<HTMLButtonElement>('.session-row-open') ?? null;
+  };
 
   const handleSelectSession = (id: string) => {
     setActiveSessionId(id);
     openConversation(id);
   };
 
+  const openMenuAt = (sessionId: string, point: MenuPoint, returnFocus: HTMLElement): void => {
+    if (!liveMode) return;
+    setSessionActionError(undefined);
+    menuReturnFocusRef.current = returnFocus;
+    setOpenSessionMenu({ sessionId, point, returnFocus });
+  };
+
+  const handleTogglePin = async (session: SessionListItem): Promise<void> => {
+    if (metaMutationPending || renameMutationPending || deletePending) return;
+    const pinned = sessionMeta.pinned.includes(session.id);
+    const mutationKey = `pin:${session.id}`;
+    const generation = (mutationVersionsRef.current.get(mutationKey) ?? 0) + 1;
+    mutationVersionsRef.current.set(mutationKey, generation);
+    menuReturnFocusRef.current = document.querySelector<HTMLInputElement>('[aria-label="搜索会话"]');
+    setMetaMutationPending(true);
+    setSessionActionError(undefined);
+    setSessionMeta((current) => ({
+      ...current,
+      pinned: pinned
+        ? current.pinned.filter((id) => id !== session.id)
+        : [...current.pinned.filter((id) => id !== session.id), session.id],
+    }));
+    try {
+      const snapshot = await setSessionPinned(session.id, !pinned);
+      if (mountedRef.current && generation === mutationVersionsRef.current.get(mutationKey)) {
+        setSessionMeta((current) => mergePinnedSnapshot(current, snapshot));
+      }
+    } catch (error) {
+      if (mountedRef.current && generation === mutationVersionsRef.current.get(mutationKey)) {
+        setSessionMeta((current) => ({
+          ...current,
+          pinned: pinned
+            ? [...current.pinned.filter((id) => id !== session.id), session.id]
+            : current.pinned.filter((id) => id !== session.id),
+        }));
+        setSessionActionError(String((error as Error)?.message ?? error));
+      }
+    } finally {
+      if (mountedRef.current && generation === mutationVersionsRef.current.get(mutationKey)) setMetaMutationPending(false);
+    }
+  };
+
+  const handleToggleArchive = async (session: SessionListItem): Promise<void> => {
+    if (hostArchivedIds.has(session.id) || metaMutationPending || renameMutationPending || deletePending) return;
+    const archived = sessionMeta.archived.includes(session.id);
+    const mutationKey = `archive:${session.id}`;
+    const generation = (mutationVersionsRef.current.get(mutationKey) ?? 0) + 1;
+    mutationVersionsRef.current.set(mutationKey, generation);
+    menuReturnFocusRef.current = document.querySelector<HTMLInputElement>('[aria-label="搜索会话"]');
+    setMetaMutationPending(true);
+    setSessionActionError(undefined);
+    try {
+      const snapshot = await setSessionArchived(session.id, !archived);
+      if (mountedRef.current && generation === mutationVersionsRef.current.get(mutationKey)) {
+        setSessionMeta((current) => mergeArchivedSnapshot(current, snapshot));
+        if (!archived && activeSessionId === session.id) {
+          const next = pickFirstVisibleSession(renderedSessions, new Set([session.id]), archivedIds);
+          if (next !== undefined) handleSelectSession(next.id);
+          else {
+            setActiveSessionId('');
+            setIsNewSessionOpen(true);
+          }
+        }
+      }
+    } catch (error) {
+      if (mountedRef.current && generation === mutationVersionsRef.current.get(mutationKey)) {
+        setSessionActionError(String((error as Error)?.message ?? error));
+      }
+    } finally {
+      if (mountedRef.current && generation === mutationVersionsRef.current.get(mutationKey)) setMetaMutationPending(false);
+    }
+  };
+
+  const startRename = (session: SessionListItem): void => {
+    if (renameMutationPending || metaMutationPending || deletePending) return;
+    setRenamingSessionId(session.id);
+    setRenameDraft(session.title);
+    setSessionActionError(undefined);
+  };
+
+  const cancelRename = (): void => {
+    setRenamingSessionId(undefined);
+    setRenameDraft('');
+  };
+
+  const submitRename = async (session: SessionListItem): Promise<void> => {
+    if (renameMutationPending || metaMutationPending || deletePending) return;
+    const title = renameDraft.trim();
+    if (title === '' || title === session.title) {
+      cancelRename();
+      return;
+    }
+    const previousOverride = titleOverrides[session.id];
+    const mutationKey = `rename:${session.id}`;
+    const generation = (mutationVersionsRef.current.get(mutationKey) ?? 0) + 1;
+    mutationVersionsRef.current.set(mutationKey, generation);
+    setRenameMutationPending(true);
+    setTitleOverrides((current) => ({ ...current, [session.id]: title }));
+    cancelRename();
+    try {
+      const result = await renameSession(session.id, title);
+      if (!mountedRef.current || generation !== mutationVersionsRef.current.get(mutationKey)) return;
+      if (result.ok) {
+        setTitleOverrides((current) => ({ ...current, [session.id]: result.title }));
+        return;
+      }
+      setTitleOverrides((current) => {
+        const next = { ...current };
+        if (previousOverride === undefined) delete next[session.id];
+        else next[session.id] = previousOverride;
+        return next;
+      });
+      setSessionActionError(result.error);
+    } finally {
+      if (mountedRef.current && generation === mutationVersionsRef.current.get(mutationKey)) setRenameMutationPending(false);
+    }
+  };
+
+  const copySessionValue = (value: string, label: string): void => {
+    void navigator.clipboard.writeText(value).catch((error: unknown) => {
+      if (mountedRef.current) setSessionActionError(`${label}拷贝失败：${String((error as Error)?.message ?? error)}`);
+    });
+  };
+
+  const revealSession = (session: SessionListItem): void => {
+    void openHostPath(session.cwd).then((result) => {
+      if (mountedRef.current && !result.ok) setSessionActionError(result.error ?? '无法在访达中显示');
+    });
+  };
+
+  const confirmDeleteSession = async (): Promise<void> => {
+    const target = deleteTarget;
+    if (target === undefined || target.running || deletePending || metaMutationPending || renameMutationPending) return;
+    const mutationKey = `delete:${target.id}`;
+    const generation = (mutationVersionsRef.current.get(mutationKey) ?? 0) + 1;
+    mutationVersionsRef.current.set(mutationKey, generation);
+    setDeletePending(true);
+    setSessionActionError(undefined);
+    try {
+      await trashSession(target.id);
+      if (!mountedRef.current || generation !== mutationVersionsRef.current.get(mutationKey)) return;
+      setDeletedSessionIds((current) => new Set(current).add(target.id));
+      setSessionMeta((current) => ({
+        ...current,
+        pinned: current.pinned.filter((id) => id !== target.id),
+        archived: current.archived.filter((id) => id !== target.id),
+      }));
+      deleteReturnFocusRef.current = document.querySelector<HTMLInputElement>('[aria-label="搜索会话"]');
+      setDeleteTarget(undefined);
+      if (activeSessionId === target.id) {
+        const next = pickFirstVisibleSession(renderedSessions, new Set([target.id]), archivedIds);
+        if (next !== undefined) {
+          deleteReturnFocusRef.current = findSessionOpenButton(next.id)
+            ?? document.querySelector<HTMLInputElement>('[aria-label="搜索会话"]');
+          handleSelectSession(next.id);
+        }
+        else {
+          setActiveSessionId('');
+          setIsNewSessionOpen(true);
+        }
+      }
+      void refreshSessions();
+    } catch (error) {
+      if (mountedRef.current && generation === mutationVersionsRef.current.get(mutationKey)) {
+        setSessionActionError(String((error as Error)?.message ?? error));
+      }
+    } finally {
+      if (mountedRef.current && generation === mutationVersionsRef.current.get(mutationKey)) setDeletePending(false);
+    }
+  };
+
   const handleSend = async (message: CommandDeckMessage) => {
+    if (liveMode && !hasActiveLiveSession) return { ok: false, error: '请先新建或选择会话' };
     const result = await sendPromptParts(activeSessionId, message.parts);
     if (mountedRef.current && result.ok && message.images.length > 0) {
       setOptimisticImageMessages((previous) => [...previous, {
@@ -225,6 +560,7 @@ export const ChatPage: React.FC<{
   };
 
   const handleAnalyzeImage = (image: ImageAttachmentDraft) => {
+    if (liveMode && !hasActiveLiveSession) return;
     const id = localId('vision');
     const controller = new AbortController();
     visionControllersRef.current.set(id, controller);
@@ -272,97 +608,219 @@ export const ChatPage: React.FC<{
     });
   };
 
+  const closeSessionMenu = useCallback(() => {
+    const returnFocus = menuReturnFocusRef.current;
+    menuReturnFocusRef.current = null;
+    setOpenSessionMenu(undefined);
+    if (returnFocus !== null) {
+      window.requestAnimationFrame(() => {
+        if (mountedRef.current && returnFocus.isConnected) returnFocus.focus();
+      });
+    }
+  }, []);
+  const resolveDeleteReturnFocus = useCallback(() => deleteReturnFocusRef.current, []);
+  const menuSession = openSessionMenu === undefined
+    ? undefined
+    : renderedSessions.find((session) => session.id === openSessionMenu.sessionId);
+  const canUseClipboard = typeof navigator !== 'undefined' && typeof navigator.clipboard?.writeText === 'function';
+
+  const renderSessionRow = (session: SessionListItem, options: { pinned?: boolean, archived?: boolean } = {}) => (
+    <div
+      key={session.id}
+      data-session-id={session.id}
+      className={`session-row${activeSessionId === session.id ? ' is-active' : ''}${options.archived ? ' is-archived' : ''}`}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        const openButton = event.currentTarget.querySelector<HTMLButtonElement>('.session-row-open');
+        openMenuAt(session.id, { x: event.clientX, y: event.clientY }, openButton ?? event.currentTarget);
+      }}
+    >
+      <button
+        type="button"
+        className="session-row-open"
+        aria-label={`打开会话：${session.title}`}
+        aria-current={activeSessionId === session.id ? 'page' : undefined}
+        tabIndex={renamingSessionId === session.id ? -1 : 0}
+        onClick={() => handleSelectSession(session.id)}
+      />
+      <div className="session-row-content">
+        <div className="session-row-title-line">
+          {options.pinned && (
+            <svg className="session-row-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+              <path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5Z" />
+              <path d="M12 14v6" />
+            </svg>
+          )}
+          {session.running && <Dot state="running" size={8} title="会话运行中" />}
+          {renamingSessionId === session.id ? (
+            <input
+              className="session-rename-input"
+              aria-label={`重命名会话“${session.title}”`}
+              value={renameDraft}
+              autoFocus
+              onFocus={(event) => event.currentTarget.select()}
+              onChange={(event) => setRenameDraft(event.target.value)}
+              onBlur={cancelRename}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  void submitRename(session);
+                } else if (event.key === 'Escape') {
+                  event.preventDefault();
+                  cancelRename();
+                }
+              }}
+            />
+          ) : (
+            <span className="session-row-title" title={session.title}>{session.title}</span>
+          )}
+        </div>
+        <div className="session-row-cwd" title={session.cwd}>{basenameOfPath(session.cwd)}</div>
+        <div className="session-row-meta">
+          <span className="u-num">{session.meta}</span>
+          <span className="u-num">{session.time}</span>
+        </div>
+      </div>
+      {liveMode && (
+        <button
+          type="button"
+          className="session-row-more"
+          aria-label={`管理会话“${session.title}”`}
+          title="会话操作"
+          onClick={(event) => {
+            event.stopPropagation();
+            const rect = event.currentTarget.getBoundingClientRect();
+            openMenuAt(session.id, { x: rect.right, y: rect.bottom }, event.currentTarget);
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <circle cx="5" cy="12" r="1.5" />
+            <circle cx="12" cy="12" r="1.5" />
+            <circle cx="19" cy="12" r="1.5" />
+          </svg>
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <div style={{ display: 'flex', flex: 1, height: '100vh', overflow: 'hidden' }}>
-      {/* 侧栏会话矩阵 */}
-      <aside
-        style={{
-          width: '290px',
-          flex: 'none',
-          backgroundColor: 'var(--bg-layer-1)',
-          borderRight: '1px solid var(--border-dim)',
-          display: 'flex',
-          flexDirection: 'column',
-          height: '100%',
-        }}
-      >
-        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border-dim)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span className="u-microlabel">会话矩阵 ({renderedSessions.length})</span>
+      <aside className="session-sidebar" aria-label="会话侧栏">
+        <div className="session-sidebar-header">
+          <div className="session-sidebar-heading">
+            <span className="u-microlabel">会话 ({renderedSessions.length})</span>
             <Button
               variant="primary"
               size="sm"
               style={{ padding: '0 10px', gap: '4px' }}
+              aria-label="新建会话"
               onClick={() => setIsNewSessionOpen(true)}
             >
               <span style={{ fontSize: '14px', lineHeight: 1 }}>+</span>
               <span>新建会话</span>
             </Button>
           </div>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              backgroundColor: 'var(--bg-layer-2)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: '7px',
-              padding: '6px 12px',
-              gap: '8px',
-            }}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style={{ color: 'var(--text-tertiary)' }}>
+          <div className="session-search">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--text-tertiary)' }} aria-hidden="true">
               <circle cx="11" cy="11" r="8" />
               <path d="m21 21-4.3-4.3" />
             </svg>
             <input
               type="text"
-              placeholder="搜索会话主题 / RPC ID..."
-              style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: '12px', width: '100%', outline: 'none' }}
+              aria-label="搜索会话"
+              placeholder="搜索标题、目录或对话内容..."
+              maxLength={500}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
+          <div className="session-search-status" role="status" aria-live="polite">
+            {searchMode === 'loading' && '正在搜索对话内容…'}
+            {searchMode === 'fallback' && searchQuery.trim() !== '' && '内容搜索暂不可用，已按标题、目录和 ID 筛选'}
+          </div>
         </div>
 
-        <div style={{ flex: 1, overflowY: 'auto', padding: '10px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
-          {filteredSessions.map((s) => (
-            <div
-              key={s.id}
-              onClick={() => handleSelectSession(s.id)}
-              style={{
-                padding: '12px 14px',
-                borderRadius: '10px',
-                backgroundColor: activeSessionId === s.id ? 'var(--bg-layer-2)' : 'transparent',
-                border: activeSessionId === s.id ? '1px solid var(--border-subtle)' : '1px solid transparent',
-                boxShadow: activeSessionId === s.id ? '0 0 0 1px var(--border-bold), var(--shadow-card)' : 'none',
-                cursor: 'pointer',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '6px',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                  <Dot state={s.state} />
-                  <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {s.title}
-                  </span>
-                </div>
-                {s.tag !== '' && <Chip variant={s.tagVariant}>{s.tag}</Chip>}
+        <div className="session-list-scroll">
+          {sectionedSessions.pinned.length > 0 && (
+            <section className="session-section" aria-labelledby="session-pinned-heading">
+              <div className="session-section-heading" id="session-pinned-heading">
+                <span className="u-microlabel">置顶</span>
+                <span className="u-num">{sectionedSessions.pinned.length}</span>
               </div>
-              <div style={{ fontSize: '12.5px', color: 'var(--text-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {s.preview}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11.5px', color: 'var(--text-tertiary)' }}>
-                <span className="u-num">{s.meta}</span>
-                <span className="u-num" style={s.state === 'running' ? { color: 'var(--state-running)', fontWeight: 600 } : undefined}>
-                  {s.time}
-                </span>
-              </div>
+              {sectionedSessions.pinned.map((session) => renderSessionRow(session, { pinned: true }))}
+            </section>
+          )}
+
+          <section className="session-section" aria-labelledby="session-recent-heading">
+            <div className="session-section-heading" id="session-recent-heading">
+              <span className="u-microlabel">最近</span>
+              <span className="u-num">{sectionedSessions.recent.length}</span>
             </div>
-          ))}
+            {sectionedSessions.recent.map((session) => renderSessionRow(session))}
+            {sectionedSessions.recent.length === 0 && sectionedSessions.pinned.length === 0 && (
+              <div className="session-empty-note">没有匹配的会话</div>
+            )}
+          </section>
+
+          <section className="session-section" aria-labelledby="session-archived-heading">
+            <button
+              type="button"
+              className="session-archive-toggle"
+              aria-expanded={archivedExpanded}
+              aria-controls="session-archived-list"
+              onClick={() => setArchivedExpanded((expanded) => !expanded)}
+            >
+              <span className="u-microlabel" id="session-archived-heading">已归档 ({sectionedSessions.archived.length})</span>
+              <svg className="session-archive-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+                <path d="m9 18 6-6-6-6" />
+              </svg>
+            </button>
+            <div
+              id="session-archived-list"
+              className="session-archive-body"
+              style={{ height: archivedExpanded ? `${sectionedSessions.archived.length * 68}px` : '0px' }}
+              aria-hidden={!archivedExpanded}
+            >
+              {archivedExpanded && sectionedSessions.archived.map((session) => renderSessionRow(session, { archived: true }))}
+            </div>
+          </section>
+
+          {sessionActionError !== undefined && (
+            <div className="session-action-error" role="alert">{sessionActionError}</div>
+          )}
         </div>
       </aside>
+
+      {menuSession !== undefined && openSessionMenu !== undefined && (
+        <SessionContextMenu
+          point={openSessionMenu.point}
+          sessionId={menuSession.id}
+          cwd={menuSession.cwd}
+          title={menuSession.title}
+          pinned={sessionMeta.pinned.includes(menuSession.id)}
+          archived={sessionMeta.archived.includes(menuSession.id)}
+          hostArchived={hostArchivedIds.has(menuSession.id)}
+          running={menuSession.running}
+          metaAvailable={sessionMetaAvailable}
+          managementPending={metaMutationPending || renameMutationPending || deletePending}
+          canOpenPath={canRevealPath}
+          canUseClipboard={canUseClipboard}
+          onClose={closeSessionMenu}
+          onTogglePin={() => { void handleTogglePin(menuSession); }}
+          onRename={() => {
+            menuReturnFocusRef.current = null;
+            startRename(menuSession);
+          }}
+          onToggleArchive={() => { void handleToggleArchive(menuSession); }}
+          onReveal={() => revealSession(menuSession)}
+          onCopy={copySessionValue}
+          onDelete={() => {
+            deleteReturnFocusRef.current = openSessionMenu.returnFocus;
+            menuReturnFocusRef.current = null;
+            setDeleteTarget(menuSession);
+          }}
+        />
+      )}
 
       {/* 舞台 Stage */}
       <main className={`app-stage${isEmptyConversation ? ' is-empty' : ''}`}>
@@ -626,11 +1084,20 @@ export const ChatPage: React.FC<{
 
         <ProgressDock />
 
-        <CommandDeck sessionId={liveMode ? activeSessionId : undefined}
-          onSend={handleSend}
-          onAnalyzeImage={handleAnalyzeImage}
-          onFocusApproval={handleFocusApproval}
-        />
+        {(!liveMode || hasActiveLiveSession) ? (
+          <CommandDeck sessionId={hasActiveLiveSession ? activeSessionId : undefined}
+            onSend={handleSend}
+            onAnalyzeImage={handleAnalyzeImage}
+            onFocusApproval={handleFocusApproval}
+          />
+        ) : (
+          <div className="session-no-active" role="status">
+            <span>没有可用会话，请先选择或新建会话。</span>
+            <Button variant="primary" size="sm" aria-label="新建可用会话" onClick={() => setIsNewSessionOpen(true)}>
+              新建会话
+            </Button>
+          </div>
+        )}
 
         {isEmptyConversation && (
           <div className="es-below-host">
@@ -645,10 +1112,49 @@ export const ChatPage: React.FC<{
 
       {isComputerOpen && (
         <AgosComputer
-          sessionId={liveMode ? activeSessionId : undefined}
+          sessionId={hasActiveLiveSession ? activeSessionId : undefined}
           onClose={() => setIsComputerOpen(false)}
         />
       )}
+
+      <Modal
+        isOpen={deleteTarget !== undefined}
+        maxWidth="430px"
+        title="删除会话"
+        overlayClassName="session-delete-overlay"
+        initialFocusSelector=".session-delete-cancel"
+        returnFocus={resolveDeleteReturnFocus}
+        onClose={() => { if (!deletePending) setDeleteTarget(undefined); }}
+        footer={(
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="session-delete-cancel"
+              aria-label="取消删除会话"
+              disabled={deletePending}
+              onClick={() => setDeleteTarget(undefined)}
+            >
+              取消
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              aria-label="确认将会话移入回收站目录"
+              disabled={deletePending}
+              onClick={() => { void confirmDeleteSession(); }}
+            >
+              {deletePending ? '正在移动…' : '移入回收站'}
+            </Button>
+          </>
+        )}
+      >
+        <div className="session-delete-copy">
+          <p>确认删除 <strong>{deleteTarget?.title}</strong>？</p>
+          <p>会话目录将移入带日期的回收站目录，不会永久销毁，可从磁盘恢复。</p>
+          {sessionActionError !== undefined && <p className="session-action-error" role="alert">{sessionActionError}</p>}
+        </div>
+      </Modal>
 
       {/* 新建会话弹窗 */}
       <NewSessionModal
