@@ -47,6 +47,7 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
         <button
           type="button"
           className={`console-nav-item ${activeTab === 'overview' ? 'is-active' : ''}`}
+          aria-label="概览遥测"
           onClick={() => setActiveTab('overview')}
         >
           <span>概览遥测</span>
@@ -56,6 +57,7 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
         <button
           type="button"
           className={`console-nav-item ${activeTab === 'fleet' ? 'is-active' : ''}`}
+          aria-label="机器与机架"
           onClick={() => setActiveTab('fleet')}
         >
           <span>机器与机架</span>
@@ -64,6 +66,7 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
         <button
           type="button"
           className={`console-nav-item ${activeTab === 'sessions' ? 'is-active' : ''}`}
+          aria-label="会话矩阵"
           onClick={() => setActiveTab('sessions')}
         >
           <span>会话矩阵</span>
@@ -75,6 +78,7 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
         <button
           type="button"
           className={`console-nav-item ${activeTab === 'lineage' ? 'is-active' : ''}`}
+          aria-label="智能体谱系"
           onClick={() => setActiveTab('lineage')}
         >
           <span>智能体谱系</span>
@@ -83,6 +87,7 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
         <button
           type="button"
           className={`console-nav-item ${activeTab === 'trace' ? 'is-active' : ''}`}
+          aria-label="轨迹时间流"
           onClick={() => setActiveTab('trace')}
         >
           <span>轨迹时间流</span>
@@ -91,6 +96,7 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
         <button
           type="button"
           className={`console-nav-item ${activeTab === 'plans' ? 'is-active' : ''}`}
+          aria-label="计划与目标"
           onClick={() => setActiveTab('plans')}
         >
           <span>计划与目标</span>
@@ -102,6 +108,7 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
         <button
           type="button"
           className={`console-nav-item ${activeTab === 'skills' ? 'is-active' : ''}`}
+          aria-label="技能注册表"
           onClick={() => setActiveTab('skills')}
         >
           <span>技能注册表</span>
@@ -113,6 +120,7 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
         <button
           type="button"
           className={`console-nav-item ${activeTab === 'ledger' ? 'is-active' : ''}`}
+          aria-label="读图台账"
           onClick={() => setActiveTab('ledger')}
         >
           <span>读图台账</span>

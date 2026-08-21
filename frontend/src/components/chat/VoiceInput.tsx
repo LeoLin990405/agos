@@ -240,6 +240,7 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
   const abortRef = useRef<AbortController | null>(null);
   // W3:电平采样 / VAD / 自动停
   const [level, setLevel] = useState(0);
+  const [levelAvailable, setLevelAvailable] = useState(false);
   const samplerRef = useRef<VoiceLevelSampler | null>(null);
   const levelTimerRef = useRef<number | null>(null);
   const vadRef = useRef<VadState>(createVadState());
@@ -255,6 +256,7 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
     samplerRef.current?.dispose();
     samplerRef.current = null;
     setLevel(0);
+    setLevelAvailable(false);
   }, []);
 
   useEffect(() => {
@@ -413,28 +415,37 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
       setStatus('recording');
       stoppingRef.current = false;
 
-      // W3:电平采样 + 能量 VAD。reduced-motion 下采样率降到 2Hz(数据更新,非动画)。
+      // W3:电平采样 + 能量 VAD。
+      // ⚠️ prefers-reduced-motion 是**动画**偏好,不是「可以少听我说话」。原来把整个
+      // 采样循环降到 2Hz,于是设了减少动效的用户(常见于前庭障碍)拿到更差的判停:
+      // 1.5s 静音窗只剩 3 个采样点,句中停顿容易被误判成说完(2026-08-21 验收 P1)。
+      // 现在 VAD 恒定 66Hz 采样,reduced-motion 只降**电平条的视觉刷新**到约 2Hz。
       vadRef.current = createVadState();
       const sampler = (createLevelSampler ?? createAnalyserSampler)(stream);
       samplerRef.current = sampler;
       setLevel(0);
+      setLevelAvailable(sampler !== null);
       if (sampler !== null) {
         const reduced = typeof globalThis.matchMedia === 'function'
           && globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const visualEvery = reduced ? 8 : 1;
+        let ticks = 0;
         levelTimerRef.current = window.setInterval(() => {
           const active = samplerRef.current;
           if (active === null) return;
           const currentLevel = active.sample();
-          setLevel(currentLevel);
+          ticks += 1;
+          if (ticks % visualEvery === 0) setLevel(currentLevel);
           if (silenceStopMs > 0 && !stoppingRef.current) {
             const tick = vadTick(vadRef.current, currentLevel, Date.now(), {
               silenceMs: silenceStopMs,
               threshold: vadThreshold,
+              minSpeechMs: VAD_DEFAULTS.minSpeechMs,
             });
             vadRef.current = tick.state;
             if (tick.shouldStop) stopRecordingRef.current();
           }
-        }, reduced ? 500 : 66);
+        }, 66);
       }
     } catch {
       stopSampler();
@@ -535,8 +546,15 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
         <span>{isRecording ? `${labels.stop} ${formatElapsed(elapsedMs)}` : labels.record}</span>
       </Button>
 
-      {/* W3:实时电平条(transform-only,无颜色过渡;reduced-motion 下 2Hz 数据刷新) */}
-      {isRecording && (
+      {/* W3:实时电平条(transform-only,无颜色过渡;reduced-motion 下降视觉刷新)。
+          采样器建不起来时**不画** —— 一条恒 0 的电平条看起来像「没听到声音」,
+          而 title 还在承诺「说完会自动停」,那条定时器根本没启动(验收 P1)。*/}
+      {isRecording && !levelAvailable && (
+        <span className="u-microlabel" style={{ color: 'var(--accent-amber)' }}>
+          电平不可用,请手动停止
+        </span>
+      )}
+      {isRecording && levelAvailable && (
         <span
           role="meter"
           aria-label="录音电平"

@@ -250,7 +250,17 @@ export const SkillsView: React.FC = () => {
         <div aria-busy={isRefreshing} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
             <Badge state="queued">共 {catalogMerged.length}</Badge>
-            <Badge state="queued">从未调用 {unused}</Badge>
+            {/* 「从未调用」是拿 usageMeta.files/events 这个样本下的判决。样本只有 6 个
+                会话 / 0 次调用时,383 全是「从未调用」几乎是必然的 —— 不把分母亮出来,
+                读者会当成「这 383 个 skill 确实没人用」(2026-08-21 验收 P1)。*/}
+            <Badge state="queued">
+              从未调用 {unused}
+              {payload?.usageMeta != null && (
+                <span style={{ opacity: 0.75 }}>
+                  {` · 样本 ${payload.usageMeta.files ?? 0} 会话 / ${payload.usageMeta.events ?? 0} 次调用`}
+                </span>
+              )}
+            </Badge>
             {budget?.indexTokensEstimate != null && (
               <Badge state={(budget.indexTokensEstimate ?? 0) > (budget.indexBudgetTarget ?? 1000) ? 'running' : 'done'}>
                 索引≈{budget.indexTokensEstimate} tok / 目标 {budget.indexBudgetTarget ?? 1000}

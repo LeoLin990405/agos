@@ -289,10 +289,17 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
       </div>
 
       <div style={{ ...panelStyle, display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap', padding: '7px 10px', width: 'fit-content', maxWidth: '720px', ...quietText }}>
-        <span>悬挂 {summary.dangling}</span>
-        <span>路径归一 {summary.linkResolution.normalized}</span>
-        <span>真死链 {summary.linkResolution.dead}</span>
-        <span>非记忆目标 {summary.linkResolution.nonMemory}</span>
+        {/* 两种口径:悬挂按去重后的 canonical 边计,后三项按原始 wikilink 引用计
+            (后端 memory-graph.mjs 两处注释已写明)。并排且无单位时读者会按同一分母
+            去核对——实测「路径归一」比图上 resolution==='normalized' 的边多出的
+            正是重复引用(2026-08-21 验收 P2)。故在此显式标注口径。*/}
+        <span title="按去重后的关系计">悬挂 {summary.dangling} 条关系</span>
+        <span style={{ opacity: 0.55 }}>·</span>
+        <span title="以下三项按原始 wikilink 引用计;同一关系被多次引用会重复计数">
+          引用解析:路径归一 {summary.linkResolution.normalized}
+          {' / '}真死链 {summary.linkResolution.dead}
+          {' / '}非记忆目标 {summary.linkResolution.nonMemory}
+        </span>
         {unknownCount > 0 && (
           <span style={{ color: 'var(--accent-amber)', maxWidth: '300px' }}>
             未知类型 {unknownEntries.map(([type, count]) => `${type}(${count})`).join('、')}

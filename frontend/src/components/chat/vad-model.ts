@@ -18,18 +18,29 @@ export interface VadOptions {
   silenceMs: number;
   /** 人声能量门限(RMS,默认 0.02;环境吵就调高)。 */
   threshold: number;
+  /**
+   * 需要持续多少毫秒过门限才算「开过口」(默认 200)。
+   * 单个探针就 latch 会让一次门响/键盘声在 1.5 秒后触发自动停,录到一段静音、
+   * 恰好越过 400ms/1200B 两道下限,被真的送去 ASR(2026-08-21 验收 P1)。
+   * 可选:省略时取 VAD_DEFAULTS.minSpeechMs,既有调用方不受影响。
+   */
+  minSpeechMs?: number;
 }
 
-export const VAD_DEFAULTS: VadOptions = { silenceMs: 1500, threshold: 0.02 };
+export const VAD_DEFAULTS: VadOptions = { silenceMs: 1500, threshold: 0.02, minSpeechMs: 200 };
 
 export interface VadState {
-  /** 本次录音里是否检测到过人声(没说过话就不许自动停)。 */
+  /** 本次录音里是否检测到过**持续**人声(没说过话就不许自动停)。 */
   hasSpeech: boolean;
   /** 进入连续静音的时间戳;有声时为 undefined。 */
   silenceSince: number | undefined;
+  /** 当前这段连续过门限声音的起始时间戳;不在声音里时为 undefined。 */
+  speechSince: number | undefined;
 }
 
-export const createVadState = (): VadState => ({ hasSpeech: false, silenceSince: undefined });
+export const createVadState = (): VadState => ({
+  hasSpeech: false, silenceSince: undefined, speechSince: undefined,
+});
 
 /** 时域样本 → RMS 电平(0..1)。字节中位 128;float 样本按 ±1 满幅。 */
 export function computeLevel(samples: ArrayLike<number>, center = 128, scale = 128): number {
@@ -55,13 +66,23 @@ export function vadTick(
   now: number,
   options: VadOptions = VAD_DEFAULTS,
 ): VadTickResult {
+  const minSpeechMs = options.minSpeechMs ?? VAD_DEFAULTS.minSpeechMs ?? 200;
   if (level >= options.threshold) {
-    return { state: { hasSpeech: true, silenceSince: undefined }, shouldStop: false };
+    const speechSince = state.speechSince ?? now;
+    return {
+      state: {
+        // 只有连续过门限达到 minSpeechMs 才认作「开过口」;瞬时尖峰不 latch。
+        hasSpeech: state.hasSpeech || now - speechSince >= minSpeechMs,
+        silenceSince: undefined,
+        speechSince,
+      },
+      shouldStop: false,
+    };
   }
-  if (!state.hasSpeech) return { state, shouldStop: false };
+  if (!state.hasSpeech) return { state: { ...state, speechSince: undefined }, shouldStop: false };
   const silenceSince = state.silenceSince ?? now;
   return {
-    state: { hasSpeech: true, silenceSince },
+    state: { hasSpeech: true, silenceSince, speechSince: undefined },
     shouldStop: now - silenceSince >= options.silenceMs,
   };
 }

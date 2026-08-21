@@ -47,7 +47,36 @@ test('静音中恢复说话会重置计时', () => {
 
 test('silenceMs=0 语义由调用方禁用;状态机本身不特判', () => {
   let state: VadState = createVadState()
-  state = vadTick(state, 0.2, 0, { silenceMs: 0, threshold: 0.02 }).state
-  const r = vadTick(state, 0.001, 10, { silenceMs: 0, threshold: 0.02 })
+  // setup 改成持续发声 250ms:本用例验的是 silenceMs=0 的超时语义,而 hasSpeech 的
+  // latch 条件在 2026-08-21 验收里从「单帧」改成「持续 minSpeechMs」(瞬时尖峰
+  // 会让一次门响触发自动停并把静音送去 ASR)。断言本身一字未改。
+  for (let t = 0; t <= 250; t += 50) {
+    state = vadTick(state, 0.2, t, { silenceMs: 0, threshold: 0.02 }).state
+  }
+  const r = vadTick(state, 0.001, 300, { silenceMs: 0, threshold: 0.02 })
   assert.equal(r.shouldStop, true) // 纯状态机:silenceMs=0 即立即超时;禁用逻辑在组件层
 })
+
+test('单个瞬时尖峰不 latch hasSpeech,因此不会触发自动停', () => {
+  // 一次门响/键盘声:t=0 过门限一帧,之后全静音。
+  let st = createVadState();
+  st = vadTick(st, 0.9, 0).state;                       // 尖峰起始
+  assert.equal(st.hasSpeech, false, '持续不足 minSpeechMs 时不得 latch');
+  for (let t = 66; t <= 4000; t += 66) {
+    const r = vadTick(st, 0.001, t);
+    st = r.state;
+    assert.equal(r.shouldStop, false, `t=${t} 不该自动停`);
+  }
+});
+
+test('持续说话满 minSpeechMs 才 latch,随后静音超时才停', () => {
+  let st = createVadState();
+  for (let t = 0; t <= 300; t += 66) st = vadTick(st, 0.5, t).state;
+  assert.equal(st.hasSpeech, true, '持续 300ms > 默认 200ms 应 latch');
+  let stopped = false;
+  for (let t = 366; t <= 2200 && !stopped; t += 66) {
+    const r = vadTick(st, 0.001, t);
+    st = r.state; stopped = r.shouldStop;
+  }
+  assert.equal(stopped, true, '静音超过 silenceMs 应自动停');
+});

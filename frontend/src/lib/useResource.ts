@@ -109,7 +109,13 @@ export function useResource<T>({
     };
 
     const run = async (requestedUrl?: string): Promise<void> => {
-      if (!active || !pageVisible()) return;
+      // 只有「排程轮询」受可见性管辖(见 schedule)。首次加载与显式 refresh 必须
+      // 无条件发出:否则一个挂载时就处于 document.hidden 的标签页会永远停在
+      // 「连接中」——既没有请求在飞,刷新按钮也被静默吞掉,而屏幕上写着正在读取。
+      // useResource.test.ts 的 shouldResumeResource(false,0,0)===true 早已声明了
+      // 这个意图(「initially hidden resource still needs its first fetch」),
+      // 只是此处的闸把它挡在了 visibilitychange 事件之后。
+      if (!active) return;
       started = true;
       const target = requestedUrl ?? pendingUrl ?? url;
       pendingUrl = undefined;

@@ -172,10 +172,12 @@ export const VisionArbiterCard: React.FC<VisionArbiterCardProps> = ({
                       <div
                         key={lineIndex}
                         style={line.divergent ? {
-                          borderLeft: '2px solid var(--accent-amber)',
-                          background: 'color-mix(in oklch, var(--accent-amber) 8%, transparent)',
-                          paddingLeft: '6px',
-                          borderRadius: '2px',
+                          // impeccable 绝对禁项:>1px 的彩色左右边框(side-stripe)。改用低透明度全边框
+                          // + 背景色调,视觉权重相当但不触禁(2026-08-21 验收)。
+                          border: '1px solid color-mix(in oklch, var(--accent-amber) 34%, transparent)',
+                          background: 'color-mix(in oklch, var(--accent-amber) 9%, transparent)',
+                          padding: '0 6px',
+                          borderRadius: '3px',
                         } : undefined}
                       >
                         {line.text === '' ? ' ' : line.text}

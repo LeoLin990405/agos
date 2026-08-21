@@ -36,10 +36,12 @@ function PanelistText({ text, marked }: { text: string; marked: ReturnType<typeo
         <div
           key={i}
           style={line.divergent ? {
-            borderLeft: '2px solid var(--accent-amber)',
-            background: 'color-mix(in oklch, var(--accent-amber) 8%, transparent)',
-            paddingLeft: '6px',
-            borderRadius: '2px',
+            // impeccable 绝对禁项:>1px 的彩色左右边框(side-stripe)。改用低透明度全边框
+            // + 背景色调,视觉权重相当但不触禁(2026-08-21 验收)。
+            border: '1px solid color-mix(in oklch, var(--accent-amber) 34%, transparent)',
+            background: 'color-mix(in oklch, var(--accent-amber) 9%, transparent)',
+            padding: '0 6px',
+            borderRadius: '3px',
           } : undefined}
         >
           {line.text === '' ? ' ' : line.text}
@@ -144,7 +146,11 @@ export const CouncilLedgerView: React.FC = () => {
       {payload !== undefined && payload.length === 0 && (
         <div style={panelStyle}>
           <p style={{ ...quietText, margin: 0 }}>
-            还没有交叉读图记录——在对话里贴图并点「交叉读图」后,这里会出现三家面板与仲裁结论。
+            {/* 30 条窗口是**全类型**的,本视图只留 kind==='vision'。笼统说「还没有记录」
+                会把「窗口里全是评审类记录」谎报成「你从没读过图」(2026-08-21 验收 P1)。*/}
+            最近 30 条台账窗口里没有交叉读图(kind=vision)记录。该窗口是全类型的,
+            评审类记录另有其主、不在本视图。在对话里贴图并点「交叉读图」后,
+            这里会出现三家面板与仲裁结论。
           </p>
         </div>
       )}
