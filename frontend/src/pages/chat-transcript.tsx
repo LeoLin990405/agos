@@ -21,7 +21,7 @@ import { ApprovalPanel } from '@/components/chat/ApprovalPanel';
 import { TodoBar } from '@/components/chat/TodoBar';
 import type { StateLamp } from '@/design-system/tokens';
 import { agos, approvalRpc, conversationStore } from '@/stores/live';
-import type { ConversationItem, ToolItem } from '@/fold/model';
+import type { ConversationItem, FoldedConversation, ToolItem } from '@/fold/model';
 import { RpcId } from '@/contract/api/rpc';
 import type { OptimisticImageAttachment } from '@/components/chat/ImageAttachments';
 import { extractMultimodalMessageId, stripMultimodalMessageMarker } from '@/components/chat/CommandDeck';
@@ -483,6 +483,7 @@ function renderItem(
   key: string,
   sessionId: string,
   optimisticImages: readonly OptimisticImageAttachment[] = [],
+  readOnly = false,
 ): React.ReactNode {
   if (item.kind === 'user') {
     if (item.sourceKind !== 'user') return null;
@@ -608,8 +609,9 @@ function renderItem(
         riskLevel="需人工决策"
         actionSummary={item.reason ?? item.callId ?? item.id}
         diffSnippet={[]}
-        onAllow={() => respond('allowed-once')}
-        onReject={() => respond('rejected')}
+        readOnly={readOnly}
+        onAllow={readOnly ? undefined : () => respond('allowed-once')}
+        onReject={readOnly ? undefined : () => respond('rejected')}
       />
     </div>
   );
@@ -624,19 +626,41 @@ export function useTranscriptItemCount(sessionId: string): number {
   return convo.snapshot?.items.length ?? 0;
 }
 
-export const LiveTranscript: React.FC<{
+export interface LiveTranscriptProps {
   sessionId: string;
   optimisticImageMessages?: readonly OptimisticImageMessage[];
   /** P1-7 回放:只渲染 items 的前 N 项。undefined = 全量(与改造前完全一致)。 */
   replayLimit?: number;
   /** P1-8:点击产出文件卡。不传则文件卡不可点。 */
   onOpenFile?: (path: string) => void;
-}> = ({ sessionId, optimisticImageMessages = [], replayLimit, onOpenFile }) => {
-  const convo = useSyncExternalStore(
-    conversationStore.subscribe,
-    useCallback(() => conversationStore.getSnapshot(sessionId), [sessionId]),
-  );
-  const snapshot = convo.snapshot;
+  /** 远端 fold 快照。显式传 undefined 仍表示远端尚无轨迹，不可回退读本机会话。 */
+  snapshotOverride?: FoldedConversation;
+  /** 远端 run 没有 approval respond 通道。 */
+  readOnly?: boolean;
+}
+
+/** 区分「没有 override」与「远端明确尚无 snapshot」。继承属性不算调用契约。 */
+export function hasSnapshotOverride(props: LiveTranscriptProps): boolean {
+  return Object.hasOwn(props, 'snapshotOverride');
+}
+
+interface TranscriptBodyProps extends LiveTranscriptProps {
+  snapshot: FoldedConversation | undefined;
+  phase: 'idle' | 'loading' | 'live' | 'error';
+  error: string | undefined;
+}
+
+/** 纯渲染体：远端与本地共用，不订阅任何 store。 */
+export const TranscriptBody: React.FC<TranscriptBodyProps> = ({
+  sessionId,
+  optimisticImageMessages = [],
+  replayLimit,
+  onOpenFile,
+  snapshot,
+  phase,
+  error,
+  readOnly = false,
+}) => {
   const localMessages = optimisticImageMessages.filter((message) => message.sessionId === sessionId);
   const matchedLocalIds = new Set<string>();
   const imagesByItemIndex = new Map<number, readonly OptimisticImageAttachment[]>();
@@ -679,7 +703,7 @@ export const LiveTranscript: React.FC<{
       continue;
     }
     if (item === undefined) continue;
-    renderedItems.push(renderItem(item, `${sessionId}:${index}`, sessionId, imagesByItemIndex.get(index) ?? []));
+    renderedItems.push(renderItem(item, `${sessionId}:${index}`, sessionId, imagesByItemIndex.get(index) ?? [], readOnly));
   }
   /* 回卷到历史某一步时,「发送中」的乐观气泡属于未来,不该出现在回放里。 */
   const pendingLocalMessages = isReplaying
@@ -691,11 +715,11 @@ export const LiveTranscript: React.FC<{
   const deliverables = pendingLocalMessages.length > 0 ? undefined : deriveDeliverables(visibleItems);
   return (
     <>
-      {convo.phase === 'loading' && (
+      {phase === 'loading' && (
         <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '12.5px' }}>正在折叠会话历史…</div>
       )}
-      {convo.phase === 'error' && (
-        <div style={{ padding: '32px', textAlign: 'center', color: 'var(--state-failed)', fontSize: '12.5px' }}>加载失败:{convo.error}</div>
+      {phase === 'error' && (
+        <div style={{ padding: '32px', textAlign: 'center', color: 'var(--state-failed)', fontSize: '12.5px' }}>加载失败:{error}</div>
       )}
       {snapshot !== undefined && snapshot.todos.length > 0 && (
         <div className="message-wrap"><TodoBar todos={snapshot.todos.map((t) => ({ content: t.content, status: t.status as 'completed' | 'in_progress' | 'pending' }))} /></div>
@@ -716,9 +740,41 @@ export const LiveTranscript: React.FC<{
           </div>
         </div>
       ))}
-      {snapshot !== undefined && snapshot.items.length === 0 && convo.phase === 'live' && (
-        <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '12.5px' }}>空白会话——在下方输入第一条指令。</div>
+      {snapshot !== undefined && snapshot.items.length === 0 && phase === 'live' && (
+        <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '12.5px' }}>
+          {readOnly ? '远端轨迹目前没有可显示的对话条目。' : '空白会话——在下方输入第一条指令。'}
+        </div>
       )}
     </>
   );
 };
+
+/** 本机会话订阅壳。hook 始终在自己的组件里调用，override 切换不会改变 hook 顺序。 */
+export const SubscribedTranscript: React.FC<LiveTranscriptProps> = (props) => {
+  const { sessionId } = props;
+  const convo = useSyncExternalStore(
+    conversationStore.subscribe,
+    useCallback(() => conversationStore.getSnapshot(sessionId), [sessionId]),
+  );
+  return (
+    <TranscriptBody
+      {...props}
+      snapshot={convo.snapshot}
+      phase={convo.phase}
+      error={convo.error}
+    />
+  );
+};
+
+export const LiveTranscript: React.FC<LiveTranscriptProps> = (props) => (
+  hasSnapshotOverride(props)
+    ? (
+      <TranscriptBody
+        {...props}
+        snapshot={props.snapshotOverride}
+        phase="live"
+        error={undefined}
+      />
+    )
+    : <SubscribedTranscript {...props} />
+);

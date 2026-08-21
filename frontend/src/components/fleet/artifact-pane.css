@@ -1,0 +1,113 @@
+.artifact-pane {
+  min-height: 100%;
+  color: var(--text-secondary);
+}
+
+.artifact-summary {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-dim);
+  font-size: 12px;
+}
+
+.artifact-summary strong {
+  color: var(--text-primary);
+}
+
+.artifact-bundle,
+.artifact-download {
+  flex: none;
+  text-decoration: none;
+}
+
+.artifact-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.artifact-note,
+.artifact-limit {
+  margin: 0;
+  padding: 9px 16px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.artifact-limit {
+  color: var(--state-failed);
+  background-color: var(--state-failed-bg);
+}
+
+.artifact-state {
+  margin: 0;
+  padding: 20px 16px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-tertiary);
+}
+
+.artifact-state-error {
+  color: var(--state-failed);
+}
+
+.artifact-state-error p {
+  margin: 0 0 10px;
+}
+
+.artifact-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.artifact-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 58px;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.artifact-row:last-child {
+  border-bottom: 0;
+}
+
+.artifact-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.artifact-path {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 9px;
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .artifact-pane .btn {
+    transition: none;
+  }
+}

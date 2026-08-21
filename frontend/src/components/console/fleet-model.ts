@@ -37,6 +37,53 @@ export interface FleetHostRow extends FleetHost {
   latestRun?: FleetRun;
 }
 
+export interface FleetPowerLike {
+  reachable: boolean;
+  wakeState: string;
+  etaMs: number;
+  wakeError?: string | null;
+}
+
+export type FleetHostVisualState = 'reachable' | 'unreachable' | 'waking';
+export type FleetRunLampStatus =
+  | 'queued' | 'waking' | 'running' | 'detached'
+  | 'completed' | 'failed' | 'cancelled' | 'interrupted' | 'lost';
+export type FleetBatchLampStatus = 'running' | 'completed' | 'failed' | 'cancelled';
+export type FleetLamp = 'queued' | 'running' | 'done' | 'failed';
+
+export function fleetRunLamp(status: FleetRunLampStatus): FleetLamp {
+  if (status === 'completed') return 'done';
+  if (status === 'failed' || status === 'cancelled' || status === 'interrupted' || status === 'lost') return 'failed';
+  if (status === 'queued') return 'queued';
+  return 'running';
+}
+
+export function fleetBatchLamp(status: FleetBatchLampStatus): FleetLamp {
+  if (status === 'completed') return 'done';
+  if (status === 'failed' || status === 'cancelled') return 'failed';
+  return 'running';
+}
+
+export interface FleetCostConfirmation {
+  kind: 'wake' | 'preflight';
+  host: string;
+}
+
+export async function executeFleetCostConfirmation(
+  confirmation: FleetCostConfirmation | undefined,
+  handlers: Record<FleetCostConfirmation['kind'], (host: string) => Promise<void>>,
+): Promise<boolean> {
+  if (confirmation === undefined) return false;
+  await handlers[confirmation.kind](confirmation.host);
+  return true;
+}
+
+/** Power snapshots are intent only; reachability remains the host SSH probe truth. */
+export function fleetHostVisualState(hostOk: boolean, power?: FleetPowerLike): FleetHostVisualState {
+  if (['requested', 'probing', 'waking'].includes(power?.wakeState ?? '')) return 'waking';
+  return hostOk ? 'reachable' : 'unreachable';
+}
+
 /** Reject malformed route payloads instead of silently presenting an empty fleet. */
 export function parseFleetHosts(value: unknown): FleetHostsPayload {
   if (typeof value !== 'object' || value === null || !Array.isArray((value as { hosts?: unknown }).hosts)) {

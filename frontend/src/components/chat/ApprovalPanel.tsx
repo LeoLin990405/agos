@@ -15,6 +15,8 @@ export interface ApprovalPanelProps {
    *  语义,也没有别的授权 RPC。不传则该按钮不渲染 —— 界面不承诺后端做不到的事。 */
   onAlwaysAllow?: () => void;
   onReject?: () => void;
+  /** 远端 transcript 没有 approval respond 通道。保留请求内容，但真实禁用所有决策。 */
+  readOnly?: boolean;
 }
 
 export const ApprovalPanel: React.FC<ApprovalPanelProps> = ({
@@ -25,20 +27,24 @@ export const ApprovalPanel: React.FC<ApprovalPanelProps> = ({
   onAllow,
   onAlwaysAllow,
   onReject,
+  readOnly = false,
 }) => {
   const [resolvedState, setResolvedState] = useState<'idle' | 'allowed' | 'rejected'>('idle');
 
   const handleAllow = () => {
+    if (readOnly) return;
     setResolvedState('allowed');
     onAllow?.();
   };
 
   const handleAlwaysAllow = () => {
+    if (readOnly) return;
     setResolvedState('allowed');
     onAlwaysAllow?.();
   };
 
   const handleReject = () => {
+    if (readOnly) return;
     setResolvedState('rejected');
     onReject?.();
   };
@@ -89,21 +95,26 @@ export const ApprovalPanel: React.FC<ApprovalPanelProps> = ({
       </div>
 
       <div className="approval-actions">
-        <Button variant="success" size="sm" onClick={handleAllow}>
+        <Button variant="success" size="sm" onClick={handleAllow} disabled={readOnly}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
             <polyline points="20 6 9 17 4 12" />
           </svg>
           <span>允许单次执行</span>
         </Button>
         {onAlwaysAllow !== undefined && (
-          <Button variant="secondary" size="sm" onClick={handleAlwaysAllow}>
+          <Button variant="secondary" size="sm" onClick={handleAlwaysAllow} disabled={readOnly}>
             <span>本会话永久信任</span>
           </Button>
         )}
-        <Button variant="danger" size="sm" onClick={handleReject}>
+        <Button variant="danger" size="sm" onClick={handleReject} disabled={readOnly}>
           <span>拒绝并中止</span>
         </Button>
       </div>
+      {readOnly && (
+        <p className="pc-approval-caption" role="status">
+          远端审批暂不可答；请在远端控制通道处理。
+        </p>
+      )}
     </div>
   );
 };

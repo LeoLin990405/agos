@@ -37,6 +37,7 @@ import {
   canHostOpenPath,
   conversationStore,
   ensureLiveConnection,
+  fleetProgressStore,
   liveConnectionStore,
   openConversation,
   openHostPath,
@@ -99,8 +100,9 @@ interface OpenSessionMenu {
 
 export const ChatPage: React.FC<{
   onNavigateConsole?: () => void;
+  onNavigateFleet?: (batchId?: string) => void;
   onNavigateGraph?: (nodeId?: string) => void;
-}> = ({ onNavigateConsole, onNavigateGraph }) => {
+}> = ({ onNavigateConsole, onNavigateFleet, onNavigateGraph }) => {
   const [activeSessionId, setActiveSessionId] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [isNewSessionOpen, setIsNewSessionOpen] = useState(false);
@@ -164,6 +166,7 @@ export const ChatPage: React.FC<{
   const liveSessions = useSyncExternalStore(sessionsStore.subscribe, sessionsStore.getSnapshot);
   const isStreamOnline = useSyncExternalStore(streamStore.subscribe, streamStore.getSnapshot);
   const liveConnectionPhase = useSyncExternalStore(liveConnectionStore.subscribe, liveConnectionStore.getSnapshot);
+  const fleetProgress = useSyncExternalStore(fleetProgressStore.subscribe, fleetProgressStore.getSnapshot);
 
   useEffect(() => {
     ensureLiveConnection();
@@ -899,7 +902,15 @@ export const ChatPage: React.FC<{
           />
         )}
 
-        {liveMode && <ProgressDock />}
+        {(fleetProgress !== undefined || liveMode) && (
+          <div className="progress-dock-stack">
+            <ProgressDock
+              summary={fleetProgress}
+              onSelectBatch={onNavigateFleet}
+            />
+            {liveMode && <ProgressDock />}
+          </div>
+        )}
 
         {liveMode && hasActiveLiveSession ? (
           <CommandDeck sessionId={activeSessionId}

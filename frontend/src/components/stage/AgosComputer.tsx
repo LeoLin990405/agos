@@ -5,17 +5,26 @@
  * - conversationStore.getSnapshot(sessionId).snapshot  → fold 快照(items)
  * - swarmProgressStore.getSnapshot()                   → 运行中批次进度(复用 telemetry 轮询)
  *
- * 三个 tab 的内容都由本文件里的纯函数从快照派生(全部导出,便于单测):
+ * 本地三个 tab 的内容都由纯 selector 从 fold 快照派生:
  * ① 终端   selectTerminalEntries  bash/terminal 族工具的命令与输出,最新在下,自动滚到底
  * ② 文件   selectFileEntries      write/edit/read 族工具触及的文件路径去重 + 次数
  * ③ 子代理 selectSubagentBatches  本会话发起的 swarm 批次逐行(Wide Research 对位物)
+ * 远端模式额外出现 ④ 产物,展示远端工作区实际存在且可流式下载的文件。
  *
+ * 本地与远端 store 始终都订阅,只在渲染时选择来源；远端绝不混入本地 swarm。
  * 拿不到数据就渲染一行安静的空态说明,绝不编造。
  */
-import React, { useCallback, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Dot } from '@/components/ui/Dot';
 import { SegmentedControl, type SegmentedOption } from '@/components/ui/SegmentedControl';
-import { conversationStore, swarmProgressStore } from '@/stores/live';
+import { ArtifactPane } from '@/components/fleet/ArtifactPane';
+import {
+  conversationStore,
+  remoteRunKey,
+  remoteRunStore,
+  swarmProgressStore,
+  type FleetRunStatus,
+} from '@/stores/live';
 import {
   activityLabel,
   selectCurrentActivity,
@@ -34,16 +43,33 @@ export * from './agos-computer-model';
    7. 组件
    ========================================================================== */
 
-export type AgosComputerTab = 'terminal' | 'files' | 'subagents';
+export type AgosComputerTab = 'terminal' | 'files' | 'subagents' | 'artifacts';
 
-const TAB_OPTIONS: SegmentedOption<AgosComputerTab>[] = [
+const LOCAL_TAB_OPTIONS: SegmentedOption<AgosComputerTab>[] = [
   { value: 'terminal', label: '终端' },
   { value: 'files', label: '文件' },
   { value: 'subagents', label: '子代理' },
 ];
 
+const REMOTE_TAB_OPTIONS: SegmentedOption<AgosComputerTab>[] = [
+  ...LOCAL_TAB_OPTIONS,
+  { value: 'artifacts', label: '产物' },
+];
+
 const fmtDur = (ms: number | undefined): string =>
   ms === undefined ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+
+const REMOTE_STATUS_LABEL: Record<FleetRunStatus, string> = {
+  queued: '等待远端执行',
+  waking: '正在唤醒远端机器',
+  running: '远端执行中',
+  detached: '控制连接已脱离，等待重贴',
+  completed: '远端执行已完成',
+  failed: '远端执行失败',
+  cancelled: '远端执行已取消',
+  interrupted: '远端进程已中断',
+  lost: '远端工作区已丢失',
+};
 
 const CloseIcon: React.FC = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" aria-hidden>
@@ -139,21 +165,39 @@ const SubagentsPane: React.FC<{ batches: readonly AgosSubagentBatch[] }> = ({ ba
 export const AgosComputer: React.FC<{
   sessionId: string | undefined;
   onClose: () => void;
-}> = ({ sessionId, onClose }) => {
+  remote?: { host: string; runId: string };
+}> = ({ sessionId, onClose, remote }) => {
   const [tab, setTab] = useState<AgosComputerTab>('terminal');
   const bodyRef = useRef<HTMLDivElement | null>(null);
 
+  const localSessionId = remote === undefined ? sessionId : undefined;
+  const remoteKey = remote === undefined ? undefined : remoteRunKey(remote.host, remote.runId);
+
   const convo = useSyncExternalStore(
     conversationStore.subscribe,
-    useCallback(() => conversationStore.getSnapshot(sessionId), [sessionId]),
+    useCallback(() => conversationStore.getSnapshot(localSessionId), [localSessionId]),
+  );
+  const remoteRun = useSyncExternalStore(
+    remoteRunStore.subscribe,
+    useCallback(() => remoteRunStore.getSnapshot(remoteKey), [remoteKey]),
   );
   const live = useSyncExternalStore(swarmProgressStore.subscribe, swarmProgressStore.getSnapshot);
-  const snapshot = convo.snapshot;
+  const snapshot = remote === undefined ? convo.snapshot : remoteRun.snapshot;
 
   const activity = useMemo(() => selectCurrentActivity(snapshot), [snapshot]);
   const terminal = useMemo(() => selectTerminalEntries(snapshot), [snapshot]);
   const files = useMemo(() => selectFileEntries(snapshot), [snapshot]);
-  const batches = useMemo(() => selectSubagentBatches(snapshot, live), [snapshot, live]);
+  const batches = useMemo(
+    () => selectSubagentBatches(snapshot, remote === undefined ? live : undefined),
+    [live, remote, snapshot],
+  );
+
+  const visibleTab = remote === undefined && tab === 'artifacts' ? 'terminal' : tab;
+  const tabOptions = remote === undefined ? LOCAL_TAB_OPTIONS : REMOTE_TAB_OPTIONS;
+
+  useEffect(() => {
+    if (remote === undefined && tab === 'artifacts') setTab('terminal');
+  }, [remote, tab]);
 
   // 终端语义:最新在下,内容增长时贴底。签名把流式增量也算进去。
   const termSignature = useMemo(
@@ -162,44 +206,74 @@ export const AgosComputer: React.FC<{
   );
 
   useLayoutEffect(() => {
-    if (tab !== 'terminal') return;
+    if (visibleTab !== 'terminal') return;
     const el = bodyRef.current;
     if (el === null) return;
     el.scrollTop = el.scrollHeight;
-  }, [tab, sessionId, termSignature]);
+  }, [remoteKey, sessionId, termSignature, visibleTab]);
 
   // 切会话 / 切 tab 时,非终端 tab 回到顶部。
   useLayoutEffect(() => {
-    if (tab === 'terminal') return;
+    if (visibleTab === 'terminal') return;
     const el = bodyRef.current;
     if (el === null) return;
     el.scrollTop = 0;
-  }, [tab, sessionId]);
+  }, [remoteKey, sessionId, visibleTab]);
 
-  const label = activityLabel(activity);
+  const remotePhaseLabel = remoteRun.phase === 'loading'
+    ? '正在接入远端轨迹'
+    : remoteRun.phase === 'live'
+      ? '远端轨迹直播中'
+      : remoteRun.phase === 'ended'
+        ? '远端轨迹已结束'
+        : remoteRun.phase === 'error'
+          ? (remoteRun.error ?? '远端轨迹不可用')
+          : '尚未接入远端轨迹';
+  const remoteStatusLabel = remoteRun.runStatus === undefined
+    ? undefined
+    : REMOTE_STATUS_LABEL[remoteRun.runStatus];
+  const activityIsCurrent = activity !== undefined
+    && (remote === undefined || remoteRun.runStatus === undefined || remoteRun.runStatus === 'running');
+  const label = remote === undefined
+    ? activityLabel(activity)
+    : `${remote.host} · ${activityIsCurrent ? activityLabel(activity) : (remoteStatusLabel ?? remotePhaseLabel)}`;
+  const running = remote === undefined
+    ? activity !== undefined
+    : remoteRun.runStatus === 'queued'
+      || remoteRun.runStatus === 'waking'
+      || remoteRun.runStatus === 'running'
+      || (remoteRun.runStatus === undefined && (remoteRun.phase === 'loading' || remoteRun.phase === 'live'));
 
   return (
-    <aside className="agc" aria-label="AgOS 的电脑">
+    <aside className="agc" aria-label={remote === undefined ? 'AgOS 的电脑' : `${remote.host} 的远端电脑`}>
       <header className="agc-head">
         <div className="agc-head-text">
-          <h2 className="agc-title">AgOS 的电脑</h2>
-          <p className={`agc-status${activity !== undefined ? ' is-running' : ''}`} title={label} aria-live="polite">
+          <h2 className="agc-title">{remote === undefined ? 'AgOS 的电脑' : '远端电脑'}</h2>
+          <p className={`agc-status${running ? ' is-running' : ''}`} title={label} aria-live="polite">
             {label}
           </p>
         </div>
-        <button type="button" className="agc-close" onClick={onClose} aria-label="收起 AgOS 的电脑">
+        <button
+          type="button"
+          className="agc-close"
+          onClick={onClose}
+          aria-label={remote === undefined ? '收起 AgOS 的电脑' : '收起远端电脑'}
+        >
           <CloseIcon />
         </button>
       </header>
 
       <div className="agc-tabs">
-        <SegmentedControl options={TAB_OPTIONS} value={tab} onChange={setTab} />
+        <SegmentedControl options={tabOptions} value={visibleTab} onChange={setTab} />
       </div>
 
       <div className="agc-body" ref={bodyRef}>
-        {tab === 'terminal' && <TerminalPane entries={terminal} />}
-        {tab === 'files' && <FilesPane entries={files} />}
-        {tab === 'subagents' && <SubagentsPane batches={batches} />}
+        {visibleTab === 'terminal' && <TerminalPane entries={terminal} />}
+        {visibleTab === 'files' && <FilesPane entries={files} />}
+        {visibleTab === 'subagents' && <SubagentsPane batches={batches} />}
+        {visibleTab === 'artifacts' && remote !== undefined && (
+          <ArtifactPane host={remote.host} runId={remote.runId} />
+        )}
       </div>
     </aside>
   );

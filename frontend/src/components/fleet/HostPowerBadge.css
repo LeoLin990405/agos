@@ -1,0 +1,49 @@
+.host-power-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  padding: 2px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--text-tertiary);
+  background: var(--bg-layer-2);
+  font-size: 10.5px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.host-power-badge__dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.host-power-badge.is-reachable {
+  color: var(--state-done);
+  border-color: var(--state-done-border);
+  background: var(--state-done-bg);
+}
+
+.host-power-badge.is-waking {
+  color: var(--state-running);
+  border-color: var(--state-running-border);
+  background: var(--state-running-bg);
+}
+
+.host-power-badge.is-unreachable {
+  color: var(--text-tertiary);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .host-power-badge.is-waking .host-power-badge__dot {
+    animation: host-power-breath 2.4s ease-in-out infinite;
+  }
+
+  @keyframes host-power-breath {
+    0%, 100% { opacity: 0.45; }
+    50% { opacity: 1; }
+  }
+}

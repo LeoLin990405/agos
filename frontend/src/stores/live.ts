@@ -581,3 +581,46 @@ export function watchHostArchivedSessions(
 
 // Pure selector export for the unified node:test suite.
 export { deriveSwarmProgress }
+
+// Homelab fleet live data is isolated from local session/mux state. Keep this
+// file additive-only: consumers retain one public store entry point while the
+// implementation and its offline test seams live in dedicated modules.
+export {
+  cancelFleetRun,
+  closeRemoteRun,
+  dispatchFleet,
+  fetchFleetArtifacts,
+  fetchFleetBatch,
+  fetchFleetPower,
+  FleetRequestError,
+  fleetBatchesStore,
+  fleetHostsStore,
+  fleetProgressStore,
+  openRemoteRun,
+  preflightFleetHosts,
+  remoteRunKey,
+  remoteRunStore,
+  sleepFleetHost,
+  wakeFleetHosts,
+} from './fleet-live.ts'
+export type {
+  FleetArtifactsManifest,
+  FleetArtifactFile,
+  FleetBatch,
+  FleetBatchesState,
+  FleetCancelResult,
+  FleetCancelTarget,
+  FleetDispatchRequest,
+  FleetDispatchResult,
+  FleetHost,
+  FleetHostsState,
+  FleetPowerNode,
+  FleetPreflightResult,
+  FleetProgressSummary,
+  FleetResourcePhase,
+  FleetRunStatus,
+  FleetSleepResult,
+  FleetWakeResult,
+  FleetWakeSummary,
+  RemoteRunState,
+} from './fleet-live.ts'

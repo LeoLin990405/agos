@@ -17,6 +17,19 @@
   animation: progress-dock-enter 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 
+.progress-dock-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.progress-dock-stack > .progress-dock:not(:last-child) {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 16px;
+}
+
 @keyframes progress-dock-enter {
   from { transform: translateY(12px); opacity: 0; }
   to   { transform: translateY(0);    opacity: 1; }
@@ -89,6 +102,9 @@
 .progress-dock__chevron.is-open {
   transform: rotate(180deg);
 }
+.progress-dock__chevron.is-link {
+  transform: rotate(-90deg);
+}
 
 /* ── 展开态:批次列表(真实高度动画,高度值由组件内联提供)──────── */
 .progress-dock__list-clip {
@@ -109,6 +125,23 @@
   gap: 10px;
   min-height: 30px;
   padding: 5px 14px;
+}
+
+.progress-dock__item-button {
+  appearance: none;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.2s ease-in-out;
+}
+
+.progress-dock__item-button:hover,
+.progress-dock__item-button:focus-visible {
+  background: var(--bg-layer-2);
 }
 
 .progress-dock__item-label {
@@ -162,6 +195,7 @@
     -webkit-text-fill-color: currentColor;
   }
   .progress-dock__row,
+  .progress-dock__item-button,
   .progress-dock__chevron,
   .progress-dock__list-clip,
   .progress-dock__fill {

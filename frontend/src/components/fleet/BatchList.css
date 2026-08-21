@@ -1,0 +1,124 @@
+.batch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.batch-list__batch {
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  background: var(--bg-layer-1);
+  overflow: hidden;
+}
+
+.batch-list__batch.is-selected { border-color: var(--state-running-border); }
+
+.batch-list__batch-head,
+.batch-list__batch-select,
+.batch-list__run,
+.batch-list__run-main,
+.batch-list__run-title {
+  display: flex;
+  align-items: center;
+}
+
+.batch-list__batch-head { padding-right: 8px; }
+
+.batch-list__batch-select,
+.batch-list__run-main {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.batch-list__batch-select {
+  gap: 9px;
+  padding: 11px 12px;
+}
+
+.batch-list__batch-select:hover,
+.batch-list__run-main:hover { background: var(--bg-layer-2); }
+
+.batch-list__batch-copy,
+.batch-list__run-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.batch-list__batch-copy { gap: 3px; }
+.batch-list__batch-copy > strong { color: var(--text-primary); font-size: 12.5px; }
+.batch-list__batch-copy > span { color: var(--text-tertiary); font-size: 10.5px; }
+
+.batch-list__chevron {
+  color: var(--text-tertiary);
+  font-size: 16px;
+}
+
+.batch-list__runs {
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border-dim);
+  list-style: none;
+}
+
+.batch-list__run {
+  padding-right: 8px;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.batch-list__run:last-child { border-bottom: 0; }
+.batch-list__run.is-selected { box-shadow: inset 3px 0 0 var(--state-running); }
+
+.batch-list__run-main {
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 12px;
+}
+
+.batch-list__run-main > span[aria-hidden="true"] {
+  display: flex;
+  margin-top: 4px;
+}
+.batch-list__run-copy { gap: 4px; }
+.batch-list__run-title { flex-wrap: wrap; gap: 5px 8px; color: var(--text-secondary); font-size: 10.5px; }
+.batch-list__run-title strong { color: var(--text-primary); }
+
+.batch-list__prompt,
+.batch-list__error {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.batch-list__prompt { color: var(--text-primary); }
+.batch-list__error { color: var(--state-failed); font-family: var(--font-mono); }
+
+.batch-list__empty {
+  padding: 18px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: 9px;
+  color: var(--text-tertiary);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.batch-list__empty.is-inline {
+  border: 0;
+  border-top: 1px solid var(--border-dim);
+  border-radius: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .batch-list__batch-select,
+  .batch-list__run-main { scroll-behavior: auto; }
+}

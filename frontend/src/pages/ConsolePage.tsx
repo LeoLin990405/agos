@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AppTopbar } from '@/components/layout/AppTopbar';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Dot } from '@/components/ui/Dot';
@@ -14,17 +14,23 @@ export type ConsoleTab = 'overview' | 'fleet' | 'sessions' | 'lineage' | 'trace'
 
 export interface ConsolePageProps {
   initialTab?: ConsoleTab;
+  initialFleetBatchId?: string;
   onNavigateChat?: () => void;
   onNavigateGraph?: () => void;
 }
 
 export const ConsolePage: React.FC<ConsolePageProps> = ({
   initialTab = 'overview',
+  initialFleetBatchId,
   onNavigateChat,
   onNavigateGraph,
 }) => {
   const [activeTab, setActiveTab] = useState<ConsoleTab>(initialTab);
+  const [selectedFleetBatchId, setSelectedFleetBatchId] = useState<string | undefined>(initialFleetBatchId);
   const [densityMode, setDensityMode] = useState<'dense' | 'sparse'>('dense');
+
+  useEffect(() => { setActiveTab(initialTab); }, [initialTab]);
+  useEffect(() => { setSelectedFleetBatchId(initialFleetBatchId); }, [initialFleetBatchId]);
   const consoleLive = useConsoleLive({
     overviewEnabled: activeTab === 'overview' || activeTab === 'plans',
     progressEnabled: activeTab === 'overview',
@@ -137,7 +143,12 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
         />
 
         <div className="console-body">
-          {activeTab === 'fleet' && <FleetView />}
+          {activeTab === 'fleet' && (
+            <FleetView
+              selectedBatchId={selectedFleetBatchId}
+              onSelectBatch={setSelectedFleetBatchId}
+            />
+          )}
           {activeTab === 'sessions' && <SessionsView onSelectSession={() => onNavigateChat?.()} />}
           {activeTab === 'lineage' && <LineageView />}
           {activeTab === 'trace' && <TraceView onSelectSession={() => onNavigateChat?.()} />}

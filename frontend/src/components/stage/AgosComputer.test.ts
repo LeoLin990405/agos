@@ -93,3 +93,26 @@ test('selectSubagentBatches refreshes only call ids owned by the conversation', 
     callId: 'owned', label: 'swarm_batch', done: 2, failed: 1, total: 4, running: true,
   }]);
 });
+
+test('remote subagent selection does not merge a colliding local live batch', () => {
+  const remote = snapshot([
+    tool({
+      callId: 'same-call-id', name: 'swarm_batch', status: 'done',
+      swarm: [
+        { index: 0, item: 'remote item', type: undefined, model: undefined, status: 'completed' },
+      ],
+    }),
+  ]);
+
+  // AgosComputer passes undefined for live progress in remote mode. Even if a
+  // local batch happens to reuse the same call id, the remote fold stays the
+  // sole source of truth.
+  assert.deepEqual(selectSubagentBatches(remote, undefined), [{
+    callId: 'same-call-id',
+    label: 'swarm_batch',
+    done: 1,
+    failed: 0,
+    total: 1,
+    running: false,
+  }]);
+});
