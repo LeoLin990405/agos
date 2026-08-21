@@ -1,6 +1,3 @@
-import { createFold, type Fold } from '../fold/fold.ts'
-import type { FoldedConversation } from '../fold/model.ts'
-
 export const FLEET_RUN_STATUSES = [
   'queued',
   'waking',
@@ -565,46 +562,4 @@ export function outcomeOfFleetStatus(status: FleetRunStatus): RemoteRunOutcome {
 
 export function isTerminalFleetStatus(status: FleetRunStatus | undefined): boolean {
   return status !== undefined && ['completed', 'failed', 'cancelled', 'interrupted', 'lost'].includes(status)
-}
-
-export interface RemoteFoldCursor {
-  fold: Fold
-  nextFrom: number
-  totalLines: number
-}
-
-export interface RemoteFoldPageResult {
-  snapshot: FoldedConversation
-  reset: boolean
-}
-
-export function createRemoteFoldCursor(): RemoteFoldCursor {
-  return { fold: createFold(), nextFrom: 1, totalLines: 0 }
-}
-
-/**
- * Apply one physical-line page. Every returned line advances the cursor even
- * when JSON parsing fails; a remote truncation resets to line one before any
- * data from the obsolete offset can enter the replacement fold.
- */
-export function applyRemoteTracePage(cursor: RemoteFoldCursor, page: FleetTracePage): RemoteFoldPageResult {
-  if (page.from !== cursor.nextFrom) throw new TypeError(`trace page starts at ${page.from}, expected ${cursor.nextFrom}`)
-  if (page.truncated || page.total < page.from - 1) {
-    cursor.fold = createFold()
-    cursor.nextFrom = 1
-    cursor.totalLines = page.total
-    return { snapshot: cursor.fold.snapshot(), reset: true }
-  }
-  for (const line of page.lines) {
-    try {
-      const event = JSON.parse(line) as unknown
-      if (event === null || typeof event !== 'object' || Array.isArray(event)) throw new TypeError('trace event must be an object')
-      cursor.fold.apply(event as Record<string, unknown>)
-    } catch {
-      cursor.fold.noteParseError()
-    }
-  }
-  cursor.nextFrom = page.nextFrom
-  cursor.totalLines = page.total
-  return { snapshot: cursor.fold.snapshot(), reset: false }
 }

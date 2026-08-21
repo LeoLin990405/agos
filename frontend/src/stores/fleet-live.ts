@@ -1,7 +1,6 @@
+import { createFold, type Fold } from '../fold/fold.ts'
 import type { FoldedConversation } from '../fold/model.ts'
 import {
-  applyRemoteTracePage,
-  createRemoteFoldCursor,
   isTerminalFleetStatus,
   outcomeOfFleetStatus,
   parseFleetArtifacts,
@@ -13,7 +12,6 @@ import {
   parseFleetPower,
   parseFleetPreflightResult,
   parseFleetSleepResult,
-  parseFleetTracePage,
   parseFleetWakeResult,
   type FleetArtifactsManifest,
   type FleetArtifact,
@@ -27,9 +25,14 @@ import {
   type FleetSleepResult,
   type FleetWakeResult,
   type FleetWakeSummary,
-  type RemoteFoldCursor,
   type RemoteRunOutcome,
 } from './remote-run-model.ts'
+import {
+  createFileRemoteTraceSource,
+  type RemoteTraceBatch,
+  type RemoteTraceSource,
+  type RemoteTraceSourceFactory,
+} from './remote-trace-source.ts'
 
 type Listener = () => void
 type TimeoutHandle = ReturnType<typeof setTimeout>
@@ -57,8 +60,6 @@ export interface RemoteRunState {
   host: string
   runId: string
   snapshot: FoldedConversation | undefined
-  nextFrom: number
-  totalLines: number
   phase: 'idle' | 'loading' | 'live' | 'ended' | 'error'
   error: string | undefined
   outcome: RemoteRunOutcome | undefined
@@ -115,6 +116,7 @@ export interface FleetLiveEnvironment {
   queueMicrotaskFn?: (callback: () => void) => void
   isHidden?: () => boolean
   onVisibilityChange?: (listener: () => void) => () => void
+  traceSourceFactory?: RemoteTraceSourceFactory
 }
 
 interface Emitter {
@@ -347,6 +349,11 @@ export function createFleetLive(environment: FleetLiveEnvironment = {}): FleetLi
   const queueMicrotaskFn = environment.queueMicrotaskFn ?? queueMicrotask
   const isHidden = environment.isHidden ?? (() => typeof document !== 'undefined' && document.hidden)
   const onVisibilityChange = environment.onVisibilityChange ?? defaultVisibilityListener
+  const traceSourceFactory = environment.traceSourceFactory ?? ((host: string, runId: string) => createFileRemoteTraceSource({
+    host,
+    runId,
+    fetchPage: (url, signal) => readJson(fetchImpl, url, { signal }),
+  }))
 
   const hostsResource = createPollingResource<
     { hosts: FleetHost[], power: FleetPowerNode[], at: number },
@@ -393,11 +400,12 @@ export function createFleetLive(environment: FleetLiveEnvironment = {}): FleetLi
   const remoteEmitter = createEmitter()
   const remoteRunKey = (host: string, runId: string): string => `${host}/${runId}`
   const IDLE_REMOTE: RemoteRunState = {
-    host: '', runId: '', snapshot: undefined, nextFrom: 1, totalLines: 0,
-    phase: 'idle', error: undefined, outcome: undefined,
+    host: '', runId: '', snapshot: undefined, phase: 'idle', error: undefined, outcome: undefined,
   }
   interface RemoteEntry {
-    cursor: RemoteFoldCursor
+    source: RemoteTraceSource
+    fold: Fold
+    caughtUp: boolean
     state: RemoteRunState
     refs: number
     /** Incremented whenever a newly observed durable status is terminal. */
@@ -424,6 +432,7 @@ export function createFleetLive(environment: FleetLiveEnvironment = {}): FleetLi
     clearRemoteTimer()
     remoteController?.abort()
     remoteController = undefined
+    if (activeKey !== undefined) remoteEntries.get(activeKey)?.source.stop()
   }
 
   const findRunStatus = (host: string, runId: string): FleetRunStatus | undefined => {
@@ -434,10 +443,9 @@ export function createFleetLive(environment: FleetLiveEnvironment = {}): FleetLi
     return undefined
   }
 
-  // `1 > 0` in the initial state does not mean caught up: no trace request has
-  // established the remote total yet. A snapshot exists after a successful
-  // trace response, including the legitimate trace-not-created empty page.
-  const caughtUp = (state: RemoteRunState): boolean => state.snapshot !== undefined && state.nextFrom > state.totalLines
+  // The source owns its cursor. A successful checkpoint establishes whether
+  // that source is caught up; the public state never exposes file offsets.
+  const caughtUp = (entry: RemoteEntry): boolean => entry.state.snapshot !== undefined && entry.caughtUp
 
   const publishStatus = (key: string, status: FleetRunStatus): { changed: boolean, revalidate: boolean } => {
     const entry = remoteEntries.get(key)
@@ -502,30 +510,38 @@ export function createFleetLive(environment: FleetLiveEnvironment = {}): FleetLi
       remoteEmitter.emit()
     }
     try {
-      const query = new URLSearchParams({
-        host: entry.state.host,
-        run: entry.state.runId,
-        from: String(entry.cursor.nextFrom),
-        max: '2000',
-      })
-      const page = parseFleetTracePage(await readJson(fetchImpl, `/api/fleet/trace?${query.toString()}`, { signal }))
-      if (signal.aborted || requestGeneration !== remoteGeneration || key !== activeKey) return
-      if (page.host !== entry.state.host || (page.runId !== null && page.runId !== entry.state.runId)) {
-        throw new TypeError('fleet trace response target does not match the requested run')
-      }
-      const applied = applyRemoteTracePage(entry.cursor, page)
-      remoteFailures = 0
-      if (applied.reset) {
+      let resetAwaitingReplay = false
+      const checkpoint = await entry.source.start((batch: RemoteTraceBatch) => {
+        if (signal.aborted || requestGeneration !== remoteGeneration || key !== activeKey) return
+        if (batch.reset) {
+          entry.fold = createFold()
+          entry.caughtUp = false
+          resetAwaitingReplay = true
+        }
+        for (const event of batch.events) {
+          if (event.kind === 'parse-error') entry.fold.noteParseError()
+          else entry.fold.apply(event.value)
+        }
+        if (batch.events.length > 0) resetAwaitingReplay = false
         entry.state = {
           ...entry.state,
-          // A truncated page came from an obsolete physical offset. Keep the
-          // state explicitly unestablished until line one has been fetched.
+          snapshot: resetAwaitingReplay ? undefined : entry.fold.snapshot(),
+          phase: resetAwaitingReplay ? 'loading' : 'live',
+          error: undefined,
+        }
+        remoteEmitter.emit()
+      }, signal)
+      if (signal.aborted || requestGeneration !== remoteGeneration || key !== activeKey) return
+      remoteFailures = 0
+      entry.caughtUp = checkpoint.caughtUp
+      if (resetAwaitingReplay) {
+        entry.caughtUp = false
+        entry.state = {
+          ...entry.state,
           snapshot: undefined,
-          nextFrom: 1,
-          totalLines: page.total,
           phase: 'loading',
           error: undefined,
-          notice: page.notice,
+          notice: checkpoint.notice,
         }
         remoteEmitter.emit()
         scheduleRemote(isHidden() ? 10_000 : 0)
@@ -538,21 +554,19 @@ export function createFleetLive(environment: FleetLiveEnvironment = {}): FleetLi
       }
       const next: RemoteRunState = {
         ...entry.state,
-        snapshot: applied.snapshot,
-        nextFrom: entry.cursor.nextFrom,
-        totalLines: entry.cursor.totalLines,
+        snapshot: entry.fold.snapshot(),
         phase: 'live',
         error: undefined,
-        notice: page.notice,
+        notice: checkpoint.notice,
         ...(status === undefined ? {} : { runStatus: status, outcome: outcomeOfFleetStatus(status) }),
       }
+      entry.state = next
       if (
         isTerminalFleetStatus(status) &&
-        caughtUp(next) &&
+        caughtUp(entry) &&
         entry.terminalEpoch > 0 &&
         entry.validatedTerminalEpoch === entry.terminalEpoch
       ) next.phase = 'ended'
-      entry.state = next
       remoteEmitter.emit()
       if (next.phase !== 'ended') scheduleRemote()
     } catch (error) {
@@ -596,13 +610,14 @@ export function createFleetLive(environment: FleetLiveEnvironment = {}): FleetLi
     let entry = remoteEntries.get(key)
     if (entry === undefined) {
       entry = {
-        cursor: createRemoteFoldCursor(),
+        source: traceSourceFactory(host, runId),
+        fold: createFold(),
+        caughtUp: false,
         refs: 0,
         terminalEpoch: 0,
         validatedTerminalEpoch: 0,
         state: {
-          host, runId, snapshot: undefined, nextFrom: 1, totalLines: 0,
-          phase: 'idle', error: undefined, outcome: undefined,
+          host, runId, snapshot: undefined, phase: 'idle', error: undefined, outcome: undefined,
         },
       }
       remoteEntries.set(key, entry)
@@ -628,6 +643,7 @@ export function createFleetLive(environment: FleetLiveEnvironment = {}): FleetLi
     if (activeKey === key) selectActive(openOrder.at(-1))
     // A closed remote run can be reopened from durable trace. Retaining every
     // historical FoldedConversation here would otherwise grow without bound.
+    entry.source.stop()
     remoteEntries.delete(key)
     if (![...remoteEntries.values()].some((candidate) => candidate.refs > 0)) stopObservingBatches()
     remoteEmitter.emit()

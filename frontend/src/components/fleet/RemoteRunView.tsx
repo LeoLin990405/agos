@@ -62,6 +62,9 @@ const RemoteRunSession: React.FC<RemoteRunViewProps> = ({ host, runId, onClose }
 
   const snapshot = state.snapshot;
   const total = snapshot?.items.length ?? 0;
+  const traceEntries = snapshot === undefined
+    ? 0
+    : snapshot.diagnostics.events + snapshot.diagnostics.parseErrors;
   const replayValue = remoteReplayValue(replayLimit, total);
   useEffect(() => {
     setReplayLimit((current) => reconcileRemoteReplayLimit(current, total));
@@ -71,12 +74,12 @@ const RemoteRunSession: React.FC<RemoteRunViewProps> = ({ host, runId, onClose }
     && (snapshot.items.length > 0 || snapshot.todos.length > 0);
   const hasStaleSnapshot = state.phase === 'error' && snapshot !== undefined;
 
-  let emptyMessage = snapshot !== undefined || state.totalLines > 0
+  let emptyMessage = snapshot !== undefined || traceEntries > 0
     ? '远端轨迹已建立，尚未产生可显示的对话条目。'
     : '远端正在启动，尚未产生轨迹。';
   if (state.phase === 'idle' || state.phase === 'loading') emptyMessage = '正在接入远端轨迹…';
   else if (state.phase === 'ended') {
-    emptyMessage = snapshot !== undefined || state.totalLines > 0
+    emptyMessage = snapshot !== undefined || traceEntries > 0
       ? '运行已结束，轨迹中没有可显示的对话条目。'
       : '运行已结束，但没有收到可回放的轨迹。';
   }
@@ -95,10 +98,10 @@ const RemoteRunSession: React.FC<RemoteRunViewProps> = ({ host, runId, onClose }
               <span>{host}</span>
               <span aria-hidden>·</span>
               <code>{runId}</code>
-              {state.totalLines > 0 && (
+              {traceEntries > 0 && (
                 <>
                   <span aria-hidden>·</span>
-                  <span className="u-num">轨迹 {state.totalLines} 行</span>
+                  <span className="u-num">轨迹 {traceEntries} 行</span>
                 </>
               )}
             </p>

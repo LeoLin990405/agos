@@ -2,10 +2,9 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { fleetArtifactDownloadUrl, resolveFleetOrigin } from '../lib/fleet-origin.ts'
 import { createFleetLive, deriveFleetProgress, type FleetFetch } from './fleet-live.ts'
+import type { RemoteTraceSource } from './remote-trace-source.ts'
 import {
   FLEET_RUN_STATUSES,
-  applyRemoteTracePage,
-  createRemoteFoldCursor,
   isTerminalFleetStatus,
   outcomeOfFleetStatus,
   parseFleetArtifacts,
@@ -132,52 +131,6 @@ test('all nine durable run states survive parsing and only five are terminal', (
     assert.equal(isTerminalFleetStatus(status), terminal.has(status))
   }
   assert.equal(isTerminalFleetStatus('detached'), false)
-})
-
-test('physical trace pages advance across malformed lines and converge the shared fold', () => {
-  const cursor = createRemoteFoldCursor()
-  const first = parseFleetTracePage({
-    host: 'leo-03', runId: 'r-1', file: 'r-1/.trace/s/session.jsonl',
-    from: 1, nextFrom: 4, total: 4, truncated: false,
-    lines: [
-      JSON.stringify({ type: 'session', version: 0, id: 'remote-session', cwd: '/work', createdAt: 1, delegationDepth: 0 }),
-      '{not-json',
-      JSON.stringify({ type: 'user/message', time: 2, data: { content: [{ type: 'text', text: 'hello' }], source: { kind: 'user' } } }),
-    ],
-    runs: [{ runId: 'r-1', mtime: 2, file: 'r-1/.trace/s/session.jsonl' }],
-  })
-  const firstResult = applyRemoteTracePage(cursor, first)
-  assert.equal(firstResult.reset, false)
-  assert.equal(firstResult.snapshot.header?.sessionId, 'remote-session')
-  assert.equal(firstResult.snapshot.items.length, 1)
-  assert.equal(firstResult.snapshot.diagnostics.parseErrors, 1)
-  assert.equal(cursor.nextFrom, 4)
-
-  const second = parseFleetTracePage({
-    host: 'leo-03', runId: 'r-1', file: 'r-1/.trace/s/session.jsonl',
-    from: 4, nextFrom: 5, total: 4, truncated: false,
-    lines: [JSON.stringify({ type: 'turn/start', time: 3, data: { turn: 1 } })], runs: [],
-  })
-  const final = applyRemoteTracePage(cursor, second).snapshot
-  assert.equal(cursor.nextFrom, 5)
-  assert.equal(cursor.nextFrom > cursor.totalLines, true)
-  assert.equal(final.turnsStarted, 1)
-  assert.equal(final.diagnostics.parseErrors, 1)
-})
-
-test('trace rotation discards the prior fold and restarts at physical line one', () => {
-  const cursor = createRemoteFoldCursor()
-  applyRemoteTracePage(cursor, parseFleetTracePage({
-    host: 'h', runId: 'r', file: 'f', from: 1, nextFrom: 2, total: 1, truncated: false,
-    lines: [JSON.stringify({ type: 'session', version: 0, id: 'old' })], runs: [],
-  }))
-  const result = applyRemoteTracePage(cursor, parseFleetTracePage({
-    host: 'h', runId: 'r', file: 'f', from: 2, nextFrom: 2, total: 0, truncated: true,
-    lines: [], runs: [],
-  }))
-  assert.equal(result.reset, true)
-  assert.equal(cursor.nextFrom, 1)
-  assert.equal(result.snapshot.header, undefined)
 })
 
 test('artifact and trace parsers reject malformed success payloads', () => {
@@ -398,9 +351,83 @@ test('remote 502 keeps the last good fold and resumes with exponential retry', a
   const degraded = fleet.remoteRunStore.getSnapshot(key)
   assert.equal(degraded.phase, 'error')
   assert.equal(degraded.snapshot?.header?.sessionId, 'kept')
-  assert.equal(degraded.nextFrom, 2)
   assert.ok(timers.takeDelay(1_000), 'remote errors use exponential retry')
   fleet.closeRemoteRun('leo-03', 'r-1')
+  fleet.dispose()
+})
+
+test('remote store consumes a replaceable event source without knowing its cursor shape', async () => {
+  const timers = new FakeTimers()
+  let starts = 0
+  let stops = 0
+  const source: RemoteTraceSource = {
+    async start(onEvents) {
+      starts += 1
+      onEvents({ reset: false, events: [{ kind: 'event', value: { type: 'session', version: 0, id: 'stream-session' } }] })
+      return { cursor: { source: 'test-stream', token: { offset: 'opaque' } }, caughtUp: false }
+    },
+    stop() { stops += 1 },
+  }
+  const fetched: string[] = []
+  const fleet = createFleetLive({
+    fetchImpl: async (url) => {
+      fetched.push(url)
+      if (url.startsWith('/api/fleet/batches')) return json({ at: 1, batches: [] })
+      throw new Error(`unexpected ${url}`)
+    },
+    traceSourceFactory: () => source,
+    queueMicrotaskFn: timers.queueMicrotask,
+    setTimeoutFn: timers.setTimeout,
+    clearTimeoutFn: timers.clearTimeout,
+    isHidden: () => false,
+    onVisibilityChange: () => () => {},
+  })
+  const key = fleet.remoteRunKey('stream-host', 'stream-run')
+  fleet.openRemoteRun('stream-host', 'stream-run')
+  timers.flushMicrotasks()
+  await settle()
+  assert.equal(starts, 1)
+  assert.equal(fleet.remoteRunStore.getSnapshot(key).snapshot?.header?.sessionId, 'stream-session')
+  assert.equal(fetched.some((url) => url.startsWith('/api/fleet/trace')), false)
+  fleet.closeRemoteRun('stream-host', 'stream-run')
+  assert.equal(stops >= 1, true)
+  fleet.dispose()
+})
+
+test('an atomic reset batch keeps the replacement session events', async () => {
+  const timers = new FakeTimers()
+  let starts = 0
+  const source: RemoteTraceSource = {
+    async start(onEvents) {
+      starts += 1
+      onEvents({
+        reset: true,
+        events: [{ kind: 'event', value: { type: 'session', version: 0, id: 'replacement-session' } }],
+      })
+      return { cursor: { source: 'test-stream', token: starts }, caughtUp: false }
+    },
+    stop() {},
+  }
+  const fleet = createFleetLive({
+    fetchImpl: async (url) => {
+      if (url.startsWith('/api/fleet/batches')) return json({ at: 1, batches: [] })
+      throw new Error(`unexpected ${url}`)
+    },
+    traceSourceFactory: () => source,
+    queueMicrotaskFn: timers.queueMicrotask,
+    setTimeoutFn: timers.setTimeout,
+    clearTimeoutFn: timers.clearTimeout,
+    isHidden: () => false,
+    onVisibilityChange: () => () => {},
+  })
+  const key = fleet.remoteRunKey('stream-host', 'stream-run')
+  fleet.openRemoteRun('stream-host', 'stream-run')
+  timers.flushMicrotasks()
+  await settle()
+  const state = fleet.remoteRunStore.getSnapshot(key)
+  assert.equal(state.phase, 'live')
+  assert.equal(state.snapshot?.header?.sessionId, 'replacement-session')
+  fleet.closeRemoteRun('stream-host', 'stream-run')
   fleet.dispose()
 })
 
@@ -498,7 +525,6 @@ test('remote polling keeps detached runs live, polls hidden at 10s, and ends onl
   await settle()
   const final = fleet.remoteRunStore.getSnapshot(key)
   assert.equal(final.outcome, 'completed')
-  assert.equal(final.nextFrom > final.totalLines, true)
   assert.equal(final.phase, 'ended')
   assert.equal(traceCalls >= 2, true)
   fleet.closeRemoteRun('leo-03', 'r-1')
@@ -541,7 +567,7 @@ test('running catch-up revalidates the terminal epoch and consumes a newly appen
   fleet.openRemoteRun('leo-03', 'r-1')
   timers.flushMicrotasks()
   await settle()
-  assert.equal(fleet.remoteRunStore.getSnapshot(key).nextFrom, 2)
+  assert.equal(fleet.remoteRunStore.getSnapshot(key).snapshot?.header?.sessionId, 's')
   assert.equal(fleet.remoteRunStore.getSnapshot(key).phase, 'live')
 
   // This line appears after the cached running snapshot was already caught up,
@@ -557,8 +583,6 @@ test('running catch-up revalidates the terminal epoch and consumes a newly appen
   const ended = fleet.remoteRunStore.getSnapshot(key)
   assert.equal(ended.phase, 'ended')
   assert.equal(ended.outcome, 'completed')
-  assert.equal(ended.nextFrom, 3)
-  assert.equal(ended.totalLines, 2)
   assert.equal(ended.snapshot?.turnsStarted, 1)
   assert.equal(traceCalls >= 2, true)
   fleet.closeRemoteRun('leo-03', 'r-1')
@@ -603,7 +627,7 @@ test('last close releases every retained fold and repeated opens remain bounded'
   fleet.openRemoteRun('leo-03', 'r-0')
   timers.flushMicrotasks()
   await settle()
-  assert.equal(fleet.remoteRunStore.getSnapshot(closedKeys[0]).nextFrom, 2)
+  assert.equal(fleet.remoteRunStore.getSnapshot(closedKeys[0]).snapshot?.header?.sessionId, 'r-0')
   fleet.closeRemoteRun('leo-03', 'r-0')
   fleet.dispose()
 })
