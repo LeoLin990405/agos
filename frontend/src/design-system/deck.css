@@ -25,19 +25,7 @@
 .u-dot--running,
 .u-dot.is-running {
   background-color: var(--state-running);
-  box-shadow: 0 0 10px rgba(0, 166, 255, 0.7), 0 0 20px rgba(0, 166, 255, 0.3);
   animation: u-heartbeat var(--u-dur-scan) ease-in-out infinite;
-  animation-delay: var(--u-phase, 0ms);
-}
-
-.u-dot--running::after,
-.u-dot.is-running::after {
-  content: "";
-  position: absolute;
-  inset: -3px;
-  border-radius: 50%;
-  border: 1.5px solid var(--state-running);
-  animation: u-ring var(--u-dur-scan) var(--u-ease-swift) infinite;
   animation-delay: var(--u-phase, 0ms);
 }
 
@@ -56,30 +44,13 @@
 }
 
 @keyframes u-heartbeat {
-  0%, 100% { transform: scale(1); opacity: 1; filter: brightness(1.2); }
-  50%      { transform: scale(0.82); opacity: 0.6; filter: brightness(0.9); }
-}
-
-@keyframes u-ring {
-  0%   { transform: scale(1); opacity: 0.7; }
-  75%  { transform: scale(2.6); opacity: 0; }
-  100% { transform: scale(2.6); opacity: 0; }
-}
-
-@keyframes u-sweep {
-  0%   { transform: translateX(-100%); }
-  100% { transform: translateX(380%); }
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50%      { transform: scale(0.82); opacity: 0.6; }
 }
 
 @keyframes u-rise {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: none; }
-}
-
-@keyframes u-node-grow {
-  0%   { transform: scale(0); opacity: 0; filter: drop-shadow(0 0 0 transparent); }
-  60%  { transform: scale(1.3); opacity: 1; filter: drop-shadow(0 0 16px var(--accent-purple)); }
-  100% { transform: scale(1); opacity: 1; filter: drop-shadow(0 0 8px var(--accent-purple)); }
 }
 
 @keyframes u-cursor-blink {
@@ -91,15 +62,13 @@
    2. 目标横幅 (Goal Banner)
    -------------------------------------------------------------------------- */
 .goal-banner {
-  background: linear-gradient(90deg, rgba(168, 85, 247, 0.14) 0%, rgba(0, 166, 255, 0.1) 100%);
-  border-bottom: 1px solid rgba(168, 85, 247, 0.3);
+  background-color: var(--bg-layer-1);
   padding: 10px 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   z-index: 20;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
 }
 
 .goal-banner-left {
@@ -139,15 +108,6 @@
   overflow: hidden;
 }
 
-.u-swarm-card::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(0, 166, 255, 0.4), transparent);
-}
 
 .u-swarm-header {
   display: flex;
@@ -180,6 +140,8 @@
   margin-bottom: 16px;
 }
 
+.u-swarm-segs { height: 8px; }
+
 .u-swarm-bar {
   position: relative;
   height: 8px;
@@ -196,24 +158,10 @@
   bottom: 0;
   left: 0;
   right: 0;
-  background: linear-gradient(90deg, #0284c7 0%, #00a6ff 60%, #10b981 100%);
+  background-color: var(--state-running);
   transform-origin: left center;
-  transform: scaleX(var(--u-p, 0.625));
+  transform: scaleX(var(--u-p, 0));
   transition: transform var(--u-dur-slow) var(--u-ease-swift);
-  box-shadow: 0 0 12px rgba(0, 166, 255, 0.5);
-}
-
-.u-swarm-card.is-running .u-swarm-bar::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 30%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.8), transparent);
-  animation: u-sweep var(--u-dur-scan) linear infinite;
-  animation-delay: var(--u-phase, 0ms);
-  z-index: 2;
 }
 
 .u-swarm-bar::after {
@@ -253,6 +201,15 @@
   background-color: var(--bg-layer-3);
 }
 
+.u-swarm-row.is-running { background-color: var(--state-running-bg); }
+.u-swarm-row.is-failed { background-color: var(--state-failed-bg); }
+
+.u-swarm-stats-num {
+  font-weight: 700;
+  color: var(--state-running);
+  font-size: 13px;
+}
+
 .u-swarm-idx {
   font-size: 11px;
   color: var(--text-tertiary);
@@ -268,6 +225,16 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.u-swarm-row.is-running .u-swarm-name,
+.u-swarm-row.is-running .u-swarm-time {
+  color: var(--state-running);
+  font-weight: 700;
+}
+.u-swarm-row.is-failed .u-swarm-name,
+.u-swarm-row.is-failed .u-swarm-time {
+  color: var(--state-failed);
+  font-weight: 700;
+}
 
 .u-swarm-time {
   font-size: 11px;
@@ -281,41 +248,10 @@
   letter-spacing: 0.04em;
   text-align: right;
 }
-.u-swarm-state-text.state--running { color: var(--state-running); text-shadow: 0 0 8px rgba(0, 166, 255, 0.4); }
+.u-swarm-state-text.state--running { color: var(--state-running); }
 .u-swarm-state-text.state--done { color: var(--state-done); }
-.u-swarm-state-text.state--failed { color: var(--state-failed); text-shadow: 0 0 8px rgba(244, 63, 94, 0.4); }
+.u-swarm-state-text.state--failed { color: var(--state-failed); }
 .u-swarm-state-text.state--queued { color: var(--state-queued); }
-
-.u-civstrip {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-dim);
-  font-size: 11.5px;
-  flex-wrap: wrap;
-}
-
-.u-civ-metric {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.u-civ-metric .val {
-  font-weight: 700;
-}
-
-.u-civ-metric.is-veto .val {
-  color: var(--state-failed);
-}
-.u-civ-metric.is-pass .val {
-  color: var(--state-done);
-}
-.u-civ-metric.is-zero .val {
-  color: var(--text-tertiary);
-}
 
 /* --------------------------------------------------------------------------
    4. Team 编队卡 (Team Formation Card)
@@ -356,14 +292,10 @@
    5. 记忆沉淀卡 (Memory Submit Card + Animated Node Grow)
    -------------------------------------------------------------------------- */
 .memory-submit-card {
-  background: linear-gradient(135deg, rgba(168, 85, 247, 0.12) 0%, rgba(6, 182, 212, 0.08) 100%);
-  border: 1px solid rgba(168, 85, 247, 0.4);
-  border-radius: 14px;
+  background-color: var(--bg-layer-1);
+  border-radius: 12px;
   padding: 16px 20px;
   margin: 12px 0;
-  box-shadow: var(--shadow-card);
-  position: relative;
-  overflow: hidden;
 }
 
 .memory-submit-header {
@@ -384,39 +316,15 @@
   margin-top: 8px;
 }
 
-.memory-growing-node {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: radial-gradient(circle, #c084fc 0%, #7e22ce 100%);
-  border: 2px solid #ffffff;
-  display: grid;
-  place-items: center;
-  animation: u-node-grow 600ms var(--u-ease-pop) forwards;
-  flex: none;
-}
-
 /* --------------------------------------------------------------------------
    6. 提问面板 (Question Panel - input_required 等人独立态)
    -------------------------------------------------------------------------- */
 .question-panel {
-  background-color: var(--bg-layer-2);
-  border: 1px solid rgba(6, 182, 212, 0.5);
-  border-radius: 14px;
+  background-color: var(--bg-layer-1);
+  border-radius: 12px;
   padding: 18px 22px;
   margin: 14px 0;
-  box-shadow: 0 0 30px rgba(6, 182, 212, 0.15), var(--shadow-card);
   position: relative;
-}
-
-.question-panel::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: linear-gradient(90deg, #06b6d4 0%, #00a6ff 100%);
 }
 
 .question-options-list {
@@ -431,11 +339,10 @@
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  background-color: var(--bg-layer-1);
-  border: 1px solid var(--border-subtle);
+  background-color: var(--bg-layer-2);
   border-radius: 6px;
   cursor: pointer;
-  transition: border-color var(--u-dur-tick) ease, background-color var(--u-dur-tick) ease;
+  transition: opacity var(--u-dur-tick) ease, transform var(--u-dur-tick) ease;
 }
 
 .question-option-item:hover {
@@ -444,22 +351,12 @@
 }
 
 .question-option-item.is-selected {
-  border-color: var(--accent-cyan);
-  background-color: rgba(6, 182, 212, 0.1);
-  box-shadow: inset 2px 0 0 var(--accent-cyan);
+  background-color: var(--bg-layer-3);
 }
 
 /* --------------------------------------------------------------------------
    7. Plan & Todo 看板条
    -------------------------------------------------------------------------- */
-.plan-run-card {
-  background-color: var(--bg-layer-2);
-  border: 1px solid var(--border-subtle);
-  border-radius: 12px;
-  padding: 14px 16px;
-  margin: 10px 0;
-}
-
 .todo-kanban-bar {
   display: flex;
   align-items: center;
@@ -526,20 +423,28 @@
 .chat-scroll-view {
   flex: 1;
   overflow-y: auto;
-  padding: 24px 32px;
+  padding: 28px 36px 20px;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 20px;
 }
 
 .message-wrap {
   display: flex;
   flex-direction: column;
-  max-width: 900px;
+  max-width: 760px;
   width: 100%;
   margin: 0 auto;
   gap: 10px;
+  animation: surface-enter var(--u-dur-base) var(--u-ease-swift) both;
 }
+.message-wrap:nth-child(1) { animation-delay: calc(0 * var(--u-stagger)); }
+.message-wrap:nth-child(2) { animation-delay: calc(1 * var(--u-stagger)); }
+.message-wrap:nth-child(3) { animation-delay: calc(2 * var(--u-stagger)); }
+.message-wrap:nth-child(4) { animation-delay: calc(3 * var(--u-stagger)); }
+.message-wrap:nth-child(5) { animation-delay: calc(4 * var(--u-stagger)); }
+.message-wrap:nth-child(6) { animation-delay: calc(5 * var(--u-stagger)); }
+.message-wrap:nth-child(n + 7) { animation: none; }
 
 .message-user {
   align-self: flex-end;
@@ -673,6 +578,24 @@
   white-space: pre-wrap;
 }
 
+.terminal-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.terminal-dur {
+  color: var(--text-tertiary);
+}
+
+.terminal-running {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--state-running);
+  font-weight: 700;
+}
+
 .terminal-badge-ok {
   color: var(--state-done);
   font-weight: 700;
@@ -796,34 +719,28 @@
 
 .chat-input-deck {
   flex: none;
-  background-color: var(--bg-glass);
-  backdrop-filter: blur(20px);
-  border-top: 1px solid var(--border-dim);
-  padding: 14px 28px 18px 28px;
+  background-color: var(--bg-app);
+  padding: 10px 28px 18px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.25);
 }
 
 .input-box-container {
-  max-width: 860px;
+  max-width: 760px;
   width: 100%;
   margin: 0 auto;
-  background-color: var(--bg-layer-2);
-  border: 1px solid var(--border-subtle);
+  background-color: var(--bg-layer-1);
   border-radius: 16px;
-  padding: 14px 18px;
+  padding: 12px 16px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  box-shadow: var(--shadow-card);
-  transition: border-color var(--u-dur-fast) ease, box-shadow var(--u-dur-fast) ease;
+  transition: opacity var(--u-dur-fast) ease, transform var(--u-dur-fast) ease;
 }
 
 .input-box-container:focus-within {
-  border-color: var(--state-running);
-  box-shadow: 0 0 0 3px var(--state-running-bg), 0 6px 20px rgba(0, 0, 0, 0.14); /* Kimi 柔焦,去霓虹 */
+  background-color: var(--bg-layer-2);
 }
 
 .chat-textarea {
@@ -834,7 +751,7 @@
   border: none;
   color: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1.5;
   resize: none;
   outline: none;
@@ -883,13 +800,7 @@
 }
 
 .u-kpi-card::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.12), transparent);
+  content: none;
 }
 
 .u-kpi-val {
@@ -912,46 +823,41 @@
 .trend-down { color: var(--state-failed); font-weight: 700; }
 
 .inbox-section {
-  background-color: var(--bg-layer-2);
-  border: 1px solid var(--border-subtle);
-  border-radius: 14px;
-  padding: 20px 24px;
-  box-shadow: var(--shadow-card);
+  background-color: var(--bg-layer-1);
+  border-radius: 12px;
+  padding: 16px 18px 10px;
 }
 
 .inbox-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-top: 14px;
+  margin-top: 8px;
 }
 
 .inbox-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
-  background-color: var(--bg-layer-1);
-  border: 1px solid var(--border-dim);
-  border-radius: 12px;
+  min-height: 40px;
+  padding: 8px 4px;
   gap: 14px;
-  transition: background-color var(--u-dur-tick) ease, transform var(--u-dur-tick) ease;
+  border-top: 1px solid var(--border-dim);
+  transition: opacity var(--u-dur-fast) var(--u-ease-swift);
 }
+
+.inbox-item:first-child { border-top: none; }
 
 .inbox-item:hover {
-  background-color: var(--bg-layer-3);
+  opacity: 0.92;
 }
 
-.inbox-item--error {
-  box-shadow: inset 3px 0 0 var(--state-failed);
-}
+.inbox-item--error .table-title { color: var(--state-failed); }
+.inbox-item--running .table-title { color: var(--text-primary); }
 
-.inbox-item--warning {
-  box-shadow: inset 3px 0 0 var(--accent-amber);
-}
-
+.inbox-item--error,
+.inbox-item--warning,
 .inbox-item--running {
-  box-shadow: inset 3px 0 0 var(--state-running);
+  box-shadow: none;
 }
 
 .fleet-rack-grid {
@@ -1008,24 +914,14 @@
 /* --------------------------------------------------------------------------
    11. 谱系与共息波形 (Lineage & Sym-Respiration)
    -------------------------------------------------------------------------- */
-.lineage-wrapper {
-  flex: 1;
-  overflow-y: auto;
-  padding: 24px 32px;
-  display: flex;
-  flex-direction: column;
-  gap: 22px;
-}
-
 .sym-monitor-banner {
-  background: linear-gradient(135deg, rgba(0, 166, 255, 0.12) 0%, rgba(16, 185, 129, 0.08) 100%);
-  border: 1px solid var(--border-subtle);
-  border-radius: 14px;
-  padding: 16px 20px;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  box-shadow: var(--shadow-card);
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background-color: var(--state-running-bg);
+  border: 1px solid var(--state-running-border);
 }
 
 .sym-pulse-indicator {
@@ -1077,7 +973,81 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
 }
+
+.batch-group-title,
+.batch-group-meta,
+.lineage-card-lead,
+.lineage-card-end {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.batch-group-name {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.batch-group-summary.is-live { color: var(--state-running); font-weight: 700; }
+.batch-group-summary.is-done { color: var(--state-done); font-weight: 700; }
+
+.job-expand-icon {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-right: 1.5px solid var(--text-tertiary);
+  border-bottom: 1.5px solid var(--text-tertiary);
+  transform: rotate(-45deg);
+  transition: transform var(--u-dur-base) var(--u-ease-swift);
+}
+
+.job-expand-icon.is-open { transform: rotate(45deg); }
+
+.lineage-job-card.is-running { border-color: var(--state-running-border); }
+.lineage-job-card.is-failed { border-color: var(--state-failed-border); }
+
+.lineage-job-name {
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+
+.lineage-job-card.is-running .lineage-job-name,
+.lineage-job-card.is-running .lineage-job-dur { color: var(--state-running); }
+
+.lineage-job-card.is-failed .lineage-job-name,
+.lineage-job-card.is-failed .lineage-job-dur { color: var(--state-failed); }
+
+.lineage-job-metrics {
+  display: flex;
+  gap: 20px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.lineage-job-target {
+  background-color: var(--bg-layer-1);
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-dim);
+}
+
+.lineage-job-target .u-microlabel { margin-bottom: 4px; }
+
+.lineage-job-logs {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  background-color: var(--code-bg);
+  padding: 10px 14px;
+  border-radius: 6px;
+}
+
+.lineage-job-logs .is-ok { color: var(--state-done); }
+.lineage-job-logs .is-bad { color: var(--state-failed); }
 
 .tree-node-circuit {
   position: relative;
@@ -1093,9 +1063,12 @@
   left: 10px;
   top: 14px;
   bottom: 14px;
-  width: 2px;
+  width: 1px;
+  background-color: var(--border-subtle);
+}
+
+.tree-node-circuit.is-running-branch::before {
   background-color: var(--state-running-border);
-  box-shadow: 0 0 8px rgba(0, 166, 255, 0.3);
 }
 
 .job-card-wrap {
@@ -1157,14 +1130,13 @@
    12. 降级模式 (Reduced Motion)
    -------------------------------------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
+  .message-wrap {
+    animation: none;
+  }
   .u-dot--running,
   .u-dot.is-running,
-  .u-dot--running::after,
-  .u-dot.is-running::after,
-  .u-swarm-card.is-running .u-swarm-bar::before,
   .stream-cursor,
-  .sym-bar,
-  .memory-growing-node {
+  .sym-bar {
     animation: none !important;
   }
   .u-swarm-fill,
@@ -1179,28 +1151,44 @@
 
 /* ── V3 精修:概览仪表带(替代五卡 KPI 阵列)────────────────────── */
 .instrument-strip {
-  display: flex; align-items: stretch;
+  display: grid;
+  grid-template-columns: minmax(220px, 1.7fr) repeat(4, minmax(0, 1fr));
+  align-items: stretch;
   background: var(--bg-layer-1);
-  border: 1px solid var(--border-dim); border-radius: 14px;
-  box-shadow: var(--shadow-card);
+  border-radius: 10px;
   overflow: hidden;
 }
 .instrument-cell {
-  flex: 1 1 0; min-width: 0;
-  display: flex; flex-direction: column; gap: 5px;
-  padding: 16px 20px 14px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 14px 16px 12px;
 }
 .instrument-cell + .instrument-cell { border-left: 1px solid var(--border-dim); }
+.instrument-cell.is-lead {
+  background-color: var(--bg-layer-2);
+}
+.instrument-cell.is-lead.is-live {
+  background-color: var(--state-running-bg);
+}
+.instrument-cell.is-lead.is-live .instrument-value {
+  color: var(--state-running);
+}
 .instrument-label {
   display: flex; align-items: center; gap: 7px;
-  font-size: 10.5px; letter-spacing: 0.09em; text-transform: uppercase;
+  font-size: 11px;
   color: var(--text-tertiary); white-space: nowrap;
 }
 .instrument-value {
   display: flex; align-items: baseline; gap: 6px;
   font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-  font-size: 21px; font-weight: 600; line-height: 1.15;
+  font-size: 18px; font-weight: 600; line-height: 1.15;
   color: var(--text-primary); white-space: nowrap;
+}
+.instrument-cell.is-quiet .instrument-value {
+  font-size: 15px;
+  font-weight: 550;
 }
 .instrument-unit { font-size: 11px; font-weight: 500; color: var(--text-tertiary); }
 .instrument-sub {

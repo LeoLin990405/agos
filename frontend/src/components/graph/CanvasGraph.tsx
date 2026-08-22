@@ -11,14 +11,29 @@ interface SimNode extends MemoryNodeData {
   isRecent: boolean;
 }
 
-/* Obsidian 式柔和五色(降饱和;user 用 DeepSeek 蓝维持品牌) */
-const TYPE_COLORS: Record<MemoryNodeType, string> = {
-  user: '#679efe',
-  feedback: '#7fce9b',
-  project: '#b5a1ef',
-  reference: '#dfb56e',
-  incident: '#ef8f8f',
+const TYPE_COLOR_VARS: Record<MemoryNodeType, string> = {
+  user: '--mem-user',
+  feedback: '--mem-feedback',
+  project: '--mem-project',
+  reference: '--mem-reference',
+  incident: '--mem-incident',
 };
+
+function graphTypeColor(type: MemoryNodeType): string {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(TYPE_COLOR_VARS[type]).trim();
+  return raw !== '' ? raw : 'rgb(103, 158, 254)';
+}
+
+function phase01(): number {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue('--u-phase').trim();
+  const delay = Number.parseFloat(raw);
+  if (!Number.isFinite(delay)) return (performance.now() % 2400) / 2400;
+  return (((delay % 2400) + 2400) % 2400) / 2400;
+}
+
+function prefersReducedMotion(): boolean {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
 
 const NO_MATCHED_NODES: ReadonlySet<string> = new Set();
 
@@ -52,6 +67,7 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
   const draggingNodeRef = useRef<SimNode | null>(null);
   const isPanningRef = useRef(false);
   const panStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const kickLoopRef = useRef<() => void>(() => {});
 
   // 初始化物理仿真节点
   useEffect(() => {
@@ -81,7 +97,7 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
 
   // 动画与物理主循环
   useEffect(() => {
-    let animId: number;
+    let animId = 0;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -281,9 +297,13 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
       ctx.setLineDash([]);
 
       // 绘制节点 (Nodes)
-      const nowMs = performance.now();
-      const pulsePhase = (nowMs % 2400) / 2400; // 0..1 2400ms 同频心跳
-      const pulseScale = 1 + Math.sin(pulsePhase * Math.PI * 2) * 0.2;
+      const reducedMotion = prefersReducedMotion();
+      const physicsHot = isSimulating && alpha > 0.02;
+      const pulseScale = reducedMotion || !physicsHot
+        ? 1
+        : 1 + Math.sin(phase01() * Math.PI * 2) * 0.2;
+      const runningStroke = getComputedStyle(document.documentElement).getPropertyValue('--state-running').trim();
+      const doneStroke = getComputedStyle(document.documentElement).getPropertyValue('--state-done').trim();
 
       simNodes.forEach((node) => {
         // 类型过滤
@@ -296,7 +316,7 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
           ? !connectedSet.has(node.id)
           : hasSearch && !isMatchSearch;
 
-        const color = TYPE_COLORS[node.type] || '#679efe';
+        const color = graphTypeColor(node.type);
         // 标签和白环必须用显式焦点；无焦点时全图开灯会造成视觉噪声。
         const isFocus = activeId ? connectedSet.has(node.id) : false;
         const radius = node.radius * (isFocus ? 1.25 : 1);
@@ -318,12 +338,14 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
         ctx.fill();
         ctx.globalAlpha = appearT;
         if (isFocus) { // 只有焦点邻域上细环,平时无描边(Obsidian 语法)
-          ctx.lineWidth = 1.4;
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+          ctx.lineWidth = node.id === selectedId ? 2 : 1.4;
+          ctx.strokeStyle = node.id === selectedId
+            ? (runningStroke || color)
+            : 'rgba(255, 255, 255, 0.8)';
           ctx.stroke();
         } else if (hasSearch && isMatchSearch) {
           ctx.lineWidth = 2;
-          ctx.strokeStyle = 'rgba(127, 206, 155, 0.95)';
+          ctx.strokeStyle = doneStroke || 'rgba(127, 206, 155, 0.95)';
           ctx.stroke();
         }
 
@@ -337,11 +359,23 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
       });
 
       ctx.restore();
-      animId = requestAnimationFrame(tick);
+      const interacting = draggingNodeRef.current !== null || isPanningRef.current;
+      const settling = appearT < 1 || Math.abs(focusTarget - focusT) > 0.02;
+      if (physicsHot || interacting || settling) {
+        animId = requestAnimationFrame(tick);
+      }
     };
 
-    animId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animId);
+    const schedule = () => {
+      cancelAnimationFrame(animId);
+      animId = requestAnimationFrame(tick);
+    };
+    kickLoopRef.current = schedule;
+    schedule();
+    return () => {
+      cancelAnimationFrame(animId);
+      kickLoopRef.current = () => {};
+    };
   }, [isSimulating, matchedNodeIds, rawEdges, selectedNodeId, searchQuery, typeFilter]);
 
   // 自适应 Canvas 尺寸
@@ -353,6 +387,7 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
       const rect = canvas.parentElement.getBoundingClientRect();
       canvas.width = rect.width * dpr;
       canvas.height = rect.height * dpr;
+      kickLoopRef.current();
     };
     handleResize();
     window.addEventListener('resize', handleResize);
@@ -382,6 +417,7 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    kickLoopRef.current();
     if (draggingNodeRef.current) {
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -409,6 +445,7 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
   };
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    kickLoopRef.current();
     const hit = getSimNodeAtPos(e.clientX, e.clientY);
     if (hit) {
       draggingNodeRef.current = hit;
@@ -428,9 +465,11 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
     handleMouseUp();
     hoveredNodeRef.current = null;
     onHoverNode(null);
+    kickLoopRef.current();
   };
 
   const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
+    kickLoopRef.current();
     e.preventDefault();
     const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
     const canvas = canvasRef.current;

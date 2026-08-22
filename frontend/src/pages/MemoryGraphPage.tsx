@@ -31,11 +31,11 @@ const QuietGraphState: React.FC<{
   detail: React.ReactNode;
   onRetry?: () => void;
 }> = ({ title, detail, onRetry }) => (
-  <div className="graph-canvas-container" style={{ display: 'grid', placeItems: 'center', padding: '24px' }}>
-    <div role="status" style={{ maxWidth: '560px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '12.5px', lineHeight: 1.6 }}>
-      <strong style={{ display: 'block', color: 'var(--text-secondary)', fontSize: '14px', marginBottom: '6px' }}>{title}</strong>
+  <div className="graph-canvas-container graph-quiet">
+    <div role="status" className="graph-quiet-inner">
+      <strong className="graph-quiet-title">{title}</strong>
       <div>{detail}</div>
-      {onRetry && <Button size="sm" onClick={onRetry} style={{ marginTop: '12px' }}>重新读取</Button>}
+      {onRetry && <Button size="sm" onClick={onRetry}>重新读取</Button>}
     </div>
   </div>
 );
@@ -132,25 +132,23 @@ export const MemoryGraphPage: React.FC = () => {
         : graphData === undefined
           ? '连接中'
           : '/api/memory/graph · 实时';
-  const dataSourceColor = graphResource.status === 'error'
-    ? 'var(--state-failed)'
-    : graphResource.status === 'degraded'
-      ? 'var(--accent-amber)'
-      : graphData === undefined
-        ? 'var(--text-tertiary)'
-        : 'var(--state-done)';
 
   return (
-    <div style={{ display: 'flex', flex: 1, height: '100vh', overflow: 'hidden' }}>
+    <div className="page-workspace">
       <main className="app-stage">
         <AppTopbar
           title="记忆图谱 (Memory Graph Engineering)"
           badge={graphData && <Chip active>{graphData.nodes.length} 篇记忆 · {graphData.edges.length} 条关系</Chip>}
           rightActions={
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div className="telemetry-pill">
+            <div className="surface-cluster">
+              <div className={`graph-source ${
+                graphResource.status === 'error' ? 'is-off'
+                  : graphResource.status === 'degraded' ? 'is-warn'
+                    : graphData === undefined ? 'is-pending'
+                      : 'is-ok'
+              }`}>
                 <span className="u-microlabel">数据源</span>
-                <span className="val" style={{ color: dataSourceColor }}>{dataSourceLabel}</span>
+                <span>{dataSourceLabel}</span>
               </div>
               <Button size="sm" disabled={graphResource.status === 'loading'} onClick={() => graphResource.refresh('/api/memory/graph?refresh=1')}>
                 {graphResource.status === 'loading' ? '读取中…' : '刷新'}
@@ -224,12 +222,12 @@ export const MemoryGraphPage: React.FC = () => {
           )}
 
           {graphData && graphResource.status === 'degraded' && graphResource.error && (
-            <div role="status" style={{ position: 'absolute', left: '20px', bottom: '18px', zIndex: 11, padding: '8px 11px', border: '1px solid var(--state-running-border)', borderRadius: '6px', background: 'var(--bg-layer-1)', color: 'var(--text-secondary)', fontSize: '11.5px' }}>
+            <div role="status" className="graph-toast">
               图谱刷新失败，仍显示上次成功快照：{failureText(graphResource.error.status, graphResource.error.message)}
             </div>
           )}
           {graphData && graphData.nodes.length > 0 && graphResource.status === 'ready' && graphData.error && (
-            <div role="status" style={{ position: 'absolute', left: '20px', bottom: '18px', zIndex: 11, padding: '8px 11px', border: '1px solid var(--state-running-border)', borderRadius: '6px', background: 'var(--bg-layer-1)', color: 'var(--text-secondary)', fontSize: '11.5px' }}>
+            <div role="status" className="graph-toast">
               图谱源返回软错误：{graphData.error}
             </div>
           )}

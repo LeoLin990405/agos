@@ -65,8 +65,8 @@ export function normalizeProgressPayload(payload: Record<string, unknown> | unde
   };
 }
 
-export function overviewLamp(status: ResourceStatus): 'running' | 'queued' | 'failed' {
-  if (status === 'ready') return 'running';
+export function overviewLamp(status: ResourceStatus): 'running' | 'queued' | 'failed' | 'done' {
+  if (status === 'ready') return 'done';
   if (status === 'degraded' || status === 'error') return 'failed';
   return 'queued';
 }
@@ -166,21 +166,13 @@ export function formatCollectedAt(at: number | undefined): string {
   return new Date(at).toLocaleString('zh-CN', { hour12: false });
 }
 
-const noticeStyle: React.CSSProperties = {
-  padding: '9px 12px',
-  border: '1px solid var(--state-running-border)',
-  borderRadius: '6px',
-  color: 'var(--text-secondary)',
-  fontSize: '12px',
-};
-
 const ResourceDegradedNotice: React.FC<{
   route: string;
   at: number | undefined;
   error: ResourceFailure;
   onRetry: () => void;
 }> = ({ route, at, error, onRetry }) => (
-  <div role="status" style={{ ...noticeStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+  <div role="status" className="surface-status surface-cluster is-spread">
     <span>
       <code>{route}</code> 暂时无法更新，保留 {formatCollectedAt(at)} 的结果：
       {error.status !== undefined && `HTTP ${error.status} · `}{error.message}
@@ -197,13 +189,13 @@ const ResourceUnavailableNotice: React.FC<{
 }> = ({ status, route, error, onRetry }) => {
   if (status === 'error' && error !== undefined) {
     return (
-      <div role="alert" style={{ ...noticeStyle, borderColor: 'var(--state-failed)', color: 'var(--state-failed)' }}>
-        <p style={{ margin: '0 0 10px' }}><code>{route}</code> 未响应：{error.status !== undefined && `HTTP ${error.status} · `}{error.message}</p>
+      <div role="alert" className="surface-status surface-status--fail">
+        <p><code>{route}</code> 未响应：{error.status !== undefined && `HTTP ${error.status} · `}{error.message}</p>
         <Button size="sm" onClick={onRetry}>重试</Button>
       </div>
     );
   }
-  return <p role="status" style={{ margin: 0, color: 'var(--text-tertiary)', fontSize: '12px' }}>正在读取 <code>{route}</code>…</p>;
+  return <p role="status" className="surface-quiet">正在读取 <code>{route}</code>…</p>;
 };
 
 export const RealOverview: React.FC<{
@@ -215,17 +207,22 @@ export const RealOverview: React.FC<{
   if (!live.live) {
     if (live.overviewStatus === 'error' && live.overviewError !== undefined) {
       return (
-        <div role="alert" style={{ borderTop: '1px solid var(--border-subtle)', padding: '16px 0', color: 'var(--state-failed)', fontSize: '12px' }}>
-          <p style={{ margin: '0 0 10px' }}><code>/api/agos/overview</code> 未响应：{live.overviewError.status !== undefined && `HTTP ${live.overviewError.status} · `}{live.overviewError.message}</p>
+        <div role="alert" className="surface-section surface-alert">
+          <p><code>/api/agos/overview</code> 未响应：{live.overviewError.status !== undefined && `HTTP ${live.overviewError.status} · `}{live.overviewError.message}</p>
           <Button size="sm" onClick={live.refreshOverview}>重试</Button>
         </div>
       );
     }
-    return <p role="status" style={{ margin: 0, color: 'var(--text-tertiary)', fontSize: '12px' }}>正在读取 <code>/api/agos/overview</code>…</p>;
+    return <p role="status" className="surface-quiet">正在读取 <code>/api/agos/overview</code>…</p>;
   }
 
   const metric = (value: number | undefined): number | string => value ?? '未采集';
   const hasLineageDetail = live.calls !== undefined || live.rows !== undefined;
+  const mixReady = live.rows !== undefined && live.running !== undefined && live.failed !== undefined;
+  const mixRunning = live.running ?? 0;
+  const mixFailed = live.failed ?? 0;
+  const mixRest = mixReady ? Math.max(0, (live.rows ?? 0) - mixRunning - mixFailed) : 0;
+  const tokenMax = Math.max(1, ...live.matrix.map((row) => row.tokens));
   const hasPlans = live.plansTotal !== undefined || live.plansExecuted !== undefined;
   const hasSkills = live.skills !== undefined || live.skillsWarn !== undefined || live.skillsError !== undefined;
   const skillsDetail = [
@@ -236,37 +233,44 @@ export const RealOverview: React.FC<{
   ].filter((value): value is string => value !== undefined).join(' · ');
 
   return (
-  <div style={{ display: 'flex', flexDirection: 'column', gap: density === 'dense' ? '18px' : '30px' }} data-density={density}>
+  <div className={`surface-page ${density === 'dense' ? 'is-dense' : 'is-sparse'}`} data-density={density}>
     {live.overviewStatus === 'degraded' && live.overviewError !== undefined && (
       <ResourceDegradedNotice route="/api/agos/overview" at={live.overviewAt} error={live.overviewError} onRetry={live.refreshOverview} />
     )}
     {live.overviewStatus === 'loading' && live.overviewAt !== undefined && (
-      <p role="status" style={{ margin: 0, color: 'var(--text-tertiary)', fontSize: '12px' }}>
+      <p role="status" className="surface-quiet">
         正在更新概览，当前显示 {formatCollectedAt(live.overviewAt)} 的结果。
       </p>
     )}
     <section className="instrument-strip" aria-label="控制台仪表带">
-      <div className="instrument-cell">
+      <div className={`instrument-cell is-lead${live.running !== undefined && live.running > 0 ? ' is-live' : ''}`}>
         <div className="instrument-label">{live.running !== undefined && <Dot state={live.running > 0 ? 'running' : 'queued'} size={6} />}活跃派单</div>
         <div className="instrument-value">{metric(live.running)}{hasLineageDetail && <span className="instrument-unit">{live.calls === undefined ? '批次未采集' : `/ ${live.calls} 批`}{live.rows === undefined ? '' : ` · ${live.rows} 行`}</span>}</div>
         <div className="instrument-sub">{live.running === undefined ? 'lineage.running 未采集' : live.running > 0 ? '编队执行中' : '空闲待命'}</div>
+        {mixReady && (mixRunning + mixFailed + mixRest) > 0 && (
+          <div className="instrument-mix" aria-hidden="true">
+            {mixRunning > 0 && <span className="instrument-mix-seg is-running" style={{ flexGrow: mixRunning, flexBasis: 0 }} />}
+            {mixFailed > 0 && <span className="instrument-mix-seg is-failed" style={{ flexGrow: mixFailed, flexBasis: 0 }} />}
+            {mixRest > 0 && <span className="instrument-mix-seg is-rest" style={{ flexGrow: mixRest, flexBasis: 0 }} />}
+          </div>
+        )}
       </div>
-      <div className="instrument-cell">
+      <div className="instrument-cell is-quiet">
         <div className="instrument-label">会话</div>
         <div className="instrument-value">{metric(live.sessionsTotal)}{live.sessionsTotal !== undefined && <span className="instrument-unit">个</span>}</div>
         <div className="instrument-sub">{live.sessionsTotal === undefined ? 'sessions 组未挂载' : live.matrix[0] !== undefined ? `最近:${live.matrix[0].title.slice(0, 14)}` : live.sessionsTotal === 0 ? '总数为 0' : '会话列表尚未采集'}</div>
       </div>
-      <div className="instrument-cell">
+      <div className="instrument-cell is-quiet">
         <div className="instrument-label">计划档案</div>
         <div className="instrument-value">{metric(live.plansTotal)}{hasPlans && <span className="instrument-unit">{live.plansExecuted === undefined ? '已执行未采集' : `/ ${live.plansExecuted} 已执行`}</span>}</div>
         <div className="instrument-sub">{hasPlans ? '~/.dsh/logs/plans' : 'plans 组未挂载'}</div>
       </div>
-      <div className="instrument-cell">
+      <div className="instrument-cell is-quiet">
         <div className="instrument-label">{live.failed !== undefined && <Dot state={live.failed > 0 ? 'failed' : 'done'} size={6} />}失败子任务</div>
-        <div className="instrument-value" style={live.failed !== undefined && live.failed > 0 ? { color: 'var(--state-failed)' } : undefined}>{metric(live.failed)}{live.failed !== undefined && <span className="instrument-unit">项</span>}</div>
+        <div className={`instrument-value${live.failed !== undefined && live.failed > 0 ? ' metric-fail' : ''}`}>{metric(live.failed)}{live.failed !== undefined && <span className="instrument-unit">项</span>}</div>
         <div className="instrument-sub">{live.failed === undefined ? 'lineage.failed 未采集' : live.failed > 0 ? '需要关注' : '未发现失败'}</div>
       </div>
-      <div className="instrument-cell">
+      <div className="instrument-cell is-quiet">
         <div className="instrument-label">技能注册表</div>
         <div className="instrument-value">{metric(live.skills)}{hasSkills && <span className="instrument-unit">{skillsDetail || '审计结果未采集'}</span>}</div>
         <div className="instrument-sub">
@@ -284,7 +288,7 @@ export const RealOverview: React.FC<{
         <ResourceDegradedNotice route="/api/swarm/progress" at={live.progressAt} error={live.progressError} onRetry={live.refreshProgress} />
       )}
       {live.progressStatus === 'loading' && live.progressAt !== undefined && (
-        <p role="status" style={{ margin: 0, color: 'var(--text-tertiary)', fontSize: '12px' }}>
+        <p role="status" className="surface-quiet">
           正在更新谱系明细，当前显示 {formatCollectedAt(live.progressAt)} 的结果。
         </p>
       )}
@@ -300,16 +304,15 @@ export const RealOverview: React.FC<{
         state: r.running ? 'running' as const : r.blank ? 'queued' as const : 'done' as const,
         title: r.title,
         subtitle: r.cwd,
-        model: '未采集',
         tokenWatermark: r.tokens > 0 ? `${(r.tokens / 1000).toFixed(1)}k tok` : '未采集',
-        latency: '未采集',
+        tokenRatio: r.tokens > 0 ? r.tokens / tokenMax : undefined,
         updatedAt: r.updatedAt > 0
           ? new Date(r.updatedAt).toLocaleTimeString('zh-CN', { hour12: false })
           : '未采集',
         actionText: '接入',
         onAction: () => onNavigateChat?.(r.sessionId),
       }))}
-    /> : <p style={{ margin: 0, color: 'var(--text-tertiary)', fontSize: '12px' }}>会话列表尚未采集，session.list 尚未返回数据。</p>}
+    /> : <p className="surface-quiet">会话列表尚未采集，session.list 尚未返回数据。</p>}
   </div>
   );
 };

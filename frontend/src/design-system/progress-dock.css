@@ -1,7 +1,7 @@
 /* ==========================================================================
    ProgressDock —— 计划进度坞(P0-2,Manus Task progress 叠卡 AgOS 化)
    挂在 CommandDeck 正上方;底部 16px 藏进 composer 后面(负 margin)。
-   只在存在运行中批次时渲染,infinite 动画仅用于运行态(扫光/呼吸点)。
+   只在存在运行中批次时渲染;运行态靠 Dot 共息,段条用 scaleX(--u-p)。
    ========================================================================== */
 
 .progress-dock {
@@ -14,7 +14,7 @@
   border-bottom: none;
   border-radius: 16px 16px 0 0;
   overflow: hidden;
-  animation: progress-dock-enter 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
+  animation: progress-dock-enter var(--u-dur-base) var(--u-ease-swift) both;
 }
 
 .progress-dock-stack {
@@ -31,8 +31,8 @@
 }
 
 @keyframes progress-dock-enter {
-  from { transform: translateY(12px); opacity: 0; }
-  to   { transform: translateY(0);    opacity: 1; }
+  from { transform: translateY(6px); opacity: 0; }
+  to   { transform: none; opacity: 1; }
 }
 
 /* ── 收起态:一行 36px ─────────────────────────────────────────────── */
@@ -50,7 +50,7 @@
   padding: 0 14px;
   cursor: pointer;
   text-align: left;
-  transition: background-color 0.3s ease-in-out;
+  transition: opacity var(--u-dur-fast) ease;
 }
 .progress-dock__row:hover {
   background-color: var(--bg-layer-2);
@@ -66,26 +66,10 @@
   text-overflow: ellipsis;
 }
 
-/* 运行态文字扫光(Kimi/Manus 配方):background-clip:text + 120° 渐变 */
-.progress-dock__sweep {
-  background-image: linear-gradient(
-    120deg,
-    var(--text-secondary) 40%,
-    var(--text-primary) 50%,
-    var(--text-secondary) 60%
-  );
-  background-size: 200% 100%;
-  background-position: 100% 0;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  -webkit-text-fill-color: transparent;
-  animation: progress-dock-sweep 2.5s linear infinite;
-}
-
-@keyframes progress-dock-sweep {
-  from { background-position: 100% 0; }
-  to   { background-position: -100% 0; }
+.progress-dock__summary-bar {
+  flex: 1 1 72px;
+  max-width: 160px;
+  height: 5px;
 }
 
 .progress-dock__count {
@@ -97,7 +81,7 @@
 .progress-dock__chevron {
   flex: none;
   color: var(--text-tertiary);
-  transition: transform 0.3s ease-in-out;
+  transition: transform var(--u-dur-base) var(--u-ease-swift);
 }
 .progress-dock__chevron.is-open {
   transform: rotate(180deg);
@@ -109,9 +93,7 @@
 /* ── 展开态:批次列表(真实高度动画,高度值由组件内联提供)──────── */
 .progress-dock__list-clip {
   overflow: hidden;
-  transition:
-    height 0.3s cubic-bezier(0.4, 0, 0.1, 1),
-    opacity 0.3s cubic-bezier(0.4, 0, 0.1, 1);
+  transition: opacity var(--u-dur-base) var(--u-ease-swift);
 }
 
 .progress-dock__list {
@@ -171,9 +153,12 @@
 
 .progress-dock__fill {
   height: 100%;
+  width: 100%;
   border-radius: 3px;
   background: var(--state-running);
-  transition: width 0.3s ease-in-out;
+  transform-origin: left center;
+  transform: scaleX(var(--u-p, 0));
+  transition: transform var(--u-dur-slow) var(--u-ease-swift);
 }
 
 .progress-dock__item-failed {
@@ -187,12 +172,6 @@
 @media (prefers-reduced-motion: reduce) {
   .progress-dock {
     animation: none;
-  }
-  .progress-dock__sweep {
-    animation: none;
-    background-image: none;
-    color: var(--text-primary);
-    -webkit-text-fill-color: currentColor;
   }
   .progress-dock__row,
   .progress-dock__item-button,

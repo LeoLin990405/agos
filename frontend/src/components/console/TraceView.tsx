@@ -94,11 +94,11 @@ export const TraceView: React.FC<{ onSelectSession?: (id: string) => void }> = (
   const maxTotal = Math.max(1, ...rows.map((r) => r.llmMs + r.toolMs));
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+    <div className="surface-page">
       <div>
-        <h2 style={{ fontSize: '16px', fontWeight: 700 }}>会话轨迹与时间流 (Trace)</h2>
-        <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
-          数据源 /api/trace/sessions · 15s 轮询 · 条形 = LLM 推理与工具执行的耗时占比。
+        <h2 className="surface-title">会话轨迹与时间流 (Trace)</h2>
+        <p className="surface-lede">
+          数据源 /api/trace/sessions · 15s 轮询 · 条长相对本页最长会话，段内为 LLM / 工具耗时占比。
           {/* ⚠️ 原文是「这里的 id 来自投影缓存,与对话会话不是同一批」—— **那句是假的**:
               后端 dsh-trace-view/lib/index.js:45 就在跟 sessionPersistence.list() 取交集,
               返回的是权威名册的**子集**;实测 2 行 rawId 全部在磁盘会话目录里(2/2)。
@@ -115,37 +115,41 @@ export const TraceView: React.FC<{ onSelectSession?: (id: string) => void }> = (
           回归照绿 —— 等于没锁(2026-08-22 验收 P1)。改成由 joinIdOf 算出的计数:
           与按钮同源,数字变了就说明可接入集变了。按钮本身由 trace-join.test.ts 的源锁守住。 */}
       {joinableCount > 0 && (
-        <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0 }}>
+        <p className="surface-body">
           {TRACE_JOIN_COUNT_COPY(joinableCount)}
         </p>
       )}
 
       {loaded && rows.length === 0 && (
-        <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '12.5px', border: '1px dashed var(--border-subtle)', borderRadius: '14px' }}>
+        <div className="surface-empty">
           暂无会话轨迹。
         </div>
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        {rows.map((r) => {
+      {rows.length > 0 && (
+        <div className="trace-scale" aria-hidden="true">
+          <span className="u-num">0</span>
+          <span className="trace-scale-rule" />
+          <span className="u-num">{fmtMs(maxTotal)}</span>
+        </div>
+      )}
+
+      <div className="surface-stack">
+        {rows.map((r, index) => {
           const total = r.llmMs + r.toolMs;
-          const widthPct = Math.max(2, (total / maxTotal) * 100);
-          const llmPct = total > 0 ? (r.llmMs / total) * 100 : 0;
+          const llmFrac = total > 0 ? r.llmMs / total : 0;
           const joinId = joinIdOf(r);
           return (
             <div
               key={r.id}
-              style={{
-                display: 'flex', flexDirection: 'column', gap: '8px',
-                padding: '13px 16px', borderRadius: '12px',
-                backgroundColor: 'var(--bg-layer-1)', boxShadow: 'var(--shadow-card)',
-              }}
+              className="trace-row viz-enter"
+              style={{ ['--i' as string]: index }}
             >
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px' }}>
-                <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>
+              <div className="trace-row-head">
+                <span className="trace-title">
                   {r.title}
                 </span>
-                <span className="u-num" style={{ fontSize: '11px', color: 'var(--text-tertiary)', flex: 'none' }}>
+                <span className="u-num trace-meta">
                   {r.turns} 轮 · {r.steps} 步 · {r.model}
                 </span>
                 {joinId !== undefined && (
@@ -154,15 +158,23 @@ export const TraceView: React.FC<{ onSelectSession?: (id: string) => void }> = (
                   </Button>
                 )}
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div style={{ width: `${widthPct}%`, minWidth: '24px', height: '8px', borderRadius: '4px', overflow: 'hidden', display: 'flex', backgroundColor: 'var(--bg-layer-3)' }}>
-                  <div style={{ width: `${llmPct}%`, backgroundColor: 'var(--state-running)' }} />
-                  <div style={{ flex: 1, backgroundColor: 'var(--state-done)' }} />
+              <div className="trace-bar-row">
+                <div className="viz-track trace-track" aria-hidden="true">
+                  <div
+                    className="trace-span"
+                    style={{
+                      ['--u-p' as string]: total / maxTotal,
+                      ['--u-llm' as string]: llmFrac,
+                    }}
+                  >
+                    <div className="trace-bar-llm" />
+                    <div className="trace-bar-tool" />
+                  </div>
                 </div>
-                <span className="u-num" style={{ fontSize: '11px', color: 'var(--text-secondary)', flex: 'none' }}>
+                <span className="u-num trace-meta">
                   {fmtMs(total)}
                 </span>
-                <span className="u-num" style={{ fontSize: '10.5px', color: 'var(--text-dimmed)', flex: 'none' }}>
+                <span className="u-num trace-meta">
                   LLM {fmtMs(r.llmMs)} · 工具 {fmtMs(r.toolMs)}
                 </span>
               </div>
@@ -171,9 +183,9 @@ export const TraceView: React.FC<{ onSelectSession?: (id: string) => void }> = (
         })}
       </div>
 
-      <div style={{ display: 'flex', gap: '14px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
-        <span><span style={{ display: 'inline-block', width: '9px', height: '9px', borderRadius: '3px', backgroundColor: 'var(--state-running)', marginRight: '5px' }} />LLM 推理</span>
-        <span><span style={{ display: 'inline-block', width: '9px', height: '9px', borderRadius: '3px', backgroundColor: 'var(--state-done)', marginRight: '5px' }} />工具执行</span>
+      <div className="trace-legend">
+        <span><span className="trace-swatch is-llm" />LLM 推理</span>
+        <span><span className="trace-swatch is-tool" />工具执行</span>
       </div>
     </div>
   );

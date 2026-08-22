@@ -100,7 +100,7 @@ export const AppTopbar: React.FC<AppTopbarProps> = ({
   title,
   badge,
   rightActions,
-  runningState = true,
+  runningState = false,
 }) => {
   const { theme, toggleTheme } = useTheme();
 

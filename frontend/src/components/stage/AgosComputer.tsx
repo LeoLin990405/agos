@@ -4,6 +4,7 @@
  * 数据来源:
  * - conversationStore.getSnapshot(sessionId).snapshot  → fold 快照(items)
  * - swarmProgressStore.getSnapshot()                   → 运行中批次进度(复用 telemetry 轮询)
+ * - telemetryStore.progress.calls                      → 本会话已结清的 progress 行(坞不收,电脑台收)
  * - GET /api/agos/session-memory?sessionId=             → 本机会话短期记忆
  *
  * 本地前三个 tab 的内容由纯 selector 从 fold 快照派生:
@@ -26,6 +27,7 @@ import {
   remoteRunKey,
   remoteRunStore,
   swarmProgressStore,
+  telemetryStore,
   type FleetRunStatus,
 } from '@/stores/live';
 import {
@@ -158,7 +160,7 @@ const SubagentsPane: React.FC<{ batches: readonly AgosSubagentBatch[] }> = ({ ba
               <td className="agc-cell-progress">
                 <span className="u-num agc-batch-count">{batch.done}·{batch.total}</span>
                 <span className="agc-meter" role="presentation">
-                  <span className="agc-meter-fill" style={{ width: `${pct}%` }} />
+                  <span className="agc-meter-fill" style={{ ['--u-p' as string]: pct / 100 }} />
                 </span>
               </td>
               <td className={`u-num agc-cell-failed${batch.failed > 0 ? ' is-hot' : ''}`}>{batch.failed}</td>
@@ -190,14 +192,29 @@ export const AgosComputer: React.FC<{
     useCallback(() => remoteRunStore.getSnapshot(remoteKey), [remoteKey]),
   );
   const live = useSyncExternalStore(swarmProgressStore.subscribe, swarmProgressStore.getSnapshot);
+  const telemetry = useSyncExternalStore(telemetryStore.subscribe, telemetryStore.getSnapshot);
   const snapshot = remote === undefined ? convo.snapshot : remoteRun.snapshot;
 
   const activity = useMemo(() => selectCurrentActivity(snapshot), [snapshot]);
   const terminal = useMemo(() => selectTerminalEntries(snapshot), [snapshot]);
   const files = useMemo(() => selectFileEntries(snapshot), [snapshot]);
   const batches = useMemo(
-    () => selectSubagentBatches(snapshot, remote === undefined ? live : undefined),
-    [live, remote, snapshot],
+    () => selectSubagentBatches(
+      snapshot,
+      remote === undefined ? live : undefined,
+      remote === undefined
+        ? {
+          sessionId: localSessionId,
+          progressCalls: (telemetry.progress?.calls ?? []) as {
+            callId: string
+            parentSessionId?: string
+            description?: string
+            rows?: readonly Record<string, unknown>[]
+          }[],
+        }
+        : undefined,
+    ),
+    [live, localSessionId, remote, snapshot, telemetry],
   );
 
   const visibleTab = remote === undefined

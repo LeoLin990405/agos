@@ -39,7 +39,8 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .host-power-badge.is-waking .host-power-badge__dot {
-    animation: host-power-breath 2.4s ease-in-out infinite;
+    animation: host-power-breath var(--u-dur-scan) ease-in-out infinite;
+    animation-delay: var(--u-phase, 0ms);
   }
 
   @keyframes host-power-breath {

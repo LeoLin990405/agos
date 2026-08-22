@@ -116,3 +116,46 @@ test('remote subagent selection does not merge a colliding local live batch', ()
     running: false,
   }]);
 });
+
+test('selectSubagentBatches keeps settled progress owned by this session', () => {
+  const sessionId = 'session-534efffb-73bd-44ea-ae17-af69aa96986b';
+  const rows = selectSubagentBatches(snapshot([
+    tool({ callId: 'tool-sub', name: 'subagent', status: 'done' }),
+  ]), undefined, {
+    sessionId,
+    progressCalls: [
+      {
+        callId: `host:${sessionId}`,
+        parentSessionId: sessionId,
+        description: 'host delegation',
+        rows: [
+          { status: 'failed' },
+          { status: 'completed' },
+        ],
+      },
+      {
+        callId: 'host:session-other',
+        parentSessionId: 'session-other',
+        rows: [{ status: 'running' }],
+      },
+    ],
+  });
+  assert.deepEqual(rows, [{
+    callId: `host:${sessionId}`,
+    label: 'host delegation',
+    done: 1,
+    failed: 1,
+    total: 2,
+    running: false,
+  }]);
+});
+
+test('selectSubagentBatches falls back to swarm-class tools when progress is empty', () => {
+  const rows = selectSubagentBatches(snapshot([
+    tool({ callId: 'd1', name: 'delegate_task', status: 'done' }),
+    tool({ callId: 'b1', name: 'bash', status: 'done' }),
+  ]), undefined);
+  assert.deepEqual(rows, [{
+    callId: 'd1', label: 'delegate_task', done: 1, failed: 0, total: 1, running: false,
+  }]);
+});

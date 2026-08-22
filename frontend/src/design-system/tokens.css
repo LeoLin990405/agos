@@ -1,140 +1,129 @@
 /* ==========================================================================
-   AgOS Design System V2 - Tokens & Base Styles
-   Flagship Telemetry Deck + Sym-Respiration
+   AgOS Design System — Claude 材质海拔 + Cursor 工作面
+   层级靠明暗,边框降权。动效 tokens 与共息周期保持不变。
    ========================================================================== */
 
 :root {
   /* --------------------------------------------------------------------------
      1. 动效 Tokens (Transform / Opacity Only)
      -------------------------------------------------------------------------- */
-  --u-dur-tick: 90ms;      /* 按压反馈、离场、灯位瞬切 */
-  --u-dur-fast: 140ms;     /* 快速过渡、徽章弹入 */
-  --u-dur-base: 220ms;     /* 面板入场、卡片落位、通用过渡 */
-  --u-dur-slow: 360ms;     /* 进度条推进、一次性强调 */
-  --u-dur-scan: 2400ms;    /* 唯一常驻运行态周期: 2.4s 心跳与流光 (25 BPM) */
-  --u-stagger: 24ms;       /* 列表级联步长 (上限 N=6) */
+  --u-dur-tick: 90ms;
+  --u-dur-fast: 140ms;
+  --u-dur-base: 220ms;
+  --u-dur-slow: 360ms;
+  --u-dur-scan: 2400ms;
+  --u-stagger: 24ms;
 
-  --u-ease-swift: cubic-bezier(0.16, 1, 0.3, 1);     /* 弹射减速 */
-  --u-ease-latch: cubic-bezier(0.2, 0.9, 0.1, 1);    /* 微过冲锁定 */
-  --u-ease-pop: cubic-bezier(0.34, 1.56, 0.64, 1);   /* 徽章弹入 */
+  --u-ease-swift: cubic-bezier(0.16, 1, 0.3, 1);
+  --u-ease-latch: cubic-bezier(0.2, 0.9, 0.1, 1);
+  --u-ease-pop: cubic-bezier(0.34, 1.56, 0.64, 1);
 
   /* --------------------------------------------------------------------------
      2. 字体栈
      -------------------------------------------------------------------------- */
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Noto Sans SC", system-ui, sans-serif; /* V4:回归系统栈=DSH 原生手感 */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
   --font-mono: "Geist Mono", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
 
   /* --------------------------------------------------------------------------
-     3. 默认深色主题 (Dark Mode - 曜石航电甲板 Obsidian Avionics)
+     3. 深色主题:更深画布,更亮 layer-1,边框不再承担层级
      -------------------------------------------------------------------------- */
-  /* V4 融合:重基到 DeepSeek 原生炭灰系(上游 ui-theme/design-platform.css 权威值:
-     neutral-bluish 950/875/850/800 + deepseek-400 accent)。海拔仍靠明暗,边框发丝。 */
-  /* V5 基因:Kimi/Manus 式安静优雅(Kimi app 实测:bg #18181c、raise rgba(40,40,46)、
-     文字用透明度分层、发丝 .08 边)+ DeepSeek 蓝品牌。 */
-  --bg-app: #141416;
-  --bg-layer-1: #1b1b1f;
-  --bg-layer-2: #232328;
-  --bg-layer-3: #2b2b31;
-  --bg-layer-active: #34343a;
-  --bg-glass: rgba(40, 40, 46, 0.85);
+  --bg-app: #0c0c0e;
+  --bg-layer-1: #1a1a1f;
+  --bg-layer-2: #222228;
+  --bg-layer-3: #2b2b32;
+  --bg-layer-active: #34343c;
+  --bg-glass: #1a1a1f;
 
-  --border-dim: rgba(255, 255, 255, 0.06);
-  --border-subtle: rgba(255, 255, 255, 0.08);
-  --border-bold: rgba(255, 255, 255, 0.14);
-  --border-glow: rgba(103, 158, 254, 0.35);
+  --border-dim: rgba(255, 255, 255, 0.045);
+  --border-subtle: rgba(255, 255, 255, 0.07);
+  --border-bold: rgba(255, 255, 255, 0.12);
+  --border-glow: rgba(103, 158, 254, 0.28);
 
-  --text-primary: rgba(245, 245, 247, 0.92);
-  --text-secondary: rgba(245, 245, 247, 0.56);
-  --text-tertiary: rgba(245, 245, 247, 0.38);
-  --text-dimmed: rgba(245, 245, 247, 0.26);
+  --text-primary: rgba(248, 248, 250, 0.94);
+  --text-secondary: rgba(248, 248, 250, 0.62);
+  --text-tertiary: rgba(248, 248, 250, 0.4);
+  --text-dimmed: rgba(248, 248, 250, 0.26);
 
-  /* 4态标准灯语 (Dark Neon Accents) */
-  --state-running: rgb(103, 158, 254); /* deepseek-400:原生品牌蓝 */
-  --state-running-bg: rgba(103, 158, 254, 0.13);
-  --state-running-border: rgba(103, 158, 254, 0.38);
-  --state-running-glow: rgba(103, 158, 254, 0.35);
+  --state-running: rgb(103, 158, 254);
+  --state-running-bg: rgba(103, 158, 254, 0.12);
+  --state-running-border: rgba(103, 158, 254, 0.32);
+  --state-running-glow: rgba(103, 158, 254, 0.28);
 
-  --state-done: #34c759; /* Kimi/iOS 绿 */
+  --state-done: #34c759;
   --state-done-bg: rgba(34, 197, 94, 0.12);
-  --state-done-border: rgba(34, 197, 94, 0.38);
-  --state-done-glow: rgba(34, 197, 94, 0.32);
+  --state-done-border: rgba(34, 197, 94, 0.34);
+  --state-done-glow: rgba(34, 197, 94, 0.24);
 
-  --state-failed: #ff5f57; /* iOS 红族 */
-  --state-failed-bg: rgba(242, 90, 90, 0.13);
-  --state-failed-border: rgba(242, 90, 90, 0.38);
-  --state-failed-glow: rgba(242, 90, 90, 0.32);
+  --state-failed: #ff5f57;
+  --state-failed-bg: rgba(242, 90, 90, 0.12);
+  --state-failed-border: rgba(242, 90, 90, 0.34);
+  --state-failed-glow: rgba(242, 90, 90, 0.24);
 
   --state-queued: #64748b;
   --state-queued-bg: rgba(100, 116, 139, 0.12);
-  --state-queued-border: rgba(100, 116, 139, 0.3);
+  --state-queued-border: rgba(100, 116, 139, 0.28);
 
-  /* 记忆图谱 5 类语义色 */
   --mem-user: #00a6ff;
-  --mem-user-bg: rgba(0, 166, 255, 0.15);
+  --mem-user-bg: rgba(0, 166, 255, 0.14);
   --mem-feedback: #10b981;
-  --mem-feedback-bg: rgba(16, 185, 129, 0.15);
+  --mem-feedback-bg: rgba(16, 185, 129, 0.14);
   --mem-project: #a855f7;
-  --mem-project-bg: rgba(168, 85, 247, 0.15);
+  --mem-project-bg: rgba(168, 85, 247, 0.14);
   --mem-reference: #f59e0b;
-  --mem-reference-bg: rgba(245, 158, 11, 0.15);
+  --mem-reference-bg: rgba(245, 158, 11, 0.14);
   --mem-incident: #f43f5e;
-  --mem-incident-bg: rgba(244, 63, 94, 0.15);
+  --mem-incident-bg: rgba(244, 63, 94, 0.14);
 
   --accent-cyan: #06b6d4;
   --accent-amber: #f59e0b;
   --accent-purple: #a855f7;
   --accent-blue: #3b82f6;
 
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.2), 0 4px 16px -8px rgba(0, 0, 0, 0.4);
-  --shadow-panel: inset 0 1px 0 0 rgba(255, 255, 255, 0.05), 0 16px 40px rgba(0, 0, 0, 0.5);
-  --shadow-glow: 0 0 20px rgba(103, 158, 254, 0.14); /* 辉光只留给运行态 */
-  --grid-line: rgba(255, 255, 255, 0.02);
-  --code-bg: rgb(27, 27, 28);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.28), 0 8px 24px -10px rgba(0, 0, 0, 0.45);
+  --shadow-panel: 0 18px 40px rgba(0, 0, 0, 0.45);
+  --shadow-glow: 0 0 16px rgba(103, 158, 254, 0.12);
+  --grid-line: rgba(255, 255, 255, 0.018);
+  --code-bg: #16161a;
 }
 
-/* --------------------------------------------------------------------------
-   4. 浅色主题 (Light Mode - 极简工程图纸 Architectural Spec)
-   -------------------------------------------------------------------------- */
 [data-theme="light"],
 html.theme-light {
-  --bg-app: #fbfaf9; /* Kimi 暖纸白 */
+  --bg-app: #ebeae6;
   --bg-layer-1: #ffffff;
-  --bg-layer-2: #f5f4f2;
-  --bg-layer-3: #ecebe8;
-  --bg-layer-active: #e4e3df;
-  --bg-glass: rgba(255, 255, 255, 0.88);
+  --bg-layer-2: #f6f5f2;
+  --bg-layer-3: #ecebe7;
+  --bg-layer-active: #e4e3de;
+  --bg-glass: #ffffff;
 
-  --border-dim: rgba(0, 0, 0, 0.06);
-  --border-subtle: rgba(0, 0, 0, 0.11);
-  --border-bold: rgba(0, 0, 0, 0.22);
-  --border-glow: rgba(2, 132, 199, 0.4);
+  --border-dim: rgba(0, 0, 0, 0.05);
+  --border-subtle: rgba(0, 0, 0, 0.08);
+  --border-bold: rgba(0, 0, 0, 0.16);
+  --border-glow: rgba(2, 132, 199, 0.32);
 
-  --text-primary: #090d16;
-  --text-secondary: #334155;
-  --text-tertiary: #64748b;
-  --text-dimmed: #94a3b8;
+  --text-primary: #111318;
+  --text-secondary: #3d4450;
+  --text-tertiary: #6b7280;
+  --text-dimmed: #9aa3b2;
 
-  /* 4态标准灯语 (Light) */
-  --state-running: rgb(65, 118, 230); /* deepseek-500 */
-  --state-running-bg: rgba(2, 132, 199, 0.09);
-  --state-running-border: rgba(2, 132, 199, 0.35);
-  --state-running-glow: rgba(2, 132, 199, 0.25);
+  --state-running: rgb(65, 118, 230);
+  --state-running-bg: rgba(2, 132, 199, 0.08);
+  --state-running-border: rgba(2, 132, 199, 0.3);
+  --state-running-glow: rgba(2, 132, 199, 0.18);
 
   --state-done: #059669;
-  --state-done-bg: rgba(5, 150, 105, 0.09);
-  --state-done-border: rgba(5, 150, 105, 0.35);
-  --state-done-glow: rgba(5, 150, 105, 0.2);
+  --state-done-bg: rgba(5, 150, 105, 0.08);
+  --state-done-border: rgba(5, 150, 105, 0.3);
+  --state-done-glow: rgba(5, 150, 105, 0.16);
 
   --state-failed: #e11d48;
-  --state-failed-bg: rgba(225, 29, 72, 0.09);
-  --state-failed-border: rgba(225, 29, 72, 0.35);
-  --state-failed-glow: rgba(225, 29, 72, 0.25);
+  --state-failed-bg: rgba(225, 29, 72, 0.08);
+  --state-failed-border: rgba(225, 29, 72, 0.3);
+  --state-failed-glow: rgba(225, 29, 72, 0.16);
 
   --state-queued: #94a3b8;
   --state-queued-bg: rgba(148, 163, 184, 0.1);
-  --state-queued-border: rgba(148, 163, 184, 0.28);
+  --state-queued-border: rgba(148, 163, 184, 0.24);
 
-  /* 记忆图谱 5 类语义色 (Light) */
   --mem-user: #0284c7;
   --mem-user-bg: rgba(2, 132, 199, 0.1);
   --mem-feedback: #059669;
@@ -151,16 +140,13 @@ html.theme-light {
   --accent-purple: #9333ea;
   --accent-blue: #2563eb;
 
-  --shadow-card: inset 0 1px 0 0 rgba(255, 255, 255, 0.9), 0 4px 16px -2px rgba(15, 23, 42, 0.06);
-  --shadow-panel: 0 12px 36px rgba(15, 23, 42, 0.08), 0 0 0 1px var(--border-subtle);
-  --shadow-glow: 0 0 24px rgba(2, 132, 199, 0.14);
-  --grid-line: rgba(0, 0, 0, 0.032);
-  --code-bg: #f8fafc;
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 20px -8px rgba(15, 23, 42, 0.08);
+  --shadow-panel: 0 16px 36px rgba(15, 23, 42, 0.1);
+  --shadow-glow: 0 0 16px rgba(2, 132, 199, 0.1);
+  --grid-line: rgba(0, 0, 0, 0.03);
+  --code-bg: #f6f5f2;
 }
 
-/* --------------------------------------------------------------------------
-   5. 全局基础重置与排印
-   -------------------------------------------------------------------------- */
 *, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
@@ -174,9 +160,9 @@ html, body {
   background-color: var(--bg-app);
   color: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.5;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.011em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -188,25 +174,33 @@ html, body {
 }
 
 .u-microlabel {
-  font-size: 9.5px;
-  line-height: 12px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-tertiary);
 }
 
 .u-grid-bg {
   background-color: var(--bg-app);
-  background-image:
-    radial-gradient(circle at 50% 0%, rgba(0, 166, 255, 0.05) 0%, transparent 60%),
-    repeating-linear-gradient(0deg,  var(--grid-line) 0 1px, transparent 1px 24px),
-    repeating-linear-gradient(90deg, var(--grid-line) 0 1px, transparent 1px 24px);
+}
+
+.u-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
@@ -217,4 +211,13 @@ html, body {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--border-bold);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

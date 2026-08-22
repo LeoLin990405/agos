@@ -79,7 +79,10 @@ export const SessionMemoryPane: React.FC<{
       timer = setTimeout(() => { void run(); }, delay);
     };
     const run = async (): Promise<void> => {
-      if (!active || (typeof document !== 'undefined' && document.hidden)) return;
+      // First load / focus retry must ignore document.hidden — otherwise a
+      // background tab (or CDP session that never fires visibilitychange)
+      // stays forever on「正在读取会话记忆…」with no request in flight.
+      if (!active) return;
       clearTimer();
       controller?.abort();
       controller = new AbortController();
@@ -102,7 +105,11 @@ export const SessionMemoryPane: React.FC<{
       }
     };
     const onFocus = (): void => { void run(); };
+    const onVisible = (): void => {
+      if (typeof document !== 'undefined' && !document.hidden) void run();
+    };
     if (typeof window !== 'undefined') window.addEventListener('focus', onFocus);
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisible);
     // Avoid issuing the disposable first request in React StrictMode.
     queueMicrotask(() => { if (active) void run(); });
 
@@ -111,6 +118,7 @@ export const SessionMemoryPane: React.FC<{
       clearTimer();
       controller?.abort();
       if (typeof window !== 'undefined') window.removeEventListener('focus', onFocus);
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible);
     };
   }, [fetchImpl, generation, sessionId, url]);
 

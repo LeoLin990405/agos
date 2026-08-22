@@ -21,17 +21,6 @@ import {
 
 export const LEDGER_READY_COPY = '读图台账已采集';
 
-const quietText: React.CSSProperties = {
-  color: 'var(--text-tertiary)',
-  fontSize: '12px',
-  lineHeight: 1.6,
-};
-
-const panelStyle: React.CSSProperties = {
-  borderTop: '1px solid var(--border-subtle)',
-  padding: '14px 0',
-};
-
 function formatWhen(iso: string | undefined): string {
   if (iso === undefined) return '时间未采集';
   const d = new Date(iso);
@@ -43,9 +32,9 @@ function DisagreementsBlock({ record }: { record: CouncilRecord }) {
   if (banner !== undefined) {
     return (
       <div>
-        <p style={{ margin: 0, color: 'var(--accent-amber)', fontSize: '12px' }}>{banner}</p>
+        <p className="surface-status--amber">{banner}</p>
         {record.verdict !== undefined && (
-          <div style={{ color: 'var(--text-secondary)', fontSize: '12px', lineHeight: 1.6, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', marginTop: '8px' }}>
+          <div className="surface-pre">
             {record.verdict}
           </div>
         )}
@@ -56,10 +45,10 @@ function DisagreementsBlock({ record }: { record: CouncilRecord }) {
   if (collected.status === 'absent') {
     return (
       <div>
-        <div className="u-microlabel" style={{ marginBottom: '4px' }}>分歧</div>
-        <p style={{ ...quietText, margin: 0 }}>未采集(本条记录早于该字段)</p>
+        <div className="u-microlabel">分歧</div>
+        <p className="surface-quiet">未采集(本条记录早于该字段)</p>
         {record.verdict !== undefined && (
-          <div style={{ color: 'var(--text-secondary)', fontSize: '12px', lineHeight: 1.6, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', marginTop: '8px' }}>
+          <div className="surface-pre">
             {record.verdict}
           </div>
         )}
@@ -70,17 +59,17 @@ function DisagreementsBlock({ record }: { record: CouncilRecord }) {
     <div>
       {record.verdict !== undefined && (
         <div>
-          <div className="u-microlabel" style={{ marginBottom: '4px' }}>仲裁结论</div>
-          <div style={{ color: 'var(--text-secondary)', fontSize: '12px', lineHeight: 1.6, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+          <div className="u-microlabel">仲裁结论</div>
+          <div className="surface-pre">
             {record.verdict}
           </div>
         </div>
       )}
       {collected.status === 'present' && (
-        <div style={{ marginTop: record.verdict !== undefined ? '8px' : 0 }}>
-          <div className="u-microlabel" style={{ color: 'var(--accent-amber)', marginBottom: '4px' }}>仍有分歧</div>
+        <div>
+          <div className="u-microlabel surface-status--amber">仍有分歧</div>
           {collected.items.map((item, index) => (
-            <div key={index} style={{ color: 'var(--text-secondary)', fontSize: '11.5px', lineHeight: 1.5 }}>
+            <div key={index} className="surface-body">
               {index + 1}. {item}
             </div>
           ))}
@@ -90,19 +79,31 @@ function DisagreementsBlock({ record }: { record: CouncilRecord }) {
   );
 }
 
-function LedgerRow({ record }: { record: CouncilRecord }) {
+function LedgerRow({ record, index }: { record: CouncilRecord; index: number }) {
   const [open, setOpen] = useState(false);
   const { ok, total } = panelOkCount(record);
   return (
-    <section style={panelStyle} aria-label={record.question ?? '台账记录'}>
-      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+    <section
+      className="surface-section viz-enter"
+      style={{ ['--i' as string]: index }}
+      aria-label={record.question ?? '台账记录'}
+    >
+      <div className="surface-cluster">
         <Dot state={ok === total && total > 0 ? 'done' : ok === 0 ? 'failed' : 'running'} size={6} />
-        <span className="u-num" style={{ ...quietText, color: 'var(--text-secondary)' }}>{formatWhen(record.time)}</span>
+        {total > 0 && (
+          <span className="viz-track skills-budget-track" aria-hidden="true">
+            <span
+              className={`viz-fill${ok === total ? ' is-done' : ok === 0 ? ' is-failed' : ''}`}
+              style={{ ['--u-p' as string]: ok / total }}
+            />
+          </span>
+        )}
+        <span className="u-num surface-body">{formatWhen(record.time)}</span>
         <Chip>{kindChip(record.kind)}</Chip>
-        <strong style={{ color: 'var(--text-primary)', fontSize: '12.5px', overflowWrap: 'anywhere' }}>
+        <strong className="surface-strong">
           {record.question ?? '(无题注)'}
         </strong>
-        <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <span className="surface-toolbar">
           <Badge state={ok === total && total > 0 ? 'done' : 'running'}>面板 {ok}/{total}</Badge>
           {record.arbiter !== undefined && <Chip>仲裁 {record.arbiter}</Chip>}
           {record.inconclusive === true && <Chip variant="amber">证据不足</Chip>}
@@ -114,35 +115,35 @@ function LedgerRow({ record }: { record: CouncilRecord }) {
         </span>
       </div>
       {record.inconclusive === true && (
-        <p style={{ ...quietText, color: 'var(--accent-amber)', margin: '8px 0 0' }}>{INCONCLUSIVE_COPY}</p>
+        <p className="surface-quiet surface-status--amber">{INCONCLUSIVE_COPY}</p>
       )}
       {open && (
-        <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <div className="surface-stack">
           <DisagreementsBlock record={record} />
           {record.imagePath !== undefined && (
             <img
               src={mediaRouteUrl(record.imagePath)}
               alt={record.question ?? '台账原图'}
-              style={{ maxWidth: '100%', maxHeight: '280px', objectFit: 'contain', border: '1px solid var(--border-dim)', borderRadius: '6px' }}
+              className="surface-image"
             />
           )}
           {record.panelists.map((p, i) => (
-            <div key={`${p.provider}:${i}`} style={{ border: '1px solid var(--border-dim)', borderRadius: '8px', padding: '8px 10px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: p.text !== undefined ? '6px' : 0 }}>
+            <div key={`${p.provider}:${i}`} className="surface-panel">
+              <div className="surface-panel-head">
                 <Dot state={p.ok ? 'done' : 'failed'} size={6} />
                 <Chip>{p.provider}</Chip>
-                {p.model !== undefined && <span className="u-num" style={quietText}>{p.model}</span>}
-                {p.ms !== undefined && <span className="u-num" style={quietText}>{p.ms} ms</span>}
-                {p.error !== undefined && <span style={{ color: 'var(--state-failed)', fontSize: '11px' }}>{p.error}</span>}
+                {p.model !== undefined && <span className="u-num surface-quiet">{p.model}</span>}
+                {p.ms !== undefined && <span className="u-num surface-quiet">{p.ms} ms</span>}
+                {p.error !== undefined && <span className="surface-alert">{p.error}</span>}
               </div>
               {p.text !== undefined && (
-                <div style={{ color: 'var(--text-secondary)', fontSize: '11.5px', lineHeight: 1.55, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+                <div className="surface-pre">
                   {p.text}
                 </div>
               )}
             </div>
           ))}
-          {record.panelists.length === 0 && <p style={{ ...quietText, margin: 0 }}>这条记录没有面板明细。</p>}
+          {record.panelists.length === 0 && <p className="surface-quiet">这条记录没有面板明细。</p>}
         </div>
       )}
     </section>
@@ -158,11 +159,11 @@ export const CouncilLedgerView: React.FC = () => {
   const isBusy = resource.status === 'idle' || resource.status === 'loading';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-      <header style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
+    <div className="surface-page">
+      <header className="surface-header">
         <div>
-          <h2 style={{ fontSize: '16px', fontWeight: 800, margin: 0 }}>读图台账</h2>
-          <p style={{ ...quietText, margin: '4px 0 0' }}>
+          <h2 className="surface-title">读图台账</h2>
+          <p className="surface-lede">
             只读数据源 <code>/api/cn/council-records</code> · 最近 30 条全类型记录,倒序
           </p>
         </div>
@@ -172,23 +173,23 @@ export const CouncilLedgerView: React.FC = () => {
       </header>
 
       {isBusy && payload === undefined && (
-        <p aria-live="polite" style={quietText}>正在读取读图台账…</p>
+        <p aria-live="polite" className="surface-quiet">正在读取读图台账…</p>
       )}
 
       {resource.status === 'error' && resource.error && payload === undefined && (
-        <div role="alert" style={{ ...panelStyle, color: 'var(--state-failed)', fontSize: '12px' }}>
-          <p style={{ margin: '0 0 10px' }}>台账未响应:{resource.error.message}</p>
+        <div role="alert" className="surface-section surface-alert">
+          <p>台账未响应:{resource.error.message}</p>
           <Button size="sm" onClick={() => resource.refresh()}>重试</Button>
         </div>
       )}
 
       {payload !== undefined && (
         <div>
-          <h3 style={{ fontSize: '13px', fontWeight: 700, margin: '0 0 8px' }}>{LEDGER_READY_COPY}</h3>
+          <h3 className="success-anchor">{LEDGER_READY_COPY}</h3>
           {payload.length === 0 ? (
-            <p style={{ ...quietText, margin: 0 }}>最近 30 条窗口是空的。贴图交叉读图或跑评审后会出现记录。</p>
+            <p className="surface-quiet">最近 30 条窗口是空的。贴图交叉读图或跑评审后会出现记录。</p>
           ) : (
-            payload.map((record, index) => <LedgerRow key={`${record.time ?? ''}:${index}`} record={record} />)
+            payload.map((record, index) => <LedgerRow key={`${record.time ?? ''}:${index}`} record={record} index={index} />)
           )}
         </div>
       )}

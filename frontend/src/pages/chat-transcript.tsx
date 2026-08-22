@@ -587,7 +587,8 @@ function renderItem(
             command={parseBashCommand(item.argsRaw)}
             output={(item.resultText ?? (item.status === 'running' ? '(运行中…)' : '')).slice(0, 8000)}
             duration={fmtDur(item.endAt !== undefined ? item.endAt - item.startAt : undefined)}
-            exitCode={item.status === 'failed' ? 1 : 0}
+            running={item.status === 'running'}
+            exitCode={item.status === 'running' ? undefined : item.status === 'failed' ? 1 : 0}
           />
         </div>
       );

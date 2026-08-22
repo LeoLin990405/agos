@@ -1,5 +1,5 @@
 /* ==========================================================================
-   AgOS Layout Styles V2
+   AgOS Layout — 56px 图标轨 + 实心顶栏 + 文字次轨
    ========================================================================== */
 
 .app-container {
@@ -12,65 +12,62 @@
 }
 
 .app-rail {
-  width: 58px;
+  width: 56px;
   flex: none;
-  background-color: var(--bg-layer-1);
-  border-right: 1px solid var(--border-dim);
+  background-color: var(--bg-app);
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 14px 0;
-  gap: 10px;
+  padding: 12px 0;
+  gap: 8px;
   z-index: 40;
-  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.02);
 }
 
 .app-rail-logo {
-  width: 38px;
-  height: 38px;
-  border-radius: 14px;
-  background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%);
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background-color: var(--bg-layer-1);
   display: grid;
   place-items: center;
-  color: #ffffff;
-  font-weight: 800;
-  font-size: 15px;
-  letter-spacing: -0.05em;
-  margin-bottom: 12px;
-  box-shadow: 0 4px 16px rgba(0, 166, 255, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  color: var(--text-primary);
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 8px;
   cursor: pointer;
   user-select: none;
   text-decoration: none;
-  transition: transform var(--u-dur-tick) ease;
+  border: 0;
+  box-shadow: none;
+  transition: transform var(--u-dur-tick) var(--u-ease-swift), opacity var(--u-dur-fast) ease;
 }
 
 .app-rail-logo:active {
-  transform: scale(0.92);
+  transform: scale(0.94);
 }
 
 .rail-btn {
   position: relative;
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   border-radius: 9px;
   display: grid;
   place-items: center;
   background: transparent;
-  border: 1px solid transparent;
+  border: 0;
   color: var(--text-tertiary);
   cursor: pointer;
   text-decoration: none;
-  transition: transform var(--u-dur-tick) var(--u-ease-swift), opacity var(--u-dur-fast) ease, background-color var(--u-dur-tick) ease;
+  transition: transform var(--u-dur-tick) var(--u-ease-swift), opacity var(--u-dur-fast) ease;
 }
 
 .rail-btn:hover:not(:disabled) {
-  background-color: var(--bg-layer-2);
+  background-color: var(--bg-layer-1);
   color: var(--text-primary);
-  border-color: var(--border-subtle);
 }
 
 .rail-btn:active:not(:disabled) {
-  transform: scale(0.92);
+  transform: scale(0.94);
 }
 
 .rail-btn:disabled {
@@ -79,53 +76,38 @@
 }
 
 .rail-btn.is-active {
-  background-color: var(--state-running-bg);
-  color: var(--state-running);
-  border-color: var(--state-running-border);
-  box-shadow: inset 0 1px 0 rgba(0, 166, 255, 0.2);
+  background-color: var(--bg-layer-1);
+  color: var(--text-primary);
 }
 
 .rail-btn.is-active::before {
-  content: "";
-  position: absolute;
-  left: -8px;
-  top: 10px;
-  bottom: 10px;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background-color: var(--state-running);
-  box-shadow: 0 0 10px var(--state-running);
+  content: none;
 }
 
 .rail-btn .rail-badge {
   position: absolute;
-  top: 4px;
-  right: 4px;
-  min-width: 15px;
-  height: 15px;
-  padding: 0 4px;
-  border-radius: 12px;
-  background-color: var(--bg-layer-1);
-  border: 1px solid var(--border-subtle);
-  font-size: 9.5px;
-  line-height: 13px;
+  top: 2px;
+  right: 2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background-color: var(--bg-layer-2);
+  font-size: 9px;
+  line-height: 14px;
   font-weight: 700;
   text-align: center;
   color: var(--text-secondary);
 }
 
 .rail-badge--alert {
-  background-color: var(--state-failed) !important;
-  color: #ffffff !important;
-  border-color: var(--state-failed) !important;
-  box-shadow: 0 0 8px rgba(244, 63, 94, 0.6);
+  background-color: var(--state-failed);
+  color: #ffffff;
 }
 
 .rail-badge--running {
-  background-color: var(--state-running) !important;
-  color: #ffffff !important;
-  border-color: var(--state-running) !important;
-  box-shadow: 0 0 8px rgba(0, 166, 255, 0.6);
+  background-color: var(--state-running);
+  color: #ffffff;
 }
 
 .rail-spacer {
@@ -140,13 +122,13 @@
   height: 100vh;
   overflow: hidden;
   position: relative;
+  background-color: var(--bg-app);
 }
 
 .app-topbar {
-  height: 52px;
+  height: 48px;
   flex: none;
-  background-color: var(--bg-glass);
-  backdrop-filter: blur(16px);
+  background-color: var(--bg-app);
   border-bottom: 1px solid var(--border-dim);
   display: flex;
   align-items: center;
@@ -154,25 +136,24 @@
   padding: 0 20px;
   gap: 14px;
   z-index: 30;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
 }
 
 .topbar-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.topbar-title-wrap {
   display: flex;
   align-items: center;
   gap: 10px;
   min-width: 0;
 }
 
+.topbar-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .topbar-title {
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
   letter-spacing: -0.02em;
@@ -185,27 +166,30 @@
 .topbar-right {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex: none;
 }
 
-.telemetry-pill {
+.conn-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 11px;
-  border-radius: 14px;
-  background-color: var(--bg-layer-2);
-  border: 1px solid var(--border-subtle);
-  font-size: 11px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background-color: var(--bg-layer-1);
+  font-size: 12px;
   color: var(--text-secondary);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
-.telemetry-pill .val {
-  color: var(--text-primary);
-  font-weight: 600;
+.conn-chip.is-ok { color: var(--state-done); }
+.conn-chip.is-pending { color: var(--state-running); }
+.conn-chip.is-off { color: var(--state-failed); }
+
+.topbar-parent-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
 }
 
 .btn {
@@ -214,115 +198,112 @@
   justify-content: center;
   gap: 6px;
   height: 32px;
-  padding: 0 13px;
-  border-radius: 7px;
-  font-size: 12px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  border: 1px solid var(--border-subtle);
-  background-color: var(--bg-layer-2);
+  border: 0;
+  background-color: var(--bg-layer-1);
   color: var(--text-primary);
   user-select: none;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 2px 6px rgba(0, 0, 0, 0.3);
-  transition: transform var(--u-dur-tick) var(--u-ease-swift), opacity var(--u-dur-fast) ease, background-color var(--u-dur-tick) ease;
+  transition: transform var(--u-dur-tick) var(--u-ease-swift), opacity var(--u-dur-fast) ease;
 }
 
 .btn:hover:not(:disabled) {
-  background-color: var(--bg-layer-3);
-  border-color: var(--border-bold);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 4px 12px rgba(0, 0, 0, 0.4);
+  background-color: var(--bg-layer-2);
 }
 
 .btn:active:not(:disabled) {
-  transform: scale(0.96);
+  transform: scale(0.97);
 }
 
 .btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-  box-shadow: none;
 }
 
 .btn-primary {
-  background: linear-gradient(180deg, #00a6ff 0%, #0088dd 100%);
-  color: #ffffff;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background-color: var(--text-primary);
+  color: var(--bg-app);
   font-weight: 600;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 4px 14px rgba(0, 166, 255, 0.4);
 }
 .btn-primary:hover:not(:disabled) {
-  filter: brightness(1.1);
+  background-color: var(--text-primary);
+  opacity: 0.92;
 }
 
 .btn-success {
-  background: linear-gradient(180deg, #10b981 0%, #059669 100%);
+  background-color: var(--state-done);
   color: #ffffff;
-  border: 1px solid rgba(255, 255, 255, 0.2);
   font-weight: 600;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 4px 14px rgba(16, 185, 129, 0.4);
 }
 
 .btn-danger {
-  background: linear-gradient(180deg, #f43f5e 0%, #e11d48 100%);
+  background-color: var(--state-failed);
   color: #ffffff;
-  border: 1px solid rgba(255, 255, 255, 0.2);
   font-weight: 600;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 4px 14px rgba(244, 63, 94, 0.4);
 }
 
 .btn-ghost {
   background-color: transparent;
-  border-color: transparent;
   color: var(--text-secondary);
-  box-shadow: none;
 }
 .btn-ghost:hover:not(:disabled) {
-  background-color: var(--bg-layer-2);
+  background-color: var(--bg-layer-1);
   color: var(--text-primary);
-  border-color: var(--border-dim);
 }
 
 .btn-sm {
-  height: 26px;
-  padding: 0 9px;
-  font-size: 11px;
-  border-radius: 5px;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  border-radius: 7px;
+}
+
+.btn-icon {
+  width: 32px;
+  padding: 0;
 }
 
 .u-chip {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  height: 20px;
+  height: 22px;
   padding: 0 7px;
-  border-radius: 4px;
-  font-size: 10.5px;
-  line-height: 18px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 20px;
   font-weight: 500;
-  background-color: var(--bg-layer-2);
-  border: 1px solid var(--border-subtle);
+  background-color: var(--bg-layer-1);
   color: var(--text-secondary);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
   white-space: nowrap;
 }
 
 .u-chip.is-on {
   color: var(--state-running);
-  border-color: var(--state-running-border);
   background-color: var(--state-running-bg);
-  box-shadow: 0 0 10px rgba(0, 166, 255, 0.15);
 }
 
 .u-chip--purple {
   color: var(--accent-purple);
-  border-color: rgba(168, 85, 247, 0.35);
-  background-color: rgba(168, 85, 247, 0.12);
+  background-color: var(--mem-project-bg);
 }
 
 .u-chip--amber {
   color: var(--accent-amber);
-  border-color: rgba(245, 158, 11, 0.35);
-  background-color: rgba(245, 158, 11, 0.12);
+  background-color: var(--mem-reference-bg);
+}
+
+.u-chip--cyan {
+  color: var(--accent-cyan);
+  background-color: var(--mem-user-bg);
+}
+
+.u-chip--red {
+  color: var(--state-failed);
+  background-color: var(--state-failed-bg);
 }
 
 .badge {
@@ -330,39 +311,30 @@
   align-items: center;
   gap: 4px;
   height: 22px;
-  padding: 0 9px;
-  border-radius: 11px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .badge--running {
   background-color: var(--state-running-bg);
   color: var(--state-running);
-  border: 1px solid var(--state-running-border);
-  box-shadow: 0 0 12px rgba(0, 166, 255, 0.2);
 }
 
 .badge--done {
   background-color: var(--state-done-bg);
   color: var(--state-done);
-  border: 1px solid var(--state-done-border);
-  box-shadow: 0 0 12px rgba(16, 185, 129, 0.2);
 }
 
 .badge--failed {
   background-color: var(--state-failed-bg);
   color: var(--state-failed);
-  border: 1px solid var(--state-failed-border);
-  box-shadow: 0 0 12px rgba(244, 63, 94, 0.2);
 }
 
 .badge--queued {
   background-color: var(--state-queued-bg);
   color: var(--state-queued);
-  border: 1px solid var(--state-queued-border);
 }
 
 .kbd {
@@ -370,35 +342,31 @@
   align-items: center;
   justify-content: center;
   padding: 1px 6px;
-  font-size: 10px;
+  font-size: 11px;
   font-family: var(--font-mono);
-  background-color: var(--bg-layer-3);
-  border: 1px solid var(--border-subtle);
+  background-color: var(--bg-layer-2);
   border-radius: 4px;
   color: var(--text-tertiary);
-  box-shadow: 0 1px 0 var(--border-bold);
 }
 
 .segmented-control {
   display: inline-flex;
   background-color: var(--bg-layer-1);
-  border: 1px solid var(--border-subtle);
-  border-radius: 12px;
+  border-radius: 8px;
   padding: 2px;
-  gap: 3px;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3);
+  gap: 2px;
 }
 
 .seg-item {
-  padding: 5px 14px;
+  padding: 4px 12px;
   border-radius: 6px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--text-secondary);
   background: transparent;
   border: none;
   cursor: pointer;
-  transition: transform var(--u-dur-tick) ease, background-color var(--u-dur-fast) ease, color var(--u-dur-fast) ease;
+  transition: transform var(--u-dur-tick) ease, opacity var(--u-dur-fast) ease;
 }
 
 .seg-item:hover {
@@ -406,22 +374,23 @@
 }
 
 .seg-item.is-active {
-  background-color: var(--bg-layer-2);
+  background-color: var(--bg-layer-3);
   color: var(--text-primary);
   font-weight: 600;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
-/* Console Nav Rail */
 .console-nav-rail {
-  width: 220px;
+  width: 200px;
   flex: none;
-  background-color: var(--bg-layer-1);
-  border-right: 1px solid var(--border-dim);
-  padding: 16px 12px;
+  background-color: var(--bg-app);
+  padding: 16px 10px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
+}
+
+.console-nav-label {
+  padding: 4px 10px 12px;
 }
 
 .console-nav-item {
@@ -429,48 +398,49 @@
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding: 9px 12px;
-  border-radius: 10px;
-  /* 原生 button 默认样式全清(项是 <button>,不清=浅灰药丸看不清) */
+  padding: 8px 10px;
+  border-radius: 8px;
   appearance: none;
   -webkit-appearance: none;
   background: transparent;
   font-family: inherit;
   text-align: left;
-  color: var(--text-primary);
-  font-size: 13.5px;
+  color: var(--text-secondary);
+  font-size: 13px;
   font-weight: 500;
   text-decoration: none;
   cursor: pointer;
-  border: 1px solid transparent;
-  transition: background-color var(--u-dur-tick) ease, color var(--u-dur-tick) ease;
+  border: 0;
+  transition: transform var(--u-dur-tick) ease, opacity var(--u-dur-fast) ease;
 }
 
 .console-nav-item:hover {
-  background-color: var(--bg-layer-2);
+  background-color: var(--bg-layer-1);
   color: var(--text-primary);
 }
 
 .console-nav-item.is-active {
-  background-color: var(--bg-layer-3);
+  background-color: var(--bg-layer-1);
   color: var(--text-primary);
   font-weight: 600;
-  border-color: var(--border-subtle);
 }
-.console-nav-item.is-active > span:first-child { color: var(--state-running); }
+
+.console-nav-count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
 
 .console-body {
   flex: 1;
   overflow-y: auto;
-  padding: 24px 32px;
+  padding: 24px 28px 40px;
+  background-color: var(--bg-app);
 }
 
-/* Modals & Overlays */
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(12px);
+  background: rgba(0, 0, 0, 0.62);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -480,11 +450,10 @@
 
 .modal-card {
   background-color: var(--bg-layer-1);
-  border: 1px solid var(--border-bold);
   border-radius: 12px;
   width: 100%;
   max-width: 580px;
-  box-shadow: var(--shadow-panel), 0 0 40px rgba(0, 166, 255, 0.15);
+  box-shadow: var(--shadow-panel);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -493,11 +462,10 @@
 
 .modal-header {
   padding: 16px 20px;
-  border-bottom: 1px solid var(--border-dim);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background-color: var(--bg-layer-2);
+  background-color: var(--bg-layer-1);
 }
 
 .modal-body {
@@ -509,15 +477,13 @@
 
 .modal-footer {
   padding: 14px 20px;
-  border-top: 1px solid var(--border-dim);
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
-  background-color: var(--bg-layer-2);
+  background-color: var(--bg-layer-1);
 }
 
-/* Form Controls */
 .form-group {
   display: flex;
   flex-direction: column;
@@ -525,40 +491,39 @@
 }
 
 .form-label {
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
 }
 
 .form-input {
-  background-color: var(--bg-layer-2);
+  background-color: var(--bg-layer-1);
   border: 1px solid var(--border-subtle);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 8px 12px;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--text-primary);
   outline: none;
   font-family: var(--font-sans);
 }
 
 .form-input:focus {
-  border-color: var(--state-running);
-  box-shadow: 0 0 0 2px var(--state-running-bg);
+  background-color: var(--bg-layer-2);
 }
 
-/* ==========================================================================
-   顶栏响应式收敛 (P2)
-   顶栏右侧动作在 1374px 宽已贴边(实测 right=1355 / 1374)。收敛分两档,全部
-   由容器查询驱动,不做任何 JS 宽度测量:
-     顶栏容器 < 1200px → 次要动作(TopbarAction)收成方形图标键,文字隐藏,
-                         aria-label / title 保留完整中文名;间距同时收紧。
-     顶栏容器 <  980px → 标题区放开 max-width、允许省略号截断;左右间距收紧。
-   容器锚点放在 .app-topbar 自身:它是 .app-stage 列向 flex 的 flex:none 子项,
-   宽度由父级决定而非内容决定,inline-size containment 不会引起回环。
-   注意:容器只对「后代」生效,元素查询不到自己。所以下面两档里一律只写
-      .topbar-left / .topbar-right / .topbar-title 这类后代选择器,
-      绝不往 .app-topbar 自身上挂声明(写了也永远不命中,实测确认)。
-   ========================================================================== */
+.form-input--search {
+  width: 220px;
+  height: 32px;
+}
+
+.form-input--filter {
+  width: 250px;
+  height: 32px;
+}
+
+.form-input--sm {
+  height: 28px;
+}
 
 .app-topbar {
   container-type: inline-size;
@@ -579,11 +544,11 @@
 }
 
 @container topbar (max-width: 1199.98px) {
-  .topbar-left { gap: 10px; }
+  .topbar-left { gap: 8px; }
   .topbar-right { gap: 6px; }
 
   .topbar-action.is-collapsible {
-    width: 26px;
+    width: 28px;
     padding: 0;
     gap: 0;
   }
@@ -604,6 +569,4 @@
   }
 
   .topbar-title-wrap > :not(.topbar-title) { flex: none; }
-
-  .topbar-right .telemetry-pill { padding: 0 8px; }
 }

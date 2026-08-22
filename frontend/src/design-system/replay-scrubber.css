@@ -23,7 +23,7 @@
   background: var(--bg-layer-1);
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
-  animation: rs-fade-in 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
+  animation: rs-fade-in var(--u-dur-base) var(--u-ease-swift) both;
 }
 
 /* ── 逐步按钮:复用 .btn/.btn-ghost,只把尺寸收成 24px 方钮 ──────────── */
@@ -86,12 +86,12 @@
 
 .rs-fill {
   position: absolute;
-  top: 0;
-  left: 0;
-  height: 100%;
+  inset: 0;
   border-radius: 2px;
   background: var(--state-running);
-  transition: width 0.3s ease-in-out;
+  transform-origin: left center;
+  transform: scaleX(var(--u-p, 0));
+  transition: transform var(--u-dur-slow) var(--u-ease-swift);
 }
 
 /* 刻度:条目数适中时才画,密到看不清就不画(背景图由组件按真实条目数生成) */
@@ -103,10 +103,21 @@
 }
 
 /* 当前位置的把手。放在 track 之外,避免被 4px 轨道的 overflow 裁掉。 */
+.rs-knob-shift {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 100%;
+  z-index: 1;
+  pointer-events: none;
+  transition: transform var(--u-dur-slow) var(--u-ease-swift);
+}
+
 .rs-knob {
   position: absolute;
   top: 50%;
-  z-index: 1;
+  left: 0;
   width: 10px;
   height: 10px;
   border-radius: 50%;
@@ -114,9 +125,6 @@
   border: 2px solid var(--bg-app);
   transform: translate(-50%, -50%);
   pointer-events: none;
-  transition:
-    left 0.3s ease-in-out,
-    transform 0.3s ease-in-out;
 }
 
 .rs-bar:hover .rs-knob {
@@ -182,7 +190,7 @@
    ========================================================================== */
 
 .dl-block {
-  animation: rs-fade-in 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
+  animation: rs-fade-in var(--u-dur-base) var(--u-ease-swift) both;
 }
 
 .dl-done {
@@ -285,6 +293,7 @@ button.dl-file:focus-visible {
   }
 
   .rs-fill,
+  .rs-knob-shift,
   .rs-knob,
   button.dl-file {
     transition: none;

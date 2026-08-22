@@ -14,7 +14,7 @@
   background-color: var(--bg-layer-1);
   border-left: 1px solid var(--border-dim);
   overflow: hidden;
-  animation: agc-enter 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
+  animation: agc-enter var(--u-dur-base) var(--u-ease-swift) both;
 }
 
 @media (max-width: 1400px) {
@@ -22,8 +22,8 @@
 }
 
 @keyframes agc-enter {
-  from { opacity: 0; }
-  to   { opacity: 1; }
+  from { transform: translateY(6px); opacity: 0; }
+  to   { transform: none; opacity: 1; }
 }
 
 /* ── header ─────────────────────────────────────────────────────────── */
@@ -61,7 +61,11 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: color 0.3s ease-in-out;
+  transition: color var(--u-dur-base) var(--u-ease-swift);
+}
+
+.agc-status.is-running {
+  color: var(--state-running);
 }
 
 .agc-close {
@@ -306,8 +310,11 @@
 .agc-meter-fill {
   display: block;
   height: 100%;
+  width: 100%;
+  transform-origin: left center;
+  transform: scaleX(var(--u-p, 0));
   background-color: var(--state-done);
-  transition: width 0.3s ease-in-out, background-color 0.3s ease-in-out;
+  transition: transform var(--u-dur-slow) var(--u-ease-swift);
 }
 
 .agc-table tr.is-running .agc-meter-fill {
@@ -438,27 +445,9 @@
   color: var(--state-failed);
 }
 
-/* ── 运行态文字扫光(Kimi/Manus 配方;infinite 只给运行态)───────────── */
 .agc-status.is-running,
 .agc-term-state.is-running {
-  background-image: linear-gradient(
-    120deg,
-    var(--text-tertiary) 40%,
-    var(--text-primary) 50%,
-    var(--text-tertiary) 60%
-  );
-  background-size: 200% 100%;
-  background-repeat: no-repeat;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  -webkit-text-fill-color: transparent;
-  animation: agc-sweep 2.5s linear infinite;
-}
-
-@keyframes agc-sweep {
-  from { background-position: 100% 0; }
-  to   { background-position: -100% 0; }
+  color: var(--state-running);
 }
 
 /* ── 降级模式 ───────────────────────────────────────────────────────── */
@@ -475,9 +464,6 @@
   }
   .agc-status.is-running,
   .agc-term-state.is-running {
-    animation: none;
-    background-image: none;
     color: var(--state-running);
-    -webkit-text-fill-color: currentColor;
   }
 }

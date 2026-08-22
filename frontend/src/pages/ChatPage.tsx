@@ -17,7 +17,6 @@ import { NewSessionModal } from '@/components/chat/NewSessionModal';
 import { ProgressDock } from '@/components/chat/ProgressDock';
 import { SessionContextMenu, type MenuPoint } from '@/components/chat/SessionContextMenu';
 import {
-  basenameOfPath,
   fetchSessionMeta,
   formatSessionRelativeTime,
   mergeArchivedSnapshot,
@@ -610,6 +609,7 @@ export const ChatPage: React.FC<{
       key={session.id}
       data-session-id={session.id}
       className={`session-row${activeSessionId === session.id ? ' is-active' : ''}${options.archived ? ' is-archived' : ''}`}
+      title={session.cwd}
       onContextMenu={(event) => {
         event.preventDefault();
         const openButton = event.currentTarget.querySelector<HTMLButtonElement>('.session-row-open');
@@ -655,11 +655,7 @@ export const ChatPage: React.FC<{
           ) : (
             <span className="session-row-title" title={session.title}>{session.title}</span>
           )}
-        </div>
-        <div className="session-row-cwd" title={session.cwd}>{basenameOfPath(session.cwd)}</div>
-        <div className="session-row-meta">
-          <span className="u-num">{session.meta}</span>
-          <span className="u-num">{session.time}</span>
+          <span className="session-row-time u-num">{session.time}</span>
         </div>
       </div>
       {liveMode && (
@@ -685,7 +681,7 @@ export const ChatPage: React.FC<{
   );
 
   return (
-    <div style={{ display: 'flex', flex: 1, height: '100vh', overflow: 'hidden' }}>
+    <div className="chat-workspace">
       <aside className="session-sidebar" aria-label="会话侧栏">
         <div className="session-sidebar-header">
           <div className="session-sidebar-heading">
@@ -695,18 +691,18 @@ export const ChatPage: React.FC<{
             <Button
               variant="primary"
               size="sm"
-              style={{ padding: '0 10px', gap: '4px' }}
+              className="session-new-btn"
               aria-label="新建会话"
               disabled={chatConnectionState === 'connecting' || chatConnectionState === 'disconnected'}
               title={chatConnectionState === 'disconnected' ? 'events.mux 未连接，当前无法新建会话' : undefined}
               onClick={() => setIsNewSessionOpen(true)}
             >
-              <span style={{ fontSize: '14px', lineHeight: 1 }}>+</span>
+              <span>+</span>
               <span>新建会话</span>
             </Button>
           </div>
           <div className="session-search">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--text-tertiary)' }} aria-hidden="true">
+            <svg className="session-search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
               <circle cx="11" cy="11" r="8" />
               <path d="m21 21-4.3-4.3" />
             </svg>
@@ -778,7 +774,7 @@ export const ChatPage: React.FC<{
               <div
                 id="session-archived-list"
                 className="session-archive-body"
-                style={{ height: archivedExpanded ? `${sectionedSessions.archived.length * 68}px` : '0px' }}
+                style={{ height: archivedExpanded ? `${sectionedSessions.archived.length * 48}px` : '0px' }}
                 aria-hidden={!archivedExpanded}
               >
                 {archivedExpanded && sectionedSessions.archived.map((session) => renderSessionRow(session, { archived: true }))}
@@ -833,6 +829,7 @@ export const ChatPage: React.FC<{
               : chatConnectionState === 'disconnected'
                 ? `${disconnectedService} 未连接`
                 : 'AgOS 对话甲板'}
+          runningState={renderedSessions.find((x) => x.id === activeSessionId)?.running === true}
           badge={liveMode
             ? (() => {
               const p = liveSessions.rows.find((x) => x.sessionId === activeSessionId)?.agentPreset ?? '';
@@ -847,8 +844,8 @@ export const ChatPage: React.FC<{
                     parent !== undefined ? (
                       <button
                         type="button"
+                        className="topbar-parent-link"
                         onClick={() => handleSelectSession(parent)}
-                        style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer' }}
                         aria-label={`跳回父会话 ${parent}`}
                       >
                         <Chip variant="amber">
@@ -865,14 +862,9 @@ export const ChatPage: React.FC<{
             : undefined}
           rightActions={
             <>
-
-              <div className="telemetry-pill">
-                <span className="u-microlabel">RPC 管道</span>
-                <span className="val" style={{ color: isStreamOnline ? 'var(--state-done)' : chatConnectionState === 'connecting' ? 'var(--state-running)' : 'var(--state-failed)', fontSize: '10.5px' }}>
-                  ● {isStreamOnline ? 'ONLINE WS' : chatConnectionState === 'connecting' ? 'CONNECTING' : 'OFFLINE'}
-                </span>
-              </div>
-
+              <span className={`conn-chip ${isStreamOnline ? 'is-ok' : chatConnectionState === 'connecting' ? 'is-pending' : 'is-off'}`}>
+                {isStreamOnline ? '已连接' : chatConnectionState === 'connecting' ? '连接中' : '未连接'}
+              </span>
               <TopbarAction
                 label="AgOS 的电脑"
                 icon={TOPBAR_ICONS.console}

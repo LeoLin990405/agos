@@ -10,7 +10,7 @@
   border-radius: 12px;
   background-color: var(--bg-layer-1);
   box-shadow: var(--shadow-panel);
-  animation: remote-run-enter 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
+  animation: remote-run-enter var(--u-dur-base) var(--u-ease-swift) both;
 }
 
 .remote-run-view__left {

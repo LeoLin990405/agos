@@ -40,10 +40,10 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
   const overviewFresh = consoleLive.overviewStatus === 'ready';
 
   return (
-    <div style={{ display: 'flex', flex: 1, height: '100vh', overflow: 'hidden' }}>
+    <div className="console-workspace">
       {/* 内部功能导航 */}
       <nav className="console-nav-rail">
-        <div style={{ padding: '4px 8px 10px 8px' }} className="u-microlabel">控制台功能面</div>
+        <div className="console-nav-label u-microlabel">控制台功能面</div>
 
         <button
           type="button"
@@ -72,7 +72,7 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
         >
           <span>会话矩阵</span>
           {overviewFresh && consoleLive.sessionsTotal !== undefined && (
-            <span className="u-num" style={{ fontSize: '11px' }}>{consoleLive.sessionsTotal}</span>
+            <span className="u-num console-nav-count">{consoleLive.sessionsTotal}</span>
           )}
         </button>
 
@@ -102,7 +102,7 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
         >
           <span>计划与目标</span>
           {overviewFresh && consoleLive.plansTotal !== undefined && (
-            <span className="u-num" style={{ fontSize: '11px' }}>{consoleLive.plansTotal}</span>
+            <span className="u-num console-nav-count">{consoleLive.plansTotal}</span>
           )}
         </button>
 
@@ -114,7 +114,7 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
         >
           <span>技能注册表</span>
           {overviewFresh && consoleLive.skills !== undefined && (
-            <span className="u-num" style={{ fontSize: '11px' }}>{consoleLive.skills}</span>
+            <span className="u-num console-nav-count">{consoleLive.skills}</span>
           )}
         </button>
 

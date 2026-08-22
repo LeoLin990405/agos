@@ -110,11 +110,13 @@ export const ReplayScrubber: React.FC<ReplayScrubberProps> = ({
           aria-label="回放进度"
           aria-valuetext={`第 ${current} 条,共 ${safeTotal} 条`}
         />
-        <div className="rs-track">
-          <div className="rs-fill" style={{ width: `${percent}%` }} />
+        <div className="rs-track" style={{ ['--u-p' as string]: percent / 100 }}>
+          <div className="rs-fill" />
           {tickStyle !== undefined && <div className="rs-ticks" style={tickStyle} />}
         </div>
-        <span className="rs-knob" style={{ left: `${percent}%` }} />
+        <div className="rs-knob-shift" style={{ transform: `translateX(${percent}%)` }}>
+          <span className="rs-knob" />
+        </div>
       </div>
 
       <span className="rs-count u-num">

@@ -15,7 +15,7 @@ export function useSymRespiration() {
       document.documentElement.style.setProperty('--u-phase', phaseStr);
 
       const runningNodes = document.querySelectorAll(
-        '.u-dot--running, .u-dot.is-running, .u-swarm-card.is-running, .rail-badge--running'
+        '.u-dot--running, .u-dot.is-running, .u-swarm-card.is-running, .rail-badge--running, .host-power-badge.is-waking'
       );
       runningNodes.forEach((el) => {
         (el as HTMLElement).style.setProperty('--u-phase', phaseStr);

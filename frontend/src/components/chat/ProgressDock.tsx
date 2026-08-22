@@ -1,15 +1,14 @@
 /**
  * ProgressDock —— 计划进度坞(P0-2,Manus Task progress 叠卡)。
  *
- * 全局汇总所有运行中的 swarm 批次;数据源是 telemetry 的 /api/swarm/progress
- * (经 live.ts 的 swarmProgressStore 派生,零编造)。流内单批次详情由
- * SwarmBatchCard 负责,坞不重复它的职责。无运行中批次时不渲染。
- * 挂载位置:ChatPage 的 CommandDeck 正上方、同宽容器内。
+ * 全局汇总仍未结清、或已结清但仍有失败行的 swarm 批次。
+ * 订阅坞自己读 /api/swarm/progress(2s),不改 stores 里 10s telemetry。
+ * 流内单批次详情由 SwarmBatchCard 负责。无批次时不渲染。
  */
-import React, { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Dot } from '@/components/ui/Dot';
-import { swarmProgressStore } from '@/stores/live';
 import {
+  deriveProgressDockFromCalls,
   hasControlledProgressSummary,
   type ProgressDockSummary,
 } from '@/components/chat/progress-dock-model';
@@ -21,8 +20,68 @@ export interface ProgressDockProps {
   onSelectBatch?: (batchId: string) => void;
 }
 
+const SWARM_DOCK_POLL_MS = 2_000;
+
+const flattenProgressCalls = (body: Record<string, unknown>): { callId: string; description?: string; rows?: readonly Record<string, unknown>[] }[] => {
+  const source = (body['calls'] ?? body) as Record<string, unknown>;
+  if (typeof source !== 'object' || source === null) return [];
+  return Object.entries(source)
+    .filter(([, value]) => typeof value === 'object' && value !== null)
+    .map(([callId, value]) => ({ callId, ...(value as Record<string, unknown>) }));
+};
+
+const useSwarmProgressDock = (): ProgressDockSummary | undefined => {
+  const [summary, setSummary] = useState<ProgressDockSummary | undefined>(undefined);
+
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let controller: AbortController | undefined;
+
+    const schedule = (): void => {
+      if (!active || (typeof document !== 'undefined' && document.hidden)) return;
+      timer = setTimeout(() => { void run(); }, SWARM_DOCK_POLL_MS);
+    };
+
+    const run = async (): Promise<void> => {
+      if (!active) return;
+      controller?.abort();
+      controller = new AbortController();
+      const signal = controller.signal;
+      try {
+        const response = await fetch('/api/swarm/progress', { signal });
+        if (!response.ok || !active || signal.aborted) {
+          if (active && !signal.aborted) schedule();
+          return;
+        }
+        const body = await response.json() as Record<string, unknown>;
+        if (!active || signal.aborted) return;
+        setSummary(deriveProgressDockFromCalls(flattenProgressCalls(body)));
+      } catch (error) {
+        if (!active || (error instanceof DOMException && error.name === 'AbortError')) return;
+      }
+      schedule();
+    };
+
+    const onVisible = (): void => {
+      if (typeof document !== 'undefined' && !document.hidden) void run();
+    };
+
+    void run();
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      active = false;
+      controller?.abort();
+      if (timer !== undefined) clearTimeout(timer);
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
+
+  return summary;
+};
+
 const SubscribedProgressDock: React.FC<Omit<ProgressDockProps, 'summary'>> = (props) => {
-  const summary = useSyncExternalStore(swarmProgressStore.subscribe, swarmProgressStore.getSnapshot);
+  const summary = useSwarmProgressDock();
   return <ProgressDockView {...props} summary={summary} />;
 };
 
@@ -46,10 +105,14 @@ const ProgressDockView: React.FC<{
 
   const { batches, done, total } = summary;
   const first = batches[0];
+  const anyOpen = batches.some((batch) => batch.done + batch.failed < batch.total);
+  const anyFailed = batches.some((batch) => batch.failed > 0);
   const directSelect = onSelectBatch !== undefined && first !== undefined && batches.length === 1;
   const label = batches.length === 1 && first !== undefined
     ? first.label
-    : `${batches.length} 个批次运行中`;
+    : anyOpen
+      ? `${batches.length} 个批次运行中`
+      : `${batches.length} 个批次`;
 
   return (
     <div className="progress-dock" role="status" aria-label="计划进度坞">
@@ -66,8 +129,18 @@ const ProgressDockView: React.FC<{
           setExpanded((v) => !v);
         }}
       >
-        <Dot state="running" />
-        <span className="progress-dock__label progress-dock__sweep" title={label}>{label}</span>
+        <Dot state={anyOpen ? 'running' : anyFailed ? 'failed' : 'done'} />
+        <span className="progress-dock__label" title={label}>{label}</span>
+        <span
+          className="progress-dock__summary-bar viz-track"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={total}
+          aria-valuenow={done}
+          aria-label={`${done}/${total} 完成`}
+        >
+          <span className="viz-fill" style={{ ['--u-p' as string]: total > 0 ? Math.min(1, done / total) : 0 }} />
+        </span>
         <span className="progress-dock__count u-num">{done}/{total}</span>
         <svg
           className={`progress-dock__chevron ${directSelect ? 'is-link' : expanded ? 'is-open' : ''}`}
@@ -101,7 +174,7 @@ const ProgressDockView: React.FC<{
               >
                 <div
                   className="progress-dock__fill"
-                  style={{ width: `${b.total > 0 ? Math.min(100, (b.done / b.total) * 100) : 0}%` }}
+                  style={{ ['--u-p' as string]: b.total > 0 ? Math.min(1, b.done / b.total) : 0 }}
                 />
               </div>
               {b.failed > 0 && (

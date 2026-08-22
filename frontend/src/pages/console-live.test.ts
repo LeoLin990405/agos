@@ -146,7 +146,7 @@ test('a failed overview refresh keeps old data but cannot retain a running lamp'
 });
 
 test('overview lamp and collected time distinguish ready, pending, and unavailable', () => {
-  assert.equal(overviewLamp('ready'), 'running');
+  assert.equal(overviewLamp('ready'), 'done');
   assert.equal(overviewLamp('loading'), 'queued');
   assert.equal(overviewLamp('idle'), 'queued');
   assert.equal(overviewLamp('degraded'), 'failed');

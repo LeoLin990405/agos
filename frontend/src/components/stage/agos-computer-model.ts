@@ -47,7 +47,12 @@ export type AgosToolClass = 'terminal' | 'file' | 'swarm' | 'other';
 
 export function classifyTool(name: string): AgosToolClass {
   const normalized = name.toLowerCase();
-  if (normalized.includes('swarm') || normalized.includes('subagent') || normalized.includes('fanout')) return 'swarm';
+  if (
+    normalized.includes('swarm')
+    || normalized.includes('subagent')
+    || normalized.includes('fanout')
+    || normalized.includes('delegate')
+  ) return 'swarm';
   if (normalized.includes('bash') || normalized.includes('terminal') || normalized.includes('shell') || normalized.includes('exec')) return 'terminal';
   if (normalized.includes('write') || normalized.includes('edit') || normalized.includes('read') || normalized.includes('create') || normalized.includes('notebook')) return 'file';
   return 'other';
@@ -163,9 +168,47 @@ export interface AgosSubagentBatch {
   running: boolean;
 }
 
+/** One `/api/swarm/progress` call, already flattened to `{ callId, ...body }`. */
+export interface SubagentProgressCall {
+  callId: string;
+  parentSessionId?: string;
+  description?: string;
+  rows?: readonly Record<string, unknown>[];
+}
+
+export interface SubagentOwnedProgress {
+  sessionId?: string;
+  progressCalls?: readonly SubagentProgressCall[];
+}
+
+function tallyProgressRows(rows: readonly Record<string, unknown>[]): {
+  done: number;
+  failed: number;
+  total: number;
+  running: boolean;
+} {
+  let done = 0;
+  let failed = 0;
+  for (const row of rows) {
+    const status = String(row['status'] ?? '');
+    if (status === 'completed') done += 1;
+    else if (status === 'failed') failed += 1;
+  }
+  return { done, failed, total: rows.length, running: done + failed < rows.length };
+}
+
+function progressCallOwnedBySession(call: SubagentProgressCall, sessionId: string): boolean {
+  if (sessionId === '') return false;
+  if (call.parentSessionId === sessionId) return true;
+  if (call.callId === sessionId) return true;
+  if (call.callId === `host:${sessionId}`) return true;
+  return false;
+}
+
 export function selectSubagentBatches(
   snapshot: FoldedConversation | undefined,
   live: SwarmProgressSummary | undefined,
+  owned?: SubagentOwnedProgress,
 ): AgosSubagentBatch[] {
   const order: string[] = [];
   const map = new Map<string, AgosSubagentBatch>();
@@ -204,6 +247,42 @@ export function selectSubagentBatches(
       total: batch.total,
       running: true,
     });
+  }
+
+  const sessionId = owned?.sessionId?.trim() ?? '';
+  if (sessionId !== '' && owned?.progressCalls !== undefined) {
+    for (const call of owned.progressCalls) {
+      if (!progressCallOwnedBySession(call, sessionId)) continue;
+      const rows = Array.isArray(call.rows) ? call.rows : [];
+      if (rows.length === 0) continue;
+      const tally = tallyProgressRows(rows);
+      const prev = map.get(call.callId);
+      if (prev === undefined) order.push(call.callId);
+      const fromDescription = typeof call.description === 'string' ? call.description.trim() : '';
+      map.set(call.callId, {
+        callId: call.callId,
+        label: prev?.label ?? (fromDescription !== '' ? fromDescription : call.callId),
+        done: tally.done,
+        failed: tally.failed,
+        total: tally.total,
+        running: tally.running,
+      });
+    }
+  }
+
+  if (map.size === 0) {
+    for (const tool of toolItems(snapshot)) {
+      if (classifyTool(tool.name) !== 'swarm') continue;
+      if (!map.has(tool.callId)) order.push(tool.callId);
+      map.set(tool.callId, {
+        callId: tool.callId,
+        label: tool.name.trim() === '' ? tool.callId : tool.name,
+        done: tool.status === 'done' ? 1 : 0,
+        failed: tool.status === 'failed' ? 1 : 0,
+        total: 1,
+        running: tool.status === 'running',
+      });
+    }
   }
 
   return order

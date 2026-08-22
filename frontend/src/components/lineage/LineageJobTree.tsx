@@ -52,25 +52,30 @@ export const LineageJobTree: React.FC<LineageBatchTreeProps> = ({
   return (
     <div className="batch-tree-group">
       <div className="batch-group-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div className="batch-group-title">
           <Dot state={isRunningBranch ? 'running' : 'done'} />
-          <span style={{ fontWeight: 700, fontSize: '13px' }}>
+          <span className="batch-group-name">
             批次 #{batchId}: {title}
           </span>
           <Chip variant="amber">{categoryTag}</Chip>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '11.5px' }}>
-          <span
-            className="u-num"
-            style={isRunningBranch ? { color: 'var(--state-running)', fontWeight: 700 } : { color: 'var(--state-done)', fontWeight: 700 }}
-          >
+        <div className="batch-group-meta">
+          <span className={`u-num batch-group-summary${isRunningBranch ? ' is-live' : ' is-done'}`}>
             {completedSummary}
           </span>
-          <span className="u-num" style={{ color: 'var(--text-tertiary)' }}>
+          <span className="u-num surface-quiet">
             耗时 {duration}
           </span>
         </div>
       </div>
+
+      {jobs.length > 0 && (
+        <div className="viz-segs" role="img" aria-label={completedSummary}>
+          {jobs.map((job) => (
+            <span key={job.id} className={`viz-seg is-${job.state}`} title={`${job.name} ${job.badgeText}`} />
+          ))}
+        </div>
+      )}
 
       <div className={`tree-node-circuit ${isRunningBranch ? 'is-running-branch' : ''}`}>
         {jobs.map((job) => {
@@ -78,50 +83,26 @@ export const LineageJobTree: React.FC<LineageBatchTreeProps> = ({
           return (
             <div key={job.id} className="job-card-wrap">
               <div
-                className="lineage-job-card"
-                style={
-                  job.state === 'running'
-                    ? { borderColor: 'var(--state-running-border)' }
-                    : job.state === 'failed'
-                    ? { borderColor: 'var(--state-failed-border)' }
-                    : undefined
-                }
+                className={`lineage-job-card is-${job.state}${isOpen ? ' is-open' : ''}`}
                 onClick={() => toggleJob(job.id)}
               >
                 <div className="lineage-card-header">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <span className="job-expand-icon" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>
-                      {isOpen ? '▾' : '▸'}
-                    </span>
+                  <div className="lineage-card-lead">
+                    <span className={`job-expand-icon${isOpen ? ' is-open' : ''}`} aria-hidden="true" />
                     <Dot state={job.state} />
-                    <span
-                      style={{
-                        fontWeight: 600,
-                        fontFamily: 'var(--font-mono)',
-                        color: job.state === 'running' ? 'var(--state-running)' : job.state === 'failed' ? 'var(--state-failed)' : 'inherit',
-                      }}
-                    >
-                      {job.name}
-                    </span>
+                    <span className="lineage-job-name">{job.name}</span>
                     <Chip active={job.state === 'running'}>{job.role}</Chip>
                     <Chip>{job.model}</Chip>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <span
-                      className="u-num"
-                      style={job.state === 'running' ? { color: 'var(--state-running)', fontWeight: 700 } : job.state === 'failed' ? { color: 'var(--state-failed)', fontWeight: 700 } : { color: 'var(--text-tertiary)' }}
-                    >
-                      {job.duration}
-                    </span>
+                  <div className="lineage-card-end">
+                    <span className="u-num lineage-job-dur">{job.duration}</span>
                     <Badge state={job.state}>{job.badgeText}</Badge>
                   </div>
                 </div>
 
-                {/* 3段级联展开详情 */}
                 {isOpen && (
                   <div className="job-cascade-detail is-open">
-                    {/* 段 1: 指标 */}
-                    <div style={{ display: 'flex', gap: '20px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                    <div className="lineage-job-metrics">
                       {job.metrics.map((m, i) => (
                         <div key={i}>
                           <span className="u-microlabel">{m.label}:</span> <span className="u-num">{m.value}</span>
@@ -129,17 +110,24 @@ export const LineageJobTree: React.FC<LineageBatchTreeProps> = ({
                       ))}
                     </div>
 
-                    {/* 段 2: 委派任务目标 */}
-                    <div style={{ backgroundColor: 'var(--bg-layer-1)', borderRadius: '6px', padding: '10px 14px', fontSize: '12px', color: 'var(--text-secondary)', border: '1px solid var(--border-dim)' }}>
-                      <div className="u-microlabel" style={{ marginBottom: '4px' }}>委派任务目标:</div>
+                    <div className="lineage-job-target">
+                      <div className="u-microlabel">委派任务目标:</div>
                       {job.targetPrompt}
                     </div>
 
-                    {/* 段 3: 产物与日志 */}
                     {job.logs.length > 0 && (
-                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11.5px', color: 'var(--text-tertiary)', backgroundColor: 'var(--code-bg)', padding: '10px 14px', borderRadius: '6px' }}>
+                      <div className="lineage-job-logs">
                         {job.logs.map((l, i) => (
-                          <div key={i} style={{ color: l.includes('SUCCESS') ? '#34d399' : l.includes('FORBIDDEN') || l.includes('DENIED') ? '#fb7185' : 'inherit' }}>
+                          <div
+                            key={i}
+                            className={
+                              l.includes('SUCCESS')
+                                ? 'is-ok'
+                                : l.includes('FORBIDDEN') || l.includes('DENIED')
+                                  ? 'is-bad'
+                                  : undefined
+                            }
+                          >
                             {l}
                           </div>
                         ))}

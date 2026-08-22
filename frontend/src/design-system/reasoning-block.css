@@ -5,7 +5,7 @@
    圆角;状态只由「前导 16px 图标 + 标题色」承载,四边不存在任何 >1px 的彩边。
    展开走真实高度动画(与 tool-timeline 的 .tl-body 同配方)。
    注意:保留 .cot-header / .cot-toggle-icon 类名与 `.cot-header > div > span` 结构,
-      供 tool-timeline.css 的运行态扫光选择器继续命中;视觉一律用 .rb-* 覆盖。
+      供既有测试选择器命中;视觉一律用 .rb-* 覆盖。
    ========================================================================== */
 
 .rb-block {
@@ -15,14 +15,15 @@
   padding: 9px 14px;
   font-size: 12px;
   color: var(--text-secondary);
-  transition: border-color 0.3s ease-in-out;
-  animation: rb-fade-in 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
+  transition: border-color var(--u-dur-base) ease-in-out;
+  animation: rb-fade-in var(--u-dur-base) var(--u-ease-swift) both;
 }
 
 /* 思考中:只给一条 1px 的品牌蓝发丝边,不做任何侧边彩条 */
 .rb-block.is-thinking,
 .tl-reasoning.is-thinking .rb-block {
   border-color: var(--state-running-border);
+  background-color: var(--state-running-bg);
 }
 
 @keyframes rb-fade-in {
@@ -58,7 +59,7 @@
   align-items: center;
   justify-content: center;
   color: var(--text-tertiary);
-  transition: color 0.3s ease-in-out;
+  transition: color var(--u-dur-base) ease-in-out;
 }
 
 .rb-block .rb-lead-thinking,
@@ -76,7 +77,7 @@
 .rb-block.is-thinking .rb-lead-done,
 .tl-reasoning.is-thinking .rb-block .rb-lead-done { display: none; }
 
-/* 标题槽:保持 `.cot-header > div > span` 结构给扫光选择器用 */
+/* 标题槽:保持 `.cot-header > div > span` 结构 */
 .rb-block .rb-head-main {
   flex: 1 1 auto;
   min-width: 0;
@@ -93,7 +94,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: color 0.3s ease-in-out;
+  transition: color var(--u-dur-base) ease-in-out;
 }
 
 .rb-block.is-thinking .rb-title,
@@ -101,34 +102,9 @@
   color: var(--state-running);
 }
 
-/* 运行态文字扫光(Kimi/Manus 配方:background-clip:text + 120° 渐变 + size 200%
-   + 2.5s linear infinite)。infinite 只在思考中出现,收工即停。
-   注意:这里刻意用 background-repeat: repeat。tool-timeline.css 的同款扫光写的是
-      no-repeat,而 background-position 一路扫到 -100% 时 200% 宽的渐变会整块滑出
-      元素,文字在每个周期的后半段逐渐变全透明(实测:采样到 -84% 仍在继续)。
-      repeat 让平铺始终盖住文字,渐变两端同色所以无接缝。
-   选择器写到 5 个类(0,5,0),压过 tool-timeline.css 的 (0,4,1),
-   顺带把基色从 accent-cyan 统一回本组件规定的 --state-running。 */
 .rb-block.is-thinking .rb-header .rb-title,
 .tl-reasoning.is-thinking .rb-block .rb-header .rb-title {
-  background-image: linear-gradient(
-    120deg,
-    var(--state-running) 40%,
-    var(--text-primary) 50%,
-    var(--state-running) 60%
-  );
-  background-size: 200% 100%;
-  background-repeat: repeat;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  -webkit-text-fill-color: transparent;
-  animation: rb-sweep 2.5s linear infinite;
-}
-
-@keyframes rb-sweep {
-  from { background-position: 100% 0; }
-  to   { background-position: -100% 0; }
+  color: var(--state-running);
 }
 
 .rb-block .rb-header:hover .rb-title { color: var(--text-primary); }
@@ -149,7 +125,7 @@
   align-items: center;
   justify-content: center;
   color: var(--text-tertiary);
-  transition: transform 0.3s cubic-bezier(0.36, 0.66, 0.04, 1);
+  transition: transform var(--u-dur-base) var(--u-ease-swift);
 }
 
 .rb-block.is-open .rb-chevron { transform: rotate(90deg); }
@@ -160,8 +136,8 @@
   opacity: 0;
   overflow: hidden;
   transition:
-    height 0.3s cubic-bezier(0.4, 0, 0.1, 1),
-    opacity 0.3s cubic-bezier(0.4, 0, 0.1, 1);
+    height var(--u-dur-base) var(--u-ease-swift),
+    opacity var(--u-dur-base) var(--u-ease-swift);
 }
 
 .rb-block.is-open .rb-body { opacity: 1; }
@@ -192,11 +168,8 @@
   .rb-block .rb-body {
     transition: none;
   }
-  /* 扫光静态降级:退回纯色,不留任何 infinite 动画 */
   .rb-block.is-thinking .rb-header .rb-title,
   .tl-reasoning.is-thinking .rb-block .rb-header .rb-title {
-    animation: none;
-    background-image: none;
     color: var(--state-running);
     -webkit-text-fill-color: currentColor;
   }

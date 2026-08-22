@@ -1,50 +1,27 @@
 import React from 'react';
 import { Dot } from '@/components/ui/Dot';
+import { MOTION_CONSTANTS } from '@/design-system/tokens';
 
 export interface SymMonitorProps {
-  bpm?: number;
+  runningCount: number;
   periodMs?: number;
-  driftMs?: number;
 }
 
 export const SymMonitor: React.FC<SymMonitorProps> = ({
-  bpm = 25.0,
-  periodMs = 2400,
-  driftMs = 0.1,
+  runningCount,
+  periodMs = MOTION_CONSTANTS.PULSE_DURATION_MS,
 }) => {
-  return (
-    <section className="sym-monitor-banner">
-      <div className="sym-pulse-indicator">
-        <Dot state="running" size={12} />
-        <div>
-          <div style={{ fontSize: '13.5px', fontWeight: 700, color: 'var(--text-primary)' }}>
-            全局共息同频心跳 (Sym-Respiration: Breathe as One)
-          </div>
-          <div style={{ fontSize: '11.5px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
-            所有运行中的子代理、进度条流光与侧栏指示灯均已锁相至{' '}
-            <span className="u-num" style={{ color: 'var(--state-running)', fontWeight: 800 }}>
-              {periodMs}ms
-            </span>{' '}
-            同一时间基准
-          </div>
-        </div>
-      </div>
+  if (runningCount <= 0) return null;
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
-        <div className="sym-pulse-wave">
-          <div className="sym-bar" />
-          <div className="sym-bar" />
-          <div className="sym-bar" />
-          <div className="sym-bar" />
-          <div className="sym-bar" />
-          <div className="sym-bar" />
-          <div className="sym-bar" />
-        </div>
-        <div style={{ textAlign: 'right' }}>
-          <div className="u-num" style={{ fontSize: '18px', fontWeight: 800, color: 'var(--state-running)' }}>
-            {bpm.toFixed(1)} BPM
+  return (
+    <section className="sym-monitor-banner" aria-label="运行中子任务">
+      <div className="sym-pulse-indicator">
+        <Dot state="running" size={8} />
+        <div>
+          <div className="surface-kicker">{runningCount} 个子任务在跑</div>
+          <div className="surface-quiet">
+            运行灯锁相 <span className="u-num">{periodMs}ms</span>
           </div>
-          <div className="u-microlabel">锁相漂移 &lt; {driftMs}ms</div>
         </div>
       </div>
     </section>

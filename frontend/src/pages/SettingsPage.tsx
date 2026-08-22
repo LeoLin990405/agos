@@ -23,25 +23,6 @@ const sourceLabels = {
   protected: '受保护',
 } as const
 
-const sectionStyle: React.CSSProperties = {
-  padding: '22px 0',
-  borderBottom: '1px solid var(--border-dim)',
-}
-
-const sectionHeadingStyle: React.CSSProperties = {
-  margin: 0,
-  fontSize: '14px',
-  fontWeight: 650,
-  color: 'var(--text-primary)',
-}
-
-const quietStyle: React.CSSProperties = {
-  margin: '8px 0 0',
-  fontSize: '12px',
-  lineHeight: 1.6,
-  color: 'var(--text-tertiary)',
-}
-
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -52,40 +33,32 @@ const SettingValue: React.FC<{ row: SettingRow }> = ({ row }) => {
   if (row.structured || formatted.length > 100) {
     return (
       <details>
-        <summary style={{ cursor: 'pointer', color: 'var(--text-secondary)' }}>展开解析值</summary>
-        <pre style={{ margin: '8px 0 0', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: 'var(--text-primary)', fontSize: '11px' }}>
+        <summary className="settings-summary">展开解析值</summary>
+        <pre className="surface-pre settings-pre">
           {formatted}
         </pre>
       </details>
     )
   }
-  return <span style={{ overflowWrap: 'anywhere' }}>{formatted}</span>
+  return <span className="surface-strong">{formatted}</span>
 }
 
 const SettingRows: React.FC<{ rows: SettingRow[] }> = ({ rows }) => {
-  if (rows.length === 0) return <p style={quietStyle}>宿主返回了命名空间，但其 schema 无法投影为字段列表。</p>
+  if (rows.length === 0) return <p className="surface-quiet">宿主返回了命名空间，但其 schema 无法投影为字段列表。</p>
   return (
-    <dl style={{ margin: '12px 0 0' }}>
+    <dl className="settings-list">
       {rows.map((row) => (
         <div
           key={row.path.join('.')}
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(160px, 0.8fr) minmax(220px, 1.5fr) auto auto',
-            alignItems: 'start',
-            gap: '12px',
-            padding: '10px 0',
-            borderTop: '1px solid var(--border-dim)',
-            fontSize: '12px',
-          }}
+          className="surface-row surface-row--setting"
         >
-          <dt style={{ minWidth: 0 }}>
-            <div style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', overflowWrap: 'anywhere' }}>{row.label}</div>
-            {row.description !== undefined && <div style={{ ...quietStyle, marginTop: '3px' }}>{row.description}</div>}
+          <dt>
+            <div className="u-num surface-strong">{row.label}</div>
+            {row.description !== undefined && <div className="surface-quiet">{row.description}</div>}
           </dt>
-          <dd style={{ margin: 0, minWidth: 0, color: 'var(--text-secondary)' }}><SettingValue row={row} /></dd>
-          <dd style={{ margin: 0 }}><Chip>{sourceLabels[row.source]}</Chip></dd>
-          <dd style={{ margin: 0 }}><Chip variant={row.applies === 'restart' ? 'amber' : 'default'}>{row.applies === 'restart' ? '重启生效' : '即时生效'}</Chip></dd>
+          <dd className="surface-body"><SettingValue row={row} /></dd>
+          <dd><Chip>{sourceLabels[row.source]}</Chip></dd>
+          <dd><Chip variant={row.applies === 'restart' ? 'amber' : 'default'}>{row.applies === 'restart' ? '重启生效' : '即时生效'}</Chip></dd>
         </div>
       ))}
     </dl>
@@ -129,7 +102,7 @@ export const SettingsPage: React.FC = () => {
     && snapshot.modelGroups.length === 0
 
   return (
-    <div style={{ display: 'flex', flex: 1, height: '100vh', overflow: 'hidden' }}>
+    <div className="page-workspace">
       <main className="app-stage">
         <AppTopbar
           title="设置"
@@ -142,44 +115,44 @@ export const SettingsPage: React.FC = () => {
           ) : undefined}
         />
 
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 36px 40px', maxWidth: '1120px' }}>
+        <div className="settings-body">
           {state.phase === 'loading' && (
-            <p style={{ ...quietStyle, marginTop: '18px' }}>正在读取宿主设置、提供商与模型目录…</p>
+            <p className="surface-quiet">正在读取宿主设置、提供商与模型目录…</p>
           )}
 
           {state.phase === 'error' && (
-            <section style={sectionStyle} aria-live="polite">
-              <h2 style={sectionHeadingStyle}>配置面暂不可用</h2>
-              <p style={quietStyle}>settings.describe、llm.providers 或 llm.models 没有完成读取。页面不会用本地默认值替代宿主答案。</p>
-              <p style={{ ...quietStyle, color: 'var(--state-failed)' }}>{state.message}</p>
+            <section className="settings-section" aria-live="polite">
+              <h2 className="settings-heading">配置面暂不可用</h2>
+              <p className="surface-quiet">settings.describe、llm.providers 或 llm.models 没有完成读取。页面不会用本地默认值替代宿主答案。</p>
+              <p className="surface-quiet surface-alert">{state.message}</p>
               <Button size="sm" onClick={() => setReloadKey((key) => key + 1)}>重新读取</Button>
             </section>
           )}
 
           {snapshot !== undefined && (
             <>
-              <section style={{ ...sectionStyle, paddingTop: '12px' }}>
-                <h2 style={sectionHeadingStyle}>读取边界</h2>
-                <p style={quietStyle}>
+              <section className="settings-section is-first">
+                <h2 className="settings-heading">读取边界</h2>
+                <p className="surface-quiet">
                   所有字段均来自宿主的脱敏描述。本页不读取或保存凭据值，也不提供模型发现与配置写入。
                   {snapshot.writable ? '宿主配置层可写，但本视图仍保持只读。' : '宿主当前有只读配置层遮蔽，可写操作不可用。'}
                 </p>
-                {openError !== undefined && <p role="alert" style={{ ...quietStyle, color: 'var(--state-failed)' }}>打开文档失败：{openError}</p>}
+                {openError !== undefined && <p role="alert" className="surface-quiet surface-alert">打开文档失败：{openError}</p>}
               </section>
 
               {nothingExposed && (
-                <section style={sectionStyle}>
-                  <h2 style={sectionHeadingStyle}>没有公开的配置</h2>
-                  <p style={quietStyle}>宿主当前没有向配置面公开命名空间、提供商或模型目录。</p>
+                <section className="settings-section">
+                  <h2 className="settings-heading">没有公开的配置</h2>
+                  <p className="surface-quiet">宿主当前没有向配置面公开命名空间、提供商或模型目录。</p>
                 </section>
               )}
 
               {snapshot.namespaces.map((namespace) => (
-                <section key={namespace.ns} style={sectionStyle}>
-                  <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
+                <section key={namespace.ns} className="settings-section">
+                  <div className="surface-header is-baseline">
                     <div>
-                      <h2 style={sectionHeadingStyle}>{namespace.ns}</h2>
-                      <p style={quietStyle}>
+                      <h2 className="settings-heading">{namespace.ns}</h2>
+                      <p className="surface-quiet">
                         revision {namespace.revision} · {namespace.user === undefined ? '未设置用户层' : '含用户层覆盖'}
                       </p>
                     </div>
@@ -189,37 +162,37 @@ export const SettingsPage: React.FC = () => {
                 </section>
               ))}
 
-              <section style={sectionStyle}>
-                <h2 style={sectionHeadingStyle}>凭据状态</h2>
-                <p style={quietStyle}>这里只显示是否配置、来源与可写性。浏览器没有取得凭据值或打码后的值。</p>
+              <section className="settings-section">
+                <h2 className="settings-heading">凭据状态</h2>
+                <p className="surface-quiet">这里只显示是否配置、来源与可写性。浏览器没有取得凭据值或打码后的值。</p>
                 {Object.keys(snapshot.credentials).length === 0 ? (
-                  <p style={quietStyle}>公开配置没有命名任何凭据引用。</p>
+                  <p className="surface-quiet">公开配置没有命名任何凭据引用。</p>
                 ) : (
-                  <dl style={{ margin: '12px 0 0' }}>
+                  <dl className="settings-list">
                     {Object.entries(snapshot.credentials).map(([ref, credential]) => (
-                      <div key={ref} style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', padding: '10px 0', borderTop: '1px solid var(--border-dim)', fontSize: '12px' }}>
-                        <dt style={{ minWidth: '190px', fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{ref}</dt>
-                        <dd style={{ margin: 0 }}><Chip active={credential.configured}>{credential.configured ? '已配置' : '未配置'}</Chip></dd>
-                        {credential.source !== undefined && <dd style={{ margin: 0, color: 'var(--text-secondary)' }}>来源 {credential.source}</dd>}
-                        <dd style={{ margin: 0, color: 'var(--text-tertiary)' }}>{credential.writable ? '宿主层可写' : '只读来源遮蔽'}</dd>
+                      <div key={ref} className="surface-row surface-row--inline">
+                        <dt className="u-num surface-strong">{ref}</dt>
+                        <dd><Chip active={credential.configured}>{credential.configured ? '已配置' : '未配置'}</Chip></dd>
+                        {credential.source !== undefined && <dd className="surface-body">来源 {credential.source}</dd>}
+                        <dd className="surface-quiet">{credential.writable ? '宿主层可写' : '只读来源遮蔽'}</dd>
                       </div>
                     ))}
                   </dl>
                 )}
               </section>
 
-              <section style={sectionStyle}>
-                <h2 style={sectionHeadingStyle}>提供商</h2>
-                <p style={quietStyle}>配置目录与当前路由注册状态，只读。</p>
-                {snapshot.providers.length === 0 ? <p style={quietStyle}>宿主没有公开可配置的提供商。</p> : (
-                  <div style={{ marginTop: '12px' }}>
+              <section className="settings-section">
+                <h2 className="settings-heading">提供商</h2>
+                <p className="surface-quiet">配置目录与当前路由注册状态，只读。</p>
+                {snapshot.providers.length === 0 ? <p className="surface-quiet">宿主没有公开可配置的提供商。</p> : (
+                  <div className="settings-list">
                     {snapshot.providers.map((provider) => (
-                      <div key={provider.provider} style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) auto minmax(180px, 1fr)', gap: '12px', padding: '10px 0', borderTop: '1px solid var(--border-dim)', fontSize: '12px' }}>
-                        <div><strong>{provider.displayName}</strong><div style={quietStyle}>{provider.provider}</div></div>
+                      <div key={provider.provider} className="surface-row surface-row--provider">
+                        <div><strong>{provider.displayName}</strong><div className="surface-quiet">{provider.provider}</div></div>
                         <Chip active={provider.active}>{provider.active ? '已注册' : '未注册'}</Chip>
-                        <div style={{ color: 'var(--text-secondary)' }}>
+                        <div className="surface-body">
                           {provider.settingsNs === '' ? '未提供设置地址' : `${provider.settingsNs}${provider.settingsPath.length === 0 ? '' : ` · ${provider.settingsPath.join('.')}`}`}
-                          <div style={quietStyle}>{provider.declared === undefined ? '声明状态未采集' : provider.declared ? '由配置声明' : '非配置声明'}</div>
+                          <div className="surface-quiet">{provider.declared === undefined ? '声明状态未采集' : provider.declared ? '由配置声明' : '非配置声明'}</div>
                         </div>
                       </div>
                     ))}
@@ -227,22 +200,22 @@ export const SettingsPage: React.FC = () => {
                 )}
               </section>
 
-              <section style={{ ...sectionStyle, borderBottom: 'none' }}>
-                <h2 style={sectionHeadingStyle}>模型目录</h2>
-                <p style={quietStyle}>宿主当前已注册提供商的模型清单，只读；本页不会调用模型发现。</p>
-                {snapshot.modelGroups.length === 0 && snapshot.modelFailures.length === 0 && <p style={quietStyle}>宿主返回了空模型目录。</p>}
+              <section className="settings-section is-last">
+                <h2 className="settings-heading">模型目录</h2>
+                <p className="surface-quiet">宿主当前已注册提供商的模型清单，只读；本页不会调用模型发现。</p>
+                {snapshot.modelGroups.length === 0 && snapshot.modelFailures.length === 0 && <p className="surface-quiet">宿主返回了空模型目录。</p>}
                 {snapshot.modelGroups.map((group) => (
-                  <details key={group.id} style={{ padding: '10px 0', borderTop: '1px solid var(--border-dim)' }}>
-                    <summary style={{ cursor: 'pointer', fontSize: '12px', color: 'var(--text-primary)' }}>{group.name} · {group.models.length} 个模型</summary>
-                    <div style={{ marginTop: '8px', color: 'var(--text-secondary)', fontSize: '11.5px', lineHeight: 1.7 }}>
+                  <details key={group.id} className="surface-section">
+                    <summary className="settings-summary">{group.name} · {group.models.length} 个模型</summary>
+                    <div className="settings-models">
                       {group.models.length === 0 ? '该提供商没有返回模型。' : group.models.map((model) => (
-                        <div key={model.id}>{model.name} <span style={{ color: 'var(--text-tertiary)' }}>({model.id})</span></div>
+                        <div key={model.id}>{model.name} <span className="surface-quiet">({model.id})</span></div>
                       ))}
                     </div>
                   </details>
                 ))}
                 {snapshot.modelFailures.map((failure) => (
-                  <div key={failure.id} style={{ padding: '10px 0', borderTop: '1px solid var(--border-dim)', fontSize: '12px', color: 'var(--state-failed)' }}>
+                  <div key={failure.id} className="settings-fail">
                     {failure.name}：{failure.message}
                   </div>
                 ))}

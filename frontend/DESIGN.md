@@ -1,13 +1,15 @@
-# DESIGN.md — 现状速记(V4:DeepSeek 原生融合)
+# DESIGN.md — 现状速记（2026-08-22 壳 + 可视化重设）
 
-- Tokens: src/design-system/tokens.css(深色默认 #06080d→#121723 三层;浅色 data-theme=light;四态 state-* 色族;--u-dur-* / --u-ease-*;2400ms 共息)
-- 字体: Geist / Geist Mono / JetBrains Mono(CDN),数字 tabular-nums
-- 布局: layout.css(app-rail 左 64px 图标栏 / 各页自管);deck.css(卡片/终端/消息流)
-- 组件: src/components/ui(Dot/Chip/Badge/Button/TerminalCard/SegmentedControl)+ chat/console/lineage 族
-- 已知病(用户两轮"太丑"的解剖): 层级靠边框不靠明暗,表面海拔感弱;主字号偏小而留白偏散;accent 蓝到处点缀反而没有焦点;图标是 emoji,精密感掉档;topbar 遥测 pill 是装饰 mock
+- Tokens: `src/design-system/tokens.css` — 深色底 `#0c0c0e`、layer-1 `#1a1a1f`；浅色 `data-theme=light`；四态 `state-*`；`--u-dur-*` / `--u-scan: 2400ms` / `--u-phase`
+- 字体: 正文系统栈；数据/仪表 Geist Mono / JetBrains；数字 tabular-nums
+- 布局: `layout.css` 左轨 56px 平面标；对话三栏（会话 / transcript / 贴底作曲）；控制台文字次轨 + `surfaces.css`
+- 组件: `src/components/ui`（Dot/Chip/Badge/Button/…）+ chat / console / lineage / graph
+- 动效: 进入 `translateY(6px)+opacity`；infinite 只挂 running 且锁共息；失败静止；扫描线已删；星图空闲停 rAF，听 `prefers-reduced-motion`
+- 可视化语法 `viz.css`：轨用 `scaleX(--u-p)`；编队/谱系按真实行分段；轨迹共用本页最长尺度；机架条只映射 inflight/maxConcurrency
+- 灯语: queued / running / done / failed。缺字段写「未采集」，不为好看编 KPI
+- 019 锚点文案冻结（路由档位 / 只报告 / 使用率分母已采集 / 读图台账已采集 / 接入该会话 / 星图已采集 / 补链对照已采集 / 可接入）
+- 冻结层: `stores/` `fold/` `api-client/` `contract/` `vite.config.ts` `package.json`
 
-## V4 融合基线(2026-08-20 深夜,权威来源=上游 packages/client/ui-theme/src/styles/design-platform.css)
-- 深色面:neutral-bluish 950(21,21,23)→875→850→800;浅色面:00 白 + bluish 灰阶
-- accent:deepseek-400(103,158,254)深 / deepseek-500(65,118,230)浅;done=green-500;failed=red-400;warn=amber-500
-- 正文字体回归系统栈(原生手感);数据/仪表保留 Geist Mono/JetBrains(我们的仪表 DNA)
-- 结构签名保留:仪表带/灯语四态/共息锁相/发丝边框明暗海拔
+## 结构签名
+
+Claude 材质海拔 + Cursor 会话工作面。仪表带是运行带 + 诚实空位，不是五格同宽英雄数。

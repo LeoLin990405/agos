@@ -348,12 +348,11 @@ export const CommandDeck: React.FC<CommandDeckProps> = ({
             <PermissionCapsule sessionId={sessionId} onFocusApproval={onFocusApproval} />
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div className="composer-send">
             <span className="kbd">⌘ + ↵</span>
             <Button
               variant="primary"
               size="sm"
-              style={{ padding: '0 16px' }}
               onClick={() => { void handleSend(); }}
               disabled={sending}
             >
@@ -367,7 +366,7 @@ export const CommandDeck: React.FC<CommandDeckProps> = ({
         </div>
 
         {sendError !== '' && (
-          <div role="alert" style={{ color: 'var(--state-failed)', fontSize: '11.5px', lineHeight: 1.45 }}>
+          <div role="alert" className="composer-error">
             {sendError}
           </div>
         )}

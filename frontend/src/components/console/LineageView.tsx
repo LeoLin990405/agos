@@ -75,9 +75,9 @@ function toJob(row: Record<string, unknown>): LineageJobItem {
   const status = String(row['status'] ?? '');
   const lamp = LAMP[status] ?? { lamp: 'queued' as const, label: '未采集' };
   const roleBits = [
-    row['role'] != null ? `🎭 ${String(row['role'])}` : '',
-    row['forked'] != null && row['forked'] !== '' ? `⤴ ${String(row['forked'])}` : '',
-    typeof row['depth'] === 'number' && row['depth'] > 1 ? `⛓ ${String(row['depth'])}` : '',
+    row['role'] != null ? String(row['role']) : '',
+    row['forked'] != null && row['forked'] !== '' ? `fork ${String(row['forked'])}` : '',
+    typeof row['depth'] === 'number' && row['depth'] > 1 ? `depth ${String(row['depth'])}` : '',
   ].filter(Boolean).join(' ');
   const metrics: { label: string; value: string }[] = [];
   if (typeof row['queuePosition'] === 'number') metrics.push({ label: '队列位次', value: `#${row['queuePosition']}` });
@@ -102,10 +102,10 @@ function toJob(row: Record<string, unknown>): LineageJobItem {
 const QuietState: React.FC<{ title: string; detail: React.ReactNode }> = ({ title, detail }) => (
   <div
     role="status"
-    style={{ padding: '44px 24px', textAlign: 'center', border: '1px dashed var(--border-subtle)', borderRadius: '12px', color: 'var(--text-tertiary)' }}
+    className="surface-empty"
   >
-    <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '7px' }}>{title}</div>
-    <div style={{ fontSize: '12.5px' }}>{detail}</div>
+    <div className="surface-empty-title">{title}</div>
+    <div>{detail}</div>
   </div>
 );
 
@@ -122,26 +122,26 @@ const HistoryCall: React.FC<{ call: FoldedLineageCall }> = ({ call }) => {
       : '已结束';
   return (
     <details
-      style={{ backgroundColor: 'var(--bg-layer-2)', border: '1px solid var(--border-subtle)', borderRadius: '8px', padding: '14px 18px' }}
+      className="history-call"
     >
-      <summary style={{ cursor: 'pointer', listStylePosition: 'outside' }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', marginLeft: '4px', flexWrap: 'wrap' }}>
-          <strong style={{ fontFamily: 'var(--font-mono)', fontSize: '13px' }}>{call.callId}</strong>
+      <summary>
+        <span className="surface-cluster">
+          <strong className="u-num">{call.callId}</strong>
           <Chip variant={call.state === 'unclosed' ? 'amber' : 'default'}>{statusLabel}</Chip>
-          <span className="u-num" style={{ color: 'var(--text-tertiary)', fontSize: '11.5px' }}>
+          <span className="u-num surface-quiet">
             {terminalSummary(call.rows)}
           </span>
         </span>
       </summary>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '13px', paddingTop: '12px', borderTop: '1px solid var(--border-dim)' }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', color: 'var(--text-secondary)', fontSize: '11.5px' }}>
+      <div className="history-call-body">
+        <div className="surface-cluster surface-body">
           <span>开始: <span className="u-num">{formatAt(call.startedAt)}</span></span>
           <span>结束: <span className="u-num">{formatAt(call.endedAt)}</span></span>
           <span>耗时: <span className="u-num">{call.state === 'unclosed' ? '未收尾' : fmtDur(call.durationMs)}</span></span>
-          <span>父会话: <span style={{ fontFamily: 'var(--font-mono)' }}>{call.parentSessionId ?? '未采集'}</span></span>
+          <span>父会话: <span className="u-num">{call.parentSessionId ?? '未采集'}</span></span>
         </div>
         {call.rows.length === 0 ? (
-          <div style={{ color: 'var(--text-tertiary)', fontSize: '12px' }}>该快照没有子任务行。</div>
+          <div className="surface-quiet">该快照没有子任务行。</div>
         ) : (
           <div className="telemetry-table-wrap">
             <table className="telemetry-table">
@@ -185,15 +185,18 @@ export const LineageView: React.FC = () => {
     () => foldLineageHistory(currentHistory?.records ?? []),
     [currentHistory?.records],
   );
-  const anyRunning = realBatches.some((batch) => batch.rows.some((row) => row['status'] === 'running'));
+  const runningCount = realBatches.reduce(
+    (count, batch) => count + batch.rows.filter((row) => row['status'] === 'running').length,
+    0,
+  );
   const today = formatDay();
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
+    <div className="surface-page">
+      <div className="surface-header is-center">
         <div>
-          <h2 style={{ fontSize: '16px', fontWeight: 800 }}>智能体任务谱系与血缘拓扑</h2>
-          <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
+          <h2 className="surface-title">智能体任务谱系与血缘拓扑</h2>
+          <p className="surface-lede">
             数据源: <code>{tab === 'live' ? '/api/swarm/progress' : '/api/swarm/history'}</code>
           </p>
         </div>
@@ -204,7 +207,7 @@ export const LineageView: React.FC = () => {
       </div>
 
       {tab === 'live' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+        <div className="surface-page">
           {telemetry.at === 0 && (
             <QuietState title="实时谱系尚未采集" detail={<>正在等待 <code>/api/swarm/progress</code>。</>} />
           )}
@@ -213,7 +216,7 @@ export const LineageView: React.FC = () => {
           )}
           {telemetry.progress !== undefined && (
             <>
-              {anyRunning && <SymMonitor bpm={25} periodMs={2400} driftMs={0.1} />}
+              {runningCount > 0 && <SymMonitor runningCount={runningCount} />}
               {realBatches.length === 0 && (
                 <QuietState title="谱系待机" detail="接口返回空调用集；当前没有可展示的 swarm 派单。" />
               )}
@@ -239,8 +242,8 @@ export const LineageView: React.FC = () => {
       )}
 
       {tab === 'history' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+        <div className="surface-stack">
+          <div className="surface-cluster">
             <Button variant="ghost" size="sm" onClick={() => setDay((value) => shiftDay(value, -1))}>前一天</Button>
             <input
               type="date"
@@ -270,19 +273,19 @@ export const LineageView: React.FC = () => {
           {currentHistory !== undefined && (
             <>
               {(history.status === 'degraded' || currentHistory.error !== undefined) && (
-                <div role="status" style={{ padding: '9px 12px', border: '1px solid var(--accent-amber)', borderRadius: '8px', color: 'var(--text-secondary)', fontSize: '12px' }}>
+                <div role="status" className="surface-status surface-status--amber">
                   {currentHistory.error !== undefined
                     ? <>日志读取错误: {currentHistory.error}</>
                     : <>刷新失败，保留 {formatAt(history.at)} 的数据{history.error?.status !== undefined ? ` (HTTP ${history.error.status})` : ''}: {history.error?.message}</>}
                 </div>
               )}
               {currentHistory.truncated && (
-                <div role="status" style={{ padding: '9px 12px', border: '1px solid var(--accent-amber)', borderRadius: '8px', color: 'var(--text-secondary)', fontSize: '12px' }}>
+                <div role="status" className="surface-status surface-status--amber">
                   当日日志已达上限，更早的记录未写入。
                 </div>
               )}
               {history.status === 'loading' && (
-                <div role="status" style={{ color: 'var(--text-tertiary)', fontSize: '12px' }}>正在刷新，当前继续显示上次结果。</div>
+                <div role="status" className="surface-quiet">正在刷新，当前继续显示上次结果。</div>
               )}
               {currentHistory.error === undefined && foldedHistory.length === 0 && (
                 <QuietState

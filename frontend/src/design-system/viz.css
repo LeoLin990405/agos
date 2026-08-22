@@ -1,0 +1,161 @@
+/* ==========================================================================
+   可视化语法:进度轨 / 分段 / 入场 stagger
+   对照 Linear 操作条、Manus 任务清单、Kimi/Perplexity 子代理段、
+   Vercel 共享时间尺度。只解释已采集状态;infinite 仍只挂 running。
+   ========================================================================== */
+
+.viz-track {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-layer-3);
+  overflow: hidden;
+}
+
+.viz-fill {
+  position: absolute;
+  inset: 0;
+  transform-origin: left center;
+  transform: scaleX(var(--u-p, 0));
+  background: var(--state-running);
+  transition: transform var(--u-dur-slow) var(--u-ease-swift);
+}
+
+.viz-fill.is-done { background: var(--state-done); }
+.viz-fill.is-failed { background: var(--state-failed); }
+.viz-fill.is-hot { background: var(--state-failed); }
+
+.viz-segs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 8px;
+}
+
+.viz-seg {
+  flex: 1 1 0;
+  min-width: 2px;
+  border-radius: 2px;
+  background: var(--state-queued);
+}
+
+.viz-seg.is-running { background: var(--state-running); }
+.viz-seg.is-done { background: var(--state-done); }
+.viz-seg.is-failed { background: var(--state-failed); }
+.viz-seg.is-queued { background: var(--state-queued); }
+
+.viz-enter {
+  animation: surface-enter var(--u-dur-base) var(--u-ease-swift) both;
+  animation-delay: calc(var(--i, 0) * var(--u-stagger));
+}
+
+.viz-enter:nth-child(n + 7) {
+  animation: none;
+}
+
+.surface-list > .surface-row {
+  animation: surface-enter var(--u-dur-base) var(--u-ease-swift) both;
+}
+
+.surface-list > .surface-row:nth-child(1) { animation-delay: calc(0 * var(--u-stagger)); }
+.surface-list > .surface-row:nth-child(2) { animation-delay: calc(1 * var(--u-stagger)); }
+.surface-list > .surface-row:nth-child(3) { animation-delay: calc(2 * var(--u-stagger)); }
+.surface-list > .surface-row:nth-child(4) { animation-delay: calc(3 * var(--u-stagger)); }
+.surface-list > .surface-row:nth-child(5) { animation-delay: calc(4 * var(--u-stagger)); }
+.surface-list > .surface-row:nth-child(6) { animation-delay: calc(5 * var(--u-stagger)); }
+.surface-list > .surface-row:nth-child(n + 7) { animation: none; }
+
+.table-token {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 72px;
+}
+
+.table-token-track { height: 4px; }
+
+.telemetry-table tr.is-running td { background-color: var(--state-running-bg); }
+.telemetry-table tr.is-failed td { background-color: var(--state-failed-bg); }
+
+.instrument-mix {
+  display: flex;
+  gap: 2px;
+  height: 5px;
+  margin-top: 8px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--bg-layer-3);
+}
+
+.instrument-mix-seg { min-width: 2px; }
+.instrument-mix-seg.is-running { background: var(--state-running); }
+.instrument-mix-seg.is-failed { background: var(--state-failed); }
+.instrument-mix-seg.is-rest { background: var(--state-queued); }
+
+.skills-budget-track { max-width: 220px; height: 5px; }
+
+.skills-cost-track {
+  flex: 1 1 80px;
+  max-width: 160px;
+  height: 4px;
+}
+
+.fleet-view__load {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.fleet-view__load-track { height: 4px; }
+
+.trace-scale {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10.5px;
+  color: var(--text-dimmed);
+}
+
+.trace-scale-rule {
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--border-dim);
+}
+
+.trace-track {
+  flex: 1 1 auto;
+  min-width: 48px;
+  height: 8px;
+}
+
+.trace-span {
+  display: flex;
+  height: 100%;
+  width: 100%;
+  transform-origin: left center;
+  transform: scaleX(var(--u-p, 0));
+}
+
+.trace-bar-llm {
+  width: calc(var(--u-llm, 0) * 100%);
+  background-color: var(--state-running);
+}
+
+.trace-bar-tool {
+  flex: 1;
+  background-color: var(--state-done);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .viz-fill,
+  .trace-span {
+    transition: none;
+  }
+  .viz-enter,
+  .surface-list > .surface-row {
+    animation: none;
+  }
+}

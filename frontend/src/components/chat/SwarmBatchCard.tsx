@@ -43,21 +43,36 @@ export const SwarmBatchCard: React.FC<SwarmBatchCardProps> = ({
           </span>
         </div>
         <div className="u-swarm-stats">
-          <span className="u-num" style={{ fontWeight: 800, color: 'var(--state-running)', fontSize: '13px' }}>
+          <span className="u-num u-swarm-stats-num">
             {completedCount} / {totalCount}
           </span>{' '}
-          <span style={{ color: 'var(--text-tertiary)' }}>完成 ({percentage}%)</span>
+          <span className="u-swarm-time">完成 ({percentage}%)</span>
         </div>
       </div>
 
-      {/* 分段刻度进度条 */}
       <div className="u-swarm-bar-wrap">
-        <div className="u-swarm-bar">
+        {rows.length > 0 ? (
           <div
-            className="u-swarm-fill"
-            style={{ ['--u-p' as string]: ratio }}
-          />
-        </div>
+            className="viz-segs u-swarm-segs"
+            role="img"
+            aria-label={`${completedCount} / ${totalCount} 完成`}
+          >
+            {rows.map((row) => (
+              <span
+                key={row.idx}
+                className={`viz-seg is-${row.state}`}
+                title={`${row.name} ${row.stateLabel}`}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="u-swarm-bar">
+            <div
+              className="u-swarm-fill"
+              style={{ ['--u-p' as string]: ratio }}
+            />
+          </div>
+        )}
       </div>
 
       {/* 子代理列表 */}
@@ -65,41 +80,14 @@ export const SwarmBatchCard: React.FC<SwarmBatchCardProps> = ({
         {rows.map((row) => (
           <div
             key={row.idx}
-            className="u-swarm-row"
-            style={
-              row.state === 'running'
-                ? { backgroundColor: 'var(--state-running-bg)' }
-                : row.state === 'failed'
-                ? { backgroundColor: 'var(--state-failed-bg)' }
-                : undefined
-            }
+            className={`u-swarm-row${row.state === 'running' ? ' is-running' : row.state === 'failed' ? ' is-failed' : ''}`}
           >
             <span className="u-swarm-idx u-num">{row.idx}</span>
             <Dot state={row.state} />
-            <span
-              className="u-swarm-name"
-              style={
-                row.state === 'running'
-                  ? { color: 'var(--state-running)', fontWeight: 700 }
-                  : row.state === 'failed'
-                  ? { color: 'var(--state-failed)', fontWeight: 700 }
-                  : undefined
-              }
-            >
-              {row.name}
-            </span>
+            <span className="u-swarm-name">{row.name}</span>
             <Chip active={row.state === 'running'}>{row.role}</Chip>
             <Chip active={row.state === 'running'}>{row.provider}</Chip>
-            <span
-              className="u-swarm-time u-num"
-              style={
-                row.state === 'running'
-                  ? { color: 'var(--state-running)', fontWeight: 600 }
-                  : row.state === 'failed'
-                  ? { color: 'var(--state-failed)', fontWeight: 600 }
-                  : undefined
-              }
-            >
+            <span className="u-swarm-time u-num">
               {row.time}
             </span>
             <span className={`u-swarm-state-text state--${row.state}`}>

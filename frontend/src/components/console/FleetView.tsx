@@ -25,6 +25,9 @@ import './FleetView.css';
 
 type FleetRun = NonNullable<FleetBatch['runs']>[number];
 
+/** `/api/fleet/hosts` 把 SSH 探测放在请求路径上时,前端不能无限「正在读取」。 */
+const HOSTS_PROBE_STALL_MS = 8_000;
+
 export interface FleetViewProps {
   selectedBatchId?: string;
   onSelectBatch: (batchId: string | undefined) => void;
@@ -93,6 +96,7 @@ const HostCard: React.FC<HostCardProps> = ({
       )}
 
       {reachable ? (
+        <>
         <div className="fleet-view__host-facts">
           <span>在飞 <strong className="u-num">{host.inflight}/{host.maxConcurrency}</strong></span>
           {host.version && <span>DSH <strong className="u-num">{host.version}</strong></span>}
@@ -100,6 +104,17 @@ const HostCard: React.FC<HostCardProps> = ({
             <span>工作区文件 <strong className="u-num">{host.wsFiles === null ? '读不到' : host.wsFiles}</strong></span>
           )}
         </div>
+        {host.maxConcurrency > 0 && (
+          <div className="fleet-view__load" aria-hidden="true">
+            <span className="viz-track fleet-view__load-track">
+              <span
+                className={`viz-fill${host.inflight > 0 ? '' : ' is-done'}`}
+                style={{ ['--u-p' as string]: Math.min(1, host.inflight / host.maxConcurrency) }}
+              />
+            </span>
+          </div>
+        )}
+        </>
       ) : (
         error && <div className="fleet-view__host-error">{error}</div>
       )}
@@ -169,6 +184,7 @@ export const FleetView: React.FC<FleetViewProps> = ({ selectedBatchId, onSelectB
   const [actionError, setActionError] = useState<string>();
   const [hostErrors, setHostErrors] = useState<Record<string, string>>({});
   const [costConfirmation, setCostConfirmation] = useState<FleetCostConfirmation>();
+  const [hostsWaitedMs, setHostsWaitedMs] = useState(0);
 
   const powerByHost = useMemo(
     () => new Map(hostsState.power.map((node) => [node.host, node])),
@@ -179,6 +195,19 @@ export const FleetView: React.FC<FleetViewProps> = ({ selectedBatchId, onSelectB
   const reachableCount = hostsState.hosts.filter((host) => host.ok).length;
   const hasHostData = hostsState.at > 0;
   const initialLoading = !hasHostData && (hostsState.phase === 'idle' || hostsState.phase === 'loading');
+  const hostsProbeStalled = initialLoading && hostsWaitedMs >= HOSTS_PROBE_STALL_MS;
+
+  useEffect(() => {
+    if (!initialLoading) {
+      setHostsWaitedMs(0);
+      return undefined;
+    }
+    const started = Date.now();
+    const handle = window.setInterval(() => {
+      setHostsWaitedMs(Date.now() - started);
+    }, 1_000);
+    return () => window.clearInterval(handle);
+  }, [initialLoading]);
 
   useEffect(() => {
     if (selectedRunId !== undefined && selectedBatch?.runs?.some((run) => run.runId === selectedRunId) !== true) {
@@ -226,12 +255,16 @@ export const FleetView: React.FC<FleetViewProps> = ({ selectedBatchId, onSelectB
   });
 
   return (
-    <section className="fleet-view" aria-labelledby="fleet-view-title">
+    <section className="fleet-view surface-page" aria-labelledby="fleet-view-title">
       <header className="fleet-view__header">
         <div>
           <h2 id="fleet-view-title" className="fleet-view__heading">Homelab 执行农场</h2>
           <p className="fleet-view__source">
-            {hasHostData ? `已配置 ${hostsState.hosts.length} · 可达 ${reachableCount}` : '等待 SSH 探测结果'}
+            {hasHostData
+              ? `已配置 ${hostsState.hosts.length} · 可达 ${reachableCount}`
+              : hostsProbeStalled
+                ? 'SSH 探测未返回，机架配置尚未采集'
+                : '等待 SSH 探测结果'}
           </p>
         </div>
         <div className="fleet-view__header-actions">
@@ -272,7 +305,15 @@ export const FleetView: React.FC<FleetViewProps> = ({ selectedBatchId, onSelectB
             <h3 id="fleet-rack-title">机架</h3>
             {hasHostData && <span className="u-num">{hostsState.hosts.length}</span>}
           </div>
-          {initialLoading && <div className="fleet-view__empty" role="status">正在读取机器配置…</div>}
+          {initialLoading && !hostsProbeStalled && (
+            <div className="fleet-view__empty" role="status">正在读取机器配置…</div>
+          )}
+          {hostsProbeStalled && (
+            <div className="fleet-view__empty" role="alert">
+              <span>/api/fleet/hosts 仍在等待 SSH 探测，机架配置尚未采集。</span>
+              <Button size="sm" variant="ghost" onClick={() => fleetHostsStore.refresh()}>重试</Button>
+            </div>
+          )}
           {hostsState.phase === 'error' && !hasHostData && (
             <div className="fleet-view__empty" role="alert">
               <span>{hostsState.error || '机器数据暂不可用。'}</span>

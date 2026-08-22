@@ -25,18 +25,12 @@ function sessionLamp(row: SessionSummaryRow): StateLamp {
 const QuietState: React.FC<{ title: string; detail: React.ReactNode }> = ({ title, detail }) => (
   <div
     role="status"
-    style={{
-      padding: '44px 24px',
-      textAlign: 'center',
-      border: '1px dashed var(--border-subtle)',
-      borderRadius: '12px',
-      color: 'var(--text-tertiary)',
-    }}
+    className="surface-empty"
   >
-    <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '7px' }}>
+    <div className="surface-empty-title">
       {title}
     </div>
-    <div style={{ fontSize: '12.5px' }}>{detail}</div>
+    <div>{detail}</div>
   </div>
 );
 
@@ -65,11 +59,11 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onSelectSession }) =
   const loadedRelative = formatRelative(sessions.loadedAt);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      <div style={{ display: 'flex', alignItems: 'end', justifyContent: 'space-between', gap: '16px' }}>
+    <div className="surface-page">
+      <div className="surface-header is-baseline">
         <div>
-          <h2 style={{ fontSize: '16px', fontWeight: 800 }}>会话</h2>
-          <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
+          <h2 className="surface-title">会话</h2>
+          <p className="surface-lede">
             数据源: <code>session.list</code> 与 <code>events.mux</code>
           </p>
         </div>
@@ -77,8 +71,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onSelectSession }) =
           type="search"
           aria-label="过滤会话"
           placeholder="按主题、ID 或工作目录过滤"
-          className="form-input"
-          style={{ width: '250px', height: '32px', padding: '4px 10px', fontSize: '11.5px' }}
+          className="form-input form-input--filter"
           value={filterQuery}
           onChange={(event) => setFilterQuery(event.target.value)}
         />
@@ -90,7 +83,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onSelectSession }) =
         <QuietState
           title="会话列表读取失败"
           detail={(
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
+            <span className="surface-cluster">
               <span><code>session.list</code> 未答复: {sessions.error}</span>
               <Button variant="ghost" size="sm" onClick={() => { void refreshSessions(); }}>重试</Button>
             </span>
@@ -124,13 +117,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onSelectSession }) =
           {(surface.notice === 'refresh-error' || surface.notice === 'offline') && (
             <div
               role="status"
-              style={{
-                padding: '9px 12px',
-                border: '1px solid var(--accent-amber)',
-                borderRadius: '8px',
-                color: 'var(--text-secondary)',
-                fontSize: '12px',
-              }}
+              className="surface-status surface-status--amber"
             >
               {surface.notice === 'refresh-error'
                 ? <>会话刷新失败，保留{loadedRelative !== '' ? `${loadedRelative}读取` : '上次读取'}的数据: {sessions.error}</>
@@ -138,7 +125,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onSelectSession }) =
             </div>
           )}
           {surface.notice === 'connecting' && (
-            <div role="status" style={{ color: 'var(--text-tertiary)', fontSize: '12px' }}>
+            <div role="status" className="surface-quiet">
               正在连接 <code>events.mux</code>；当前继续显示 session.list 返回的会话。
             </div>
           )}
@@ -147,28 +134,28 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onSelectSession }) =
             <table className="telemetry-table">
               <thead>
                 <tr>
-                  <th style={{ width: '54px' }}>状态</th>
+                  <th className="table-col-state">状态</th>
                   <th>主题 / 会话 ID / 工作目录</th>
-                  <th style={{ width: '150px' }}>Agent preset</th>
-                  <th style={{ width: '110px' }}>更新时间</th>
-                  <th style={{ width: '90px', textAlign: 'right' }}>操作</th>
+                  <th className="table-col-preset">Agent preset</th>
+                  <th className="table-col-time">更新时间</th>
+                  <th className="table-col-action">操作</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((row) => {
                   const relative = formatRelative(row.updatedAt);
                   return (
-                    <tr key={row.sessionId}>
+                    <tr key={row.sessionId} className={row.running ? 'is-running' : undefined}>
                       <td><Dot state={sessionLamp(row)} /></td>
                       <td>
-                        <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{row.title}</div>
-                        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10.5px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
+                        <div className="table-title">{row.title}</div>
+                        <div className="table-id">
                           #{row.sessionId}{row.cwd !== '' ? ` · ${row.cwd}` : ''}
                         </div>
                       </td>
                       <td>{row.agentPreset !== '' ? row.agentPreset : '未采集'}</td>
                       <td>{relative !== '' ? relative : '未采集'}</td>
-                      <td style={{ textAlign: 'right' }}>
+                      <td className="table-cell-end">
                         <Button variant="ghost" size="sm" onClick={() => onSelectSession?.(row.sessionId)}>
                           接入
                         </Button>
