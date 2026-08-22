@@ -11,12 +11,15 @@ import { CouncilLedgerView } from '@/components/console/CouncilLedgerView';
 import { RoutesView } from '@/components/console/RoutesView';
 import { TraceView } from '@/components/console/TraceView';
 import { overviewLamp, RealOverview, useConsoleLive } from '@/pages/console-live';
+import type { SkillsConsoleTab } from '@/pages/app-navigation';
 
 export type ConsoleTab = 'overview' | 'fleet' | 'sessions' | 'lineage' | 'trace' | 'plans' | 'skills' | 'ledger' | 'routes';
 
 export interface ConsolePageProps {
   initialTab?: ConsoleTab;
   initialFleetBatchId?: string;
+  initialSkillsTab?: SkillsConsoleTab;
+  initialSkill?: string;
   onNavigateChat?: (sessionId?: string) => void;
   onNavigateGraph?: () => void;
 }
@@ -24,14 +27,18 @@ export interface ConsolePageProps {
 export const ConsolePage: React.FC<ConsolePageProps> = ({
   initialTab = 'overview',
   initialFleetBatchId,
+  initialSkillsTab,
+  initialSkill,
   onNavigateChat,
   onNavigateGraph,
 }) => {
   const [activeTab, setActiveTab] = useState<ConsoleTab>(initialTab);
+  const [skillsTab, setSkillsTab] = useState<SkillsConsoleTab | undefined>(initialSkillsTab);
   const [selectedFleetBatchId, setSelectedFleetBatchId] = useState<string | undefined>(initialFleetBatchId);
   const [densityMode, setDensityMode] = useState<'dense' | 'sparse'>('dense');
 
   useEffect(() => { setActiveTab(initialTab); }, [initialTab]);
+  useEffect(() => { setSkillsTab(initialSkillsTab); }, [initialSkillsTab]);
   useEffect(() => { setSelectedFleetBatchId(initialFleetBatchId); }, [initialFleetBatchId]);
   const consoleLive = useConsoleLive({
     overviewEnabled: activeTab === 'overview' || activeTab === 'plans',
@@ -184,7 +191,9 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
           {activeTab === 'lineage' && <LineageView />}
           {activeTab === 'trace' && <TraceView onSelectSession={(id) => onNavigateChat?.(id)} />}
           {activeTab === 'plans' && <PlansView overviewTotal={overviewFresh ? consoleLive.plansTotal : undefined} />}
-          {activeTab === 'skills' && <SkillsView />}
+          {activeTab === 'skills' && (
+            <SkillsView initialTab={skillsTab} initialSkill={initialSkill} />
+          )}
           {activeTab === 'routes' && <RoutesView />}
           {activeTab === 'ledger' && <CouncilLedgerView />}
 
@@ -194,6 +203,11 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
               density={densityMode}
               onNavigateChat={onNavigateChat}
               onNavigateLineage={() => setActiveTab('lineage')}
+              onNavigateStudio={() => {
+                setSkillsTab('studio');
+                setActiveTab('skills');
+              }}
+              onNavigateAssemble={() => setActiveTab('routes')}
             />
           )}
         </div>

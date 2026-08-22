@@ -36,6 +36,13 @@ function prefersReducedMotion(): boolean {
 }
 
 const NO_MATCHED_NODES: ReadonlySet<string> = new Set();
+const NO_FOCUS_NODES: ReadonlySet<string> = new Set();
+const NO_EXPIRED_NODES: ReadonlySet<string> = new Set();
+const NO_PATH: readonly string[] = [];
+
+function setKey(values: ReadonlySet<string>): string {
+  return [...values].sort().join('\0');
+}
 
 export interface CanvasGraphProps {
   nodes: MemoryNodeData[];
@@ -43,6 +50,10 @@ export interface CanvasGraphProps {
   selectedNodeId?: string;
   searchQuery?: string;
   matchedNodeIds?: ReadonlySet<string>;
+  /** Extra lit neighborhood: search expansion, 2-hop local, component, or lineage. */
+  focusNodeIds?: ReadonlySet<string>;
+  expiredNodeIds?: ReadonlySet<string>;
+  pathIds?: readonly string[];
   typeFilter?: string;
   isSimulating?: boolean;
   onSelectNode: (node: MemoryNodeData | null) => void;
@@ -55,6 +66,9 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
   selectedNodeId,
   searchQuery = '',
   matchedNodeIds = NO_MATCHED_NODES,
+  focusNodeIds = NO_FOCUS_NODES,
+  expiredNodeIds = NO_EXPIRED_NODES,
+  pathIds = NO_PATH,
   typeFilter = 'all',
   isSimulating = true,
   onSelectNode,
@@ -200,11 +214,20 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
       const focusTarget = (hoveredNodeRef.current || selectedNodeId) ? 1 : 0;
       focusT += (focusTarget - focusT) * 0.16; // ~150ms 平滑,Obsidian 的渐隐邻域
 
-      // 计算高亮邻域
+      // 计算高亮邻域:工程焦点 ∪ hover/选中的一跳
       const hovered = hoveredNodeRef.current;
       const selectedId = selectedNodeId;
       const activeId = hovered?.id || selectedId;
-      const connectedSet = new Set<string>();
+      const connectedSet = new Set<string>(focusNodeIds);
+      const pathSet = new Set(pathIds);
+      const pathEdges = new Set<string>();
+      for (let i = 0; i < pathIds.length - 1; i += 1) {
+        const left = pathIds[i];
+        const right = pathIds[i + 1];
+        if (left === undefined || right === undefined) continue;
+        pathEdges.add(`${left}\0${right}`);
+        pathEdges.add(`${right}\0${left}`);
+      }
 
       if (activeId) {
         connectedSet.add(activeId);
@@ -213,6 +236,7 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
           if (e.to === activeId) connectedSet.add(e.from);
         });
       }
+      const hasFocus = connectedSet.size > 0;
 
       const nodeMap = new Map<string, SimNode>();
       simNodes.forEach((n) => nodeMap.set(n.id, n));
@@ -224,10 +248,10 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
         if (!src) return;
         if (typeFilter !== 'all' && (src.type !== typeFilter || (tgt !== undefined && tgt.type !== typeFilter))) return;
 
-        const isHighlighted = activeId
-          ? (edge.from === activeId || edge.to === activeId)
-          : false;
-        const isDimmed = activeId ? !isHighlighted : false;
+        const isPathEdge = pathEdges.has(`${edge.from}\0${edge.to}`);
+        const isHighlighted = Boolean(activeId && (edge.from === activeId || edge.to === activeId)) || isPathEdge;
+        const touchesFocus = connectedSet.has(edge.from) || (tgt !== undefined && connectedSet.has(tgt.id));
+        const isDimmed = hasFocus ? !touchesFocus && !isPathEdge : false;
 
         let endX: number;
         let endY: number;
@@ -312,13 +336,15 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
         const hasSearch = searchQuery.trim() !== '';
         const isMatchSearch = !hasSearch || matchedNodeIds.has(node.id);
 
-        const isDimmed = activeId
+        const isDimmed = hasFocus
           ? !connectedSet.has(node.id)
           : hasSearch && !isMatchSearch;
 
         const color = graphTypeColor(node.type);
         // 标签和白环必须用显式焦点；无焦点时全图开灯会造成视觉噪声。
-        const isFocus = activeId ? connectedSet.has(node.id) : false;
+        const isFocus = hasFocus ? connectedSet.has(node.id) : false;
+        const isPathNode = pathSet.has(node.id);
+        const isExpired = expiredNodeIds.has(node.id);
         const radius = node.radius * (isFocus ? 1.25 : 1);
 
         // 最近7天更新节点挂载共息呼吸光晕
@@ -338,8 +364,8 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
         ctx.fill();
         ctx.globalAlpha = appearT;
         if (isFocus) { // 只有焦点邻域上细环,平时无描边(Obsidian 语法)
-          ctx.lineWidth = node.id === selectedId ? 2 : 1.4;
-          ctx.strokeStyle = node.id === selectedId
+          ctx.lineWidth = node.id === selectedId || isPathNode ? 2 : 1.4;
+          ctx.strokeStyle = node.id === selectedId || isPathNode
             ? (runningStroke || color)
             : 'rgba(255, 255, 255, 0.8)';
           ctx.stroke();
@@ -347,6 +373,13 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
           ctx.lineWidth = 2;
           ctx.strokeStyle = doneStroke || 'rgba(127, 206, 155, 0.95)';
           ctx.stroke();
+        }
+        if (isExpired) {
+          ctx.setLineDash([2, 2]);
+          ctx.lineWidth = 1.2;
+          ctx.strokeStyle = 'rgba(245, 158, 11, 0.85)';
+          ctx.stroke();
+          ctx.setLineDash([]);
         }
 
         // 标签文本 (高亮节点或出度大节点显示)
@@ -376,7 +409,20 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
       cancelAnimationFrame(animId);
       kickLoopRef.current = () => {};
     };
-  }, [isSimulating, matchedNodeIds, rawEdges, selectedNodeId, searchQuery, typeFilter]);
+  }, [
+    expiredNodeIds,
+    focusNodeIds,
+    isSimulating,
+    matchedNodeIds,
+    pathIds,
+    rawEdges,
+    searchQuery,
+    selectedNodeId,
+    typeFilter,
+    setKey(expiredNodeIds),
+    setKey(focusNodeIds),
+    pathIds.join('\0'),
+  ]);
 
   // 自适应 Canvas 尺寸
   useEffect(() => {

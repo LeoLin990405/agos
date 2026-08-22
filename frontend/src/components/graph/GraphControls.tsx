@@ -4,6 +4,12 @@ import type { MemoryNodeType } from '@/design-system/tokens';
 import type { ResourceStatus } from '@/lib/resource';
 import type { LinkSuggestion, MemorySearchResult } from '@/pages/memory-graph-api';
 import type { MemoryGraphSummary } from './mock-graph-data';
+import {
+  GRAPH_VIEW_MODES,
+  type GraphViewMode,
+  type MemoryComponent,
+  type SupersedesChain,
+} from '@/pages/memory-graph-engineering';
 
 export interface GraphControlsProps {
   searchQuery: string;
@@ -29,6 +35,17 @@ export interface GraphControlsProps {
   suggestionsOpen: boolean;
   onToggleSuggestions: () => void;
   onRefreshSuggestions: () => void;
+  viewMode: GraphViewMode;
+  onViewModeChange: (mode: GraphViewMode) => void;
+  componentCount: number;
+  isolateCount: number;
+  expiredCount: number;
+  uncollectedValidityCount: number;
+  supersedesCount: number;
+  largestComponentSize: number;
+  components: readonly MemoryComponent[];
+  lineageChains: readonly SupersedesChain[];
+  activationBySlug?: ReadonlyMap<string, number>;
 }
 
 const panelStyle: React.CSSProperties = {
@@ -51,6 +68,7 @@ function SearchResults({
   error,
   onRetry,
   onFocusNode,
+  activationBySlug,
 }: {
   status: ResourceStatus;
   pending: boolean;
@@ -58,6 +76,7 @@ function SearchResults({
   error?: string;
   onRetry: () => void;
   onFocusNode: (id: string) => void;
+  activationBySlug?: ReadonlyMap<string, number>;
 }) {
   const loading = pending || status === 'idle' || status === 'loading';
   return (
@@ -111,6 +130,9 @@ function SearchResults({
               {result.description && <span style={{ display: 'block', ...quietText, marginTop: '4px' }}>{result.description}</span>}
               <span className="u-microlabel" style={{ display: 'block', marginTop: '5px' }}>
                 {result.matchedBy.join(' + ')}
+                {activationBySlug?.has(result.slug)
+                  ? ` · 种子激活 ${activationBySlug.get(result.slug)?.toFixed(4)}`
+                  : ''}
               </span>
             </button>
           ))}
@@ -222,6 +244,17 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
   suggestionsOpen,
   onToggleSuggestions,
   onRefreshSuggestions,
+  viewMode,
+  onViewModeChange,
+  componentCount,
+  isolateCount,
+  expiredCount,
+  uncollectedValidityCount,
+  supersedesCount,
+  largestComponentSize,
+  components,
+  lineageChains,
+  activationBySlug,
 }) => {
   const hasQuery = searchQuery.trim() !== '';
   const unknownEntries = Object.entries(summary.unknownTypes).sort(([left], [right]) => left.localeCompare(right));
@@ -259,8 +292,23 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
           error={searchError}
           onRetry={onRetrySearch}
           onFocusNode={onFocusNode}
+          activationBySlug={activationBySlug}
         />
       )}
+
+      <div style={{ ...panelStyle, display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 10px', flexWrap: 'wrap', maxWidth: '720px' }} className="mem-view-row">
+        {GRAPH_VIEW_MODES.map((mode) => (
+          <button
+            key={mode.id}
+            type="button"
+            className={`btn btn-sm ${viewMode === mode.id ? 'btn-primary' : 'btn-ghost'}`}
+            title={mode.hint}
+            onClick={() => onViewModeChange(mode.id)}
+          >
+            {mode.label}
+          </button>
+        ))}
+      </div>
 
       <div style={{ ...panelStyle, display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 10px', flexWrap: 'wrap', maxWidth: '720px' }}>
         <button type="button" className={`btn btn-sm ${typeFilter === 'all' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => onTypeFilterChange('all')}>
@@ -308,11 +356,76 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
             未知类型 {unknownEntries.map(([type, count]) => `${type}(${count})`).join('、')}
           </span>
         )}
+        <span title="客户端连通分量，不是 Leiden 社区报告">
+          连通分量 {componentCount} · 最大 {largestComponentSize} · 孤立 {isolateCount}
+        </span>
+        <span>
+          已失效 {expiredCount} · 失效时间未采集 {uncollectedValidityCount} · supersedes {supersedesCount}
+        </span>
         {suggestions !== undefined && <span>补链对照已采集</span>}
         <Button variant="ghost" size="sm" onClick={onToggleSuggestions} aria-expanded={suggestionsOpen}>
           {suggestionLabel} {suggestionsOpen ? '▴' : '▾'}
         </Button>
       </div>
+
+      {viewMode === 'community' && (
+        <section className="mem-panel" aria-label="连通分量">
+          <h3 style={{ fontSize: '12px', fontWeight: 700, margin: '0 0 8px' }}>连通分量</h3>
+          <p style={quietText}>按已解析边计算。不是 GraphRAG 的 Leiden 社区摘要。</p>
+          {components.filter((component) => !component.isolate).length === 0 ? (
+            <p style={{ ...quietText, marginTop: '8px' }}>没有大于 1 的分量。</p>
+          ) : (
+            <div className="mem-panel-list" style={{ marginTop: '8px' }}>
+              {components.filter((component) => !component.isolate).slice(0, 12).map((component) => (
+                <button
+                  key={component.id}
+                  type="button"
+                  className="mem-panel-row"
+                  onClick={() => { const seed = component.memberIds[0]; if (seed) onFocusNode(seed); }}
+                >
+                  <span className="u-num">#{component.id}</span>
+                  <code>{component.memberIds.slice(0, 3).join(' · ')}</code>
+                  <span className="u-microlabel">{component.size} 篇</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {isolateCount > 0 && (
+            <p style={{ ...quietText, marginTop: '8px' }}>另有 {isolateCount} 篇孤立文档。</p>
+          )}
+        </section>
+      )}
+
+      {viewMode === 'lineage' && (
+        <section className="mem-panel" aria-label="时间谱系">
+          <h3 style={{ fontSize: '12px', fontWeight: 700, margin: '0 0 8px' }}>supersedes 谱系</h3>
+          <p style={quietText}>新记录指向被取代的旧记录。没有链就不编造。</p>
+          {lineageChains.length === 0 ? (
+            <p style={{ ...quietText, marginTop: '8px' }}>当前图没有已解析的 supersedes 链。</p>
+          ) : (
+            <div className="mem-panel-list" style={{ marginTop: '8px' }}>
+              {lineageChains.slice(0, 12).map((chain) => (
+                <button
+                  key={chain.head}
+                  type="button"
+                  className="mem-panel-row"
+                  onClick={() => onFocusNode(chain.head)}
+                >
+                  <span aria-hidden="true">⇒</span>
+                  <code>{chain.nodes.join(' ⇒ ')}</code>
+                  <span className="u-microlabel">{chain.nodes.length} 步</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {viewMode === 'local' && (
+        <section className="mem-panel" aria-label="局部检索">
+          <p style={quietText}>选择一个节点后，星图只点亮它的 2 跳邻域。这是 GraphRAG local / LightRAG 低层，不是全文生成。</p>
+        </section>
+      )}
 
       {suggestionsOpen && (
         <SuggestionList

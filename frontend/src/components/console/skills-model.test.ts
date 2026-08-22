@@ -8,6 +8,7 @@ import {
   mergeRpcCatalog,
   neverUsedCount,
   parseSkillsPayload,
+  skillUsageHonesty,
   sortCatalog,
   usageDenominatorReady,
   vanishedUsageSkills,
@@ -63,6 +64,12 @@ test('catalog filter/sort/group and never-used signal', () => {
   const merged = mergeRpcCatalog(catalog, [{ name: 'ask', description: 'RPC desc', modelInvocable: true, whenToUse: 'when asking' }]);
   assert.equal(merged.find((r) => r.name === 'ask')?.modelInvocable, true);
   assert.equal(merged.find((r) => r.name === 'ask')?.whenToUse, 'when asking');
+});
+
+test('skillUsageHonesty does not treat a missing sample as never-used', () => {
+  assert.equal(skillUsageHonesty(undefined), '使用次数未采集。');
+  assert.equal(skillUsageHonesty({ count: 0, lastAt: 1 }), '当前样本下从未调用，不是删除判决。');
+  assert.equal(skillUsageHonesty({ count: 4, lastAt: 1 }), '当前样本调用 4 次。');
 });
 
 test('usageDenominatorReady is success-only', () => {

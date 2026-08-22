@@ -12,6 +12,16 @@ import {
   type SessionMemoryItem,
   type SessionMemoryKind,
 } from './session-memory-model';
+import {
+  SESSION_KIND_LABELS,
+  SESSION_MEMORY_LAYER,
+  compactSessionMemoryItems,
+  filterSessionMemoryByQuery,
+  importanceUnit,
+  sessionMemoryByKind,
+  sessionMemoryByTurn,
+  type SessionMemoryGroup,
+} from './session-memory-presentation';
 
 const KIND_PRESENTATION: Record<SessionMemoryKind, { label: string; variant: ChipProps['variant'] }> = {
   fact: { label: '事实', variant: 'default' },
@@ -32,19 +42,43 @@ const isAbort = (error: unknown): boolean =>
   && error !== null
   && (error as { name?: unknown }).name === 'AbortError';
 
-const SessionMemoryRow: React.FC<{ item: SessionMemoryItem }> = ({ item }) => {
+const SessionMemoryRow: React.FC<{
+  item: SessionMemoryItem;
+  selected?: boolean;
+  onSelect?: (item: SessionMemoryItem) => void;
+}> = ({ item, selected = false, onSelect }) => {
   const kind = KIND_PRESENTATION[item.kind];
-  return (
-    <li className="agc-memory-row">
+  const body = (
+    <div className="agc-memory-row">
       <div className="agc-memory-row-head">
         <Chip variant={kind.variant}>{kind.label}</Chip>
         <span className="u-num agc-memory-meta">重要度 {item.importance}</span>
+        <span
+          className="viz-track agc-memory-importance"
+          style={{ ['--u-p' as string]: String(importanceUnit(item.importance)) }}
+          aria-hidden="true"
+        >
+          <span className="viz-fill is-done" />
+        </span>
       </div>
       <p className="agc-memory-text">{item.text}</p>
       <div className="agc-memory-foot">
         <span className="u-num">{item.sourceTurn === 0 ? '会话开始' : `第 ${item.sourceTurn} 轮`}</span>
         <time dateTime={item.createdAt} title={item.createdAt}>{formatSessionMemoryTime(item.createdAt)}</time>
       </div>
+    </div>
+  );
+  if (onSelect === undefined) return <li>{body}</li>;
+  return (
+    <li>
+      <button
+        type="button"
+        className={`mem-episode-row${selected ? ' is-on' : ''}`}
+        aria-pressed={selected}
+        onClick={() => onSelect(item)}
+      >
+        {body}
+      </button>
     </li>
   );
 };
@@ -52,10 +86,30 @@ const SessionMemoryRow: React.FC<{ item: SessionMemoryItem }> = ({ item }) => {
 export const SessionMemoryPane: React.FC<{
   sessionId: string | undefined;
   fetchImpl?: SessionMemoryFetch;
-}> = ({ sessionId, fetchImpl }) => {
+  variant?: 'workspace' | 'compact';
+  query?: string;
+  selectedItemId?: string;
+  onSelectItem?: (item: SessionMemoryItem) => void;
+  onOpenWorkspace?: () => void;
+}> = ({
+  sessionId,
+  fetchImpl,
+  variant = 'workspace',
+  query = '',
+  selectedItemId,
+  onSelectItem,
+  onOpenWorkspace,
+}) => {
   const url = sessionId === undefined || sessionId.trim() === '' ? null : sessionMemoryUrl(sessionId);
   const [generation, refresh] = useReducer((value: number) => value + 1, 0);
   const [state, setState] = useState<PaneState>({ key: null, phase: 'idle', data: undefined, error: undefined });
+  const [kindFilter, setKindFilter] = useState<SessionMemoryKind | 'all'>('all');
+  const [groupBy, setGroupBy] = useState<SessionMemoryGroup>('kind');
+
+  useEffect(() => {
+    setKindFilter('all');
+    setGroupBy('kind');
+  }, [sessionId]);
 
   useEffect(() => {
     if (url === null || sessionId === undefined) {
@@ -143,15 +197,30 @@ export const SessionMemoryPane: React.FC<{
   }
 
   const extracting = active.status === 'extracting';
+  const queried = filterSessionMemoryByQuery(active.items, query);
+  const compact = compactSessionMemoryItems(queried);
+  const kindGroups = sessionMemoryByKind(queried, kindFilter);
+  const turnGroups = sessionMemoryByTurn(queried, kindFilter);
+  const compactMode = variant === 'compact';
   return (
     <div className="agc-memory">
       <div className="agc-memory-summary">
-        <div className="agc-memory-total">
-          <strong className="u-num">{active.counts.total}</strong>
-          <span>条会话记忆</span>
+        <div className="agc-memory-layer">
+          <span className="agc-memory-layer-name">{SESSION_MEMORY_LAYER}</span>
+          <div className="agc-memory-total">
+            <strong className="u-num">{active.counts.total}</strong>
+            <span>条会话记忆</span>
+          </div>
         </div>
-        <Button size="sm" variant="ghost" onClick={refresh}>刷新</Button>
+        {compactMode && onOpenWorkspace !== undefined ? (
+          <Button size="sm" variant="ghost" onClick={onOpenWorkspace}>在记忆台打开</Button>
+        ) : (
+          <Button size="sm" variant="ghost" onClick={refresh}>刷新</Button>
+        )}
       </div>
+      <p className="agc-memory-honesty">
+        工作层 / 情节条目只反映本会话已提炼内容。是否写入长期图谱未在此采集。
+      </p>
 
       {extracting && (
         <div className="agc-memory-notice" role="status" aria-live="polite">
@@ -178,10 +247,85 @@ export const SessionMemoryPane: React.FC<{
               ? '正在整理第一批会话记忆…'
               : '本轮没有形成可保留的事实、约束、偏好或排除项。'}
         </p>
+      ) : queried.length === 0 ? (
+        <p className="agc-empty">没有命中情节条目。星图检索不会在这里编造对应文档。</p>
+      ) : compactMode ? (
+        <>
+          <ul className="agc-memory-list">
+            {compact.items.map((item) => (
+              <SessionMemoryRow item={item} key={item.id} />
+            ))}
+          </ul>
+          {compact.hidden > 0 && (
+            <p className="agc-memory-honesty">还有 {compact.hidden} 条在记忆台。</p>
+          )}
+        </>
       ) : (
-        <ul className="agc-memory-list">
-          {active.items.map((item) => <SessionMemoryRow item={item} key={item.id} />)}
-        </ul>
+        <>
+          <div className="agc-memory-filters">
+            <button type="button" className={`btn btn-sm ${kindFilter === 'all' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setKindFilter('all')}>
+              全部 ({queried.length})
+            </button>
+            {([
+              ['constraint', '约束', active.counts.constraint],
+              ['preference', '偏好', active.counts.preference],
+              ['fact', '事实', active.counts.fact],
+              ['rejected', '已排除', active.counts.rejected],
+            ] as const).map(([kind, label, count]) => (
+              <button
+                key={kind}
+                type="button"
+                className={`btn btn-sm ${kindFilter === kind ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => setKindFilter(kind)}
+              >
+                {label} ({count})
+              </button>
+            ))}
+            <button type="button" className={`btn btn-sm ${groupBy === 'kind' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setGroupBy('kind')}>
+              按种类
+            </button>
+            <button type="button" className={`btn btn-sm ${groupBy === 'turn' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setGroupBy('turn')}>
+              按轮次
+            </button>
+          </div>
+          {groupBy === 'kind'
+            ? kindGroups.map((group) => (
+              <div key={group.kind}>
+                <div className="agc-memory-group-head">
+                  <span>{SESSION_KIND_LABELS[group.kind]}</span>
+                  <span className="u-num">{group.items.length}</span>
+                </div>
+                <ul className="agc-memory-list">
+                  {group.items.map((item) => (
+                    <SessionMemoryRow
+                      item={item}
+                      key={item.id}
+                      selected={selectedItemId === item.id}
+                      onSelect={onSelectItem}
+                    />
+                  ))}
+                </ul>
+              </div>
+            ))
+            : turnGroups.map((group) => (
+              <div key={group.sourceTurn}>
+                <div className="agc-memory-group-head">
+                  <span>{group.sourceTurn === 0 ? '会话开始' : `第 ${group.sourceTurn} 轮`}</span>
+                  <span className="u-num">{group.items.length}</span>
+                </div>
+                <ul className="agc-memory-list">
+                  {group.items.map((item) => (
+                    <SessionMemoryRow
+                      item={item}
+                      key={item.id}
+                      selected={selectedItemId === item.id}
+                      onSelect={onSelectItem}
+                    />
+                  ))}
+                </ul>
+              </div>
+            ))}
+        </>
       )}
     </div>
   );

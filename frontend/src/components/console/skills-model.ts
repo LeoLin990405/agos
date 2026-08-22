@@ -100,6 +100,12 @@ export interface SkillsPayload {
 
 export const SKILLS_USAGE_READY_COPY = '使用率分母已采集';
 
+export function skillUsageHonesty(usage: SkillUsageStat | undefined): string {
+  if (usage === undefined) return '使用次数未采集。';
+  if (usage.count === 0) return '当前样本下从未调用，不是删除判决。';
+  return `当前样本调用 ${usage.count} 次。`;
+}
+
 /** 分母锚点只在扫描成功态出现。error 或缺 files/roots = 失败,不能绿。 */
 export function usageDenominatorReady(meta: SkillsPayload['usageMeta'] | undefined): boolean {
   if (meta === undefined) return false;
@@ -121,7 +127,7 @@ export function vanishedUsageSkills(
 }
 
 export type SkillsSort = 'name' | 'recent' | 'never';
-export type SkillsTab = 'catalog' | 'audit';
+export type SkillsTab = 'catalog' | 'audit' | 'studio';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);

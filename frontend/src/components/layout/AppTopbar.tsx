@@ -57,7 +57,7 @@ const svgProps = {
 
 /** 顶栏自带的 14px 线性图标,零依赖内联 SVG。 */
 export const TOPBAR_ICONS = {
-  /** 记忆星图 / 图谱 */
+  /** 记忆工作台 */
   graph: (
     <svg {...svgProps}>
       <circle cx="3.5" cy="4" r="1.7" />

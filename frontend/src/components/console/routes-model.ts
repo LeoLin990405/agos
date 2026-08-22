@@ -28,6 +28,7 @@ export interface RouteDecision {
 export interface RoutesPayload {
   at?: number
   decisions: RouteDecision[]
+  assemble?: unknown
   stats: {
     total: number
     filled: number
@@ -54,6 +55,13 @@ export function parseRoutesPayload(value: unknown): RoutesPayload {
 
 export function outcomeLabel(outcome: string | null | undefined): 'pending' | 'filled' {
   return outcome === null || outcome === undefined ? 'pending' : 'filled'
+}
+
+export function outcomeValueCopy(outcome: string | null | undefined): string {
+  if (outcome === null || outcome === undefined) return '待回填'
+  if (outcome === 'ok') return '成功'
+  if (outcome === 'fail') return '失败'
+  return '已回填'
 }
 
 export function formatCoverage(stats: RoutesPayload['stats']): string {

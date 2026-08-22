@@ -100,12 +100,22 @@ interface OpenSessionMenu {
 
 export const ChatPage: React.FC<{
   onNavigateConsole?: () => void;
+  onNavigateStudio?: () => void;
+  onNavigateAssemble?: () => void;
   onNavigateFleet?: (batchId?: string) => void;
-  onNavigateGraph?: (nodeId?: string) => void;
+  onNavigateGraph?: (intent?: { sessionId?: string; nodeId?: string }) => void;
   initialSessionId?: string;
   /** 消费掉 initialSessionId 后回调,由 App 清空 —— 它是一次性跳转意图,不是持久状态。 */
   onInitialSessionConsumed?: () => void;
-}> = ({ onNavigateConsole, onNavigateFleet, onNavigateGraph, initialSessionId, onInitialSessionConsumed }) => {
+}> = ({
+  onNavigateConsole,
+  onNavigateStudio,
+  onNavigateAssemble,
+  onNavigateFleet,
+  onNavigateGraph,
+  initialSessionId,
+  onInitialSessionConsumed,
+}) => {
   const [activeSessionId, setActiveSessionId] = useState(initialSessionId ?? '');
   const [searchQuery, setSearchQuery] = useState('');
   const [isNewSessionOpen, setIsNewSessionOpen] = useState(false);
@@ -870,7 +880,7 @@ export const ChatPage: React.FC<{
                 icon={TOPBAR_ICONS.console}
                 onClick={() => setIsComputerOpen((v) => !v)}
               />
-              <TopbarAction label="记忆星图" icon={TOPBAR_ICONS.graph} onClick={() => onNavigateGraph?.()} />
+              <TopbarAction label="记忆" icon={TOPBAR_ICONS.graph} onClick={() => onNavigateGraph?.()} />
               <Button variant="primary" size="sm" onClick={onNavigateConsole}>
                 控制台概览
               </Button>
@@ -975,6 +985,8 @@ export const ChatPage: React.FC<{
             <EmptyStateBelow
               onSelectPreset={(presetId) => { setPendingPresetId(presetId); setIsNewSessionOpen(true); }}
               onNavigate={(tab) => { if (tab === 'graph') onNavigateGraph?.(); else if (tab === 'console') onNavigateConsole?.(); }}
+              onOpenStudio={onNavigateStudio}
+              onOpenAssemble={onNavigateAssemble}
               onOpenSession={handleSelectSession}
             />
           </div>
@@ -985,6 +997,9 @@ export const ChatPage: React.FC<{
         <AgosComputer
           sessionId={hasActiveLiveSession ? activeSessionId : undefined}
           onClose={() => setIsComputerOpen(false)}
+          onOpenMemory={hasActiveLiveSession
+            ? () => onNavigateGraph?.({ sessionId: activeSessionId })
+            : undefined}
         />
       )}
 

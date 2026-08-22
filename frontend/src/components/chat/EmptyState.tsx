@@ -84,8 +84,10 @@ export const EmptyStateHero: React.FC = () => (
 export interface EmptyStateBelowProps {
   /** 点击原生模式胶囊:回调真实 presetId(agentPreset.list 的 id)。 */
   onSelectPreset?: (presetId: string) => void;
-  /** 点击导航胶囊:回调 App.tsx 的路由 tab 名('graph' / 'console')。 */
+  /** 点击导航胶囊:回调 App.tsx 的路由 tab 名('graph' 记忆工作台 / 'console')。 */
   onNavigate?: (tab: MainTab) => void;
+  onOpenStudio?: () => void;
+  onOpenAssemble?: () => void;
   /** 点击最近会话行:回调真实 sessionId。 */
   onOpenSession?: (sessionId: string) => void;
 }
@@ -119,6 +121,8 @@ const rowLamp = (row: SessionSummaryRow): StateLamp => (row.running ? 'running' 
 export const EmptyStateBelow: React.FC<EmptyStateBelowProps> = ({
   onSelectPreset,
   onNavigate,
+  onOpenStudio,
+  onOpenAssemble,
   onOpenSession,
 }) => {
   const presets = useSyncExternalStore(presetsStore.subscribe, presetsStore.getSnapshot);
@@ -150,11 +154,11 @@ export const EmptyStateBelow: React.FC<EmptyStateBelowProps> = ({
           <button
             type="button"
             className="es-chip"
-            title="打开记忆星图"
+            title="打开记忆"
             onClick={() => onNavigate?.('graph')}
           >
             <GraphIcon />
-            记忆星图
+            记忆
           </button>
           <button
             type="button"
@@ -165,6 +169,26 @@ export const EmptyStateBelow: React.FC<EmptyStateBelowProps> = ({
             <ConsoleIcon />
             控制台
           </button>
+          {onOpenStudio && (
+            <button
+              type="button"
+              className="es-chip"
+              title="打开技能工作室"
+              onClick={onOpenStudio}
+            >
+              工作室
+            </button>
+          )}
+          {onOpenAssemble && (
+            <button
+              type="button"
+              className="es-chip"
+              title="打开路由组装提案"
+              onClick={onOpenAssemble}
+            >
+              组装
+            </button>
+          )}
         </div>
       )}
 

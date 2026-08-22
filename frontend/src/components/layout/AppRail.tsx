@@ -18,7 +18,7 @@ export interface AppRailProps {
 }
 
 /**
- * G5 侧栏语法:动词置顶(新会话)→ 主导航(对话/控制台/记忆星图)→ 底部账号区。
+ * G5 侧栏语法:动词置顶(新会话)→ 主导航(对话/控制台/记忆)→ 底部账号区。
  * 谱系不是 App.tsx 顶层路由(位于控制台内部),故不入主导航;
  * live.ts 无余额/身份数据源,底部账号区仅渲染设置入口。
  */
@@ -66,7 +66,7 @@ export const AppRail: React.FC<AppRailProps> = ({
 
       <div className="rail-divider" role="presentation" />
 
-      {/* ── 主导航:对话 → 控制台 → 记忆星图 ─────────────── */}
+      {/* ── 主导航:对话 → 控制台 → 记忆 ─────────────── */}
       <button
         type="button"
         className={`rail-btn ${currentTab === 'chat' ? 'is-active' : ''}`}
@@ -83,7 +83,7 @@ export const AppRail: React.FC<AppRailProps> = ({
       <button
         type="button"
         className={`rail-btn ${currentTab === 'console' ? 'is-active' : ''}`}
-        title="控制台 (Console - 概览·机器·会话·谱系·计划·技能)"
+        title="控制台（概览·工作室·路由组装·机器·会话）"
         aria-label="控制台"
         onClick={() => onSelectTab('console')}
       >
@@ -98,8 +98,8 @@ export const AppRail: React.FC<AppRailProps> = ({
       <button
         type="button"
         className={`rail-btn ${currentTab === 'graph' ? 'is-active' : ''}`}
-        title="记忆星图 (Memory Graph)"
-        aria-label="记忆星图"
+        title="记忆"
+        aria-label="记忆"
         onClick={() => onSelectTab('graph')}
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>

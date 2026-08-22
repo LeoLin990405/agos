@@ -203,7 +203,9 @@ export const RealOverview: React.FC<{
   density?: 'dense' | 'sparse';
   onNavigateChat?: (sessionId?: string) => void;
   onNavigateLineage?: () => void;
-}> = ({ live, density = 'dense', onNavigateChat, onNavigateLineage }) => {
+  onNavigateStudio?: () => void;
+  onNavigateAssemble?: () => void;
+}> = ({ live, density = 'dense', onNavigateChat, onNavigateLineage, onNavigateStudio, onNavigateAssemble }) => {
   if (!live.live) {
     if (live.overviewStatus === 'error' && live.overviewError !== undefined) {
       return (
@@ -280,6 +282,17 @@ export const RealOverview: React.FC<{
               ? live.skillsConsistency
               : '根并集审计 · 区分模型根与控制台-only'}
         </div>
+      </div>
+    </section>
+
+    <section className="surface-section" aria-label="产品入口">
+      <h3 className="surface-h3">工作室与组装</h3>
+      <p className="surface-quiet">
+        技能工作室只写模型根。路由组装是提案，不是已派活。
+      </p>
+      <div className="surface-cluster">
+        <Button size="sm" onClick={onNavigateStudio}>打开工作室</Button>
+        <Button size="sm" onClick={onNavigateAssemble}>打开路由组装</Button>
       </div>
     </section>
 

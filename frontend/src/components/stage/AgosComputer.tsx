@@ -176,7 +176,8 @@ export const AgosComputer: React.FC<{
   sessionId: string | undefined;
   onClose: () => void;
   remote?: { host: string; runId: string };
-}> = ({ sessionId, onClose, remote }) => {
+  onOpenMemory?: () => void;
+}> = ({ sessionId, onClose, remote, onOpenMemory }) => {
   const [tab, setTab] = useState<AgosComputerTab>('terminal');
   const bodyRef = useRef<HTMLDivElement | null>(null);
 
@@ -300,7 +301,13 @@ export const AgosComputer: React.FC<{
         {visibleTab === 'terminal' && <TerminalPane entries={terminal} />}
         {visibleTab === 'files' && <FilesPane entries={files} />}
         {visibleTab === 'subagents' && <SubagentsPane batches={batches} />}
-        {visibleTab === 'memory' && remote === undefined && <SessionMemoryPane sessionId={localSessionId} />}
+        {visibleTab === 'memory' && remote === undefined && (
+          <SessionMemoryPane
+            sessionId={localSessionId}
+            variant="compact"
+            onOpenWorkspace={onOpenMemory}
+          />
+        )}
         {visibleTab === 'artifacts' && remote !== undefined && (
           <ArtifactPane host={remote.host} runId={remote.runId} />
         )}

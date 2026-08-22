@@ -405,7 +405,7 @@
 }
 
 .graph-inspector-drawer {
-  width: 320px;
+  width: 360px;
   flex: none;
   background-color: var(--bg-layer-1);
   border-left: 1px solid var(--border-dim);

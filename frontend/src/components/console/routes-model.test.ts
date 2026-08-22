@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import {
   formatCoverage,
   outcomeLabel,
+  outcomeValueCopy,
   parseRoutesPayload,
   ROUTES_READY_COPY,
   routesTierNote,
@@ -25,6 +26,10 @@ test('null outcome is pending, never success or failure', () => {
   assert.equal(outcomeLabel(null), 'pending')
   assert.equal(outcomeLabel(undefined), 'pending')
   assert.equal(outcomeLabel('ok'), 'filled')
+  assert.equal(outcomeValueCopy(null), '待回填')
+  assert.equal(outcomeValueCopy('ok'), '成功')
+  assert.equal(outcomeValueCopy('fail'), '失败')
+  assert.equal(outcomeValueCopy('weird'), '已回填')
   assert.equal(
     formatCoverage({ total: 3, filled: 1, pending: 2, cells: 2, window: 2 }),
     '显示最近 2 条，台账共 3 条 · 已回填结果 1 条 · 覆盖 2 个 (角色, 模型) 格',

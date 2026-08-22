@@ -22,6 +22,15 @@ import {
   type SkillsSort,
   type SkillsTab,
 } from './skills-model';
+import { SkillsStudio } from './SkillsStudio';
+import {
+  CALL_IS_NOT_VERDICT_COPY,
+  CATALOG_TRIM_OFF_COPY,
+  parseEvolveReport,
+  POSTERIOR_METHOD_COPY,
+  type ProposeReport,
+} from './skills-evolve';
+import { RERANK_UNAVAILABLE_COPY, SHORTLIST_METHOD_COPY, shortlistSkills } from './skills-ranking';
 
 const fetchSkills = async (url: string, signal: AbortSignal): Promise<SkillsPayload> =>
   parseSkillsPayload(await fetchJsonResource<unknown>(url, signal));
@@ -123,9 +132,13 @@ function CatalogRow({
   );
 }
 
-export const SkillsView: React.FC = () => {
+export const SkillsView: React.FC<{
+  initialTab?: SkillsTab;
+  initialSkill?: string;
+}> = ({ initialTab = 'catalog', initialSkill }) => {
   const [query, setQuery] = useState('');
-  const [tab, setTab] = useState<SkillsTab>('catalog');
+  const [tab, setTab] = useState<SkillsTab>(initialTab);
+  const [studioName, setStudioName] = useState(initialSkill ?? '');
   const [sort, setSort] = useState<SkillsSort>('name');
   const [rpcOverlay, setRpcOverlay] = useState<Array<{ name: string; description: string; whenToUse?: string; modelInvocable: boolean }>>([]);
   const resource = useResource<SkillsPayload>({ url: '/api/agos/skills', fetcher: fetchSkills });
@@ -133,6 +146,16 @@ export const SkillsView: React.FC = () => {
   const roots = payload?.roots;
   const isBusy = resource.status === 'idle' || resource.status === 'loading';
   const isRefreshing = resource.status === 'loading' && payload !== undefined;
+
+  useEffect(() => {
+    setTab(initialTab);
+  }, [initialTab]);
+
+  useEffect(() => {
+    if (!initialSkill) return;
+    setStudioName(initialSkill);
+    setTab('studio');
+  }, [initialSkill]);
 
   useEffect(() => {
     const sessionId = conversationStore.activeSessionId();
@@ -157,6 +180,14 @@ export const SkillsView: React.FC = () => {
     [catalogMerged, query, sort, payload?.usage],
   );
   const groups = useMemo(() => groupCatalogByCategory(filtered), [filtered]);
+  const shortlist = useMemo(() => shortlistSkills(catalogMerged, query), [catalogMerged, query]);
+  const evolveResource = useResource<ProposeReport>({
+    url: tab === 'catalog' && query.trim() !== ''
+      ? `/api/agos/skills/evolve?query=${encodeURIComponent(query.trim())}`
+      : null,
+    fetcher: async (url, signal) => parseEvolveReport(await fetchJsonResource<unknown>(url, signal)),
+  });
+  const evolveHits = evolveResource.data?.hits ?? [];
   const unused = neverUsedCount(catalogMerged, payload?.usage);
   const vanished = useMemo(
     () => vanishedUsageSkills(catalogMerged, payload?.usage),
@@ -174,14 +205,17 @@ export const SkillsView: React.FC = () => {
         <div>
           <h2 className="surface-title">技能库</h2>
           <p className="surface-lede">
-            目录来自根并集审计；会话内 <code>skill.list</code> 可覆盖 modelInvocable
+            目录来自根并集审计；会话内 <code>skill.list</code> 可覆盖 modelInvocable。工作室只写模型根，审计台不动。
+            {SHORTLIST_METHOD_COPY}。{POSTERIOR_METHOD_COPY}。{CALL_IS_NOT_VERDICT_COPY}。{RERANK_UNAVAILABLE_COPY}。
           </p>
         </div>
         <div className="surface-toolbar">
           <div className="surface-cluster">
             <Button size="sm" onClick={() => setTab('catalog')} disabled={tab === 'catalog'}>目录</Button>
             <Button size="sm" onClick={() => setTab('audit')} disabled={tab === 'audit'}>审计</Button>
+            <Button size="sm" onClick={() => setTab('studio')} disabled={tab === 'studio'}>工作室</Button>
           </div>
+          {tab !== 'studio' && (
           <label>
             <span className="u-sr-only">搜索技能</span>
             <input
@@ -192,6 +226,7 @@ export const SkillsView: React.FC = () => {
               onChange={(event) => setQuery(event.target.value)}
             />
           </label>
+          )}
           <Button
             size="sm"
             disabled={isBusy}
@@ -340,6 +375,54 @@ export const SkillsView: React.FC = () => {
             </section>
           )}
 
+          {(evolveHits.length > 0 || shortlist.length > 0) && (
+            <section className="surface-section" aria-label="词面短名单">
+              <h3 className="surface-h3">
+                {evolveResource.data && evolveResource.data.matchingLabel > 0 ? POSTERIOR_METHOD_COPY : SHORTLIST_METHOD_COPY}
+              </h3>
+              <p className="surface-quiet">
+                {evolveResource.data?.catalogTrim.copy ?? CATALOG_TRIM_OFF_COPY}
+                {' '}
+                {evolveResource.data?.rerank?.copy ?? RERANK_UNAVAILABLE_COPY}
+              </p>
+              <ul className="surface-list">
+                {(evolveHits.length > 0 ? evolveHits : shortlist).map((hit) => {
+                  const name = hit.name;
+                  const row = catalogMerged.find((item) => item.name === name);
+                  if (!row) return null;
+                  const lexical = 'lexical' in hit ? hit.lexical : hit.score;
+                  const posterior = 'posterior' in hit ? hit.posterior : undefined;
+                  const evidence = 'evidence' in hit ? hit.evidence : undefined;
+                  return (
+                    <li key={`short:${row.name}`} className="surface-row surface-row--3">
+                      <div>
+                        <strong className="surface-strong">{row.name}</strong>
+                        <div className="surface-cluster">
+                          <Badge state="queued">重合 {lexical.toFixed(2)}</Badge>
+                          {posterior !== undefined && <Badge state="queued">后验 {posterior.toFixed(2)}</Badge>}
+                          {evidence && (evidence.s + evidence.f) > 0 && (
+                            <Badge state="done">胜负 {evidence.s}/{evidence.s + evidence.f}</Badge>
+                          )}
+                        </div>
+                      </div>
+                      <p className="surface-body">{clipDescription(row.description || '（无 description）')}</p>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setStudioName(row.name);
+                          setTab('studio');
+                        }}
+                      >
+                        在工作室打开
+                      </Button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          )}
+
           {groups.length === 0 ? (
             <p className="surface-quiet">没有匹配的技能。</p>
           ) : (
@@ -374,6 +457,14 @@ export const SkillsView: React.FC = () => {
           )}
           {payload.at && <p className="u-num surface-quiet">审计时间 {new Date(payload.at).toLocaleString()}</p>}
         </div>
+      )}
+
+      {tab === 'studio' && (
+        <SkillsStudio
+          catalogNames={catalogMerged.map((row) => row.name)}
+          initialName={studioName}
+          onCreated={() => resource.refresh('/api/agos/skills?refresh=1')}
+        />
       )}
     </div>
   );
