@@ -3,6 +3,12 @@ import React, { useEffect, useState } from 'react';
 /** 轨迹视图(把 dsh-trace-view 的时间流带回自有前端):/api/trace/sessions 真数据,
  *  每会话一行 LLM/工具耗时堆叠条 + 轮次/步数,一眼读出时间去哪了。 */
 interface TraceRow {
+  /**
+   * 权威会话 id(带 `session-` 前缀)。载荷里本来就有,此前被解析丢弃。
+   * 实测:裸 uuid 打 session-memory 返回 status:'empty',带前缀才 'ready' ——
+   * 权威形态是带前缀的(2026-08-22 验收实测)。
+   */
+  rawId: string;
   id: string;
   title: string;
   createdAt: number;
@@ -33,6 +39,7 @@ export const TraceView: React.FC = () => {
         setRows(list.map((it) => {
           const stats = (it['stats'] ?? {}) as Record<string, unknown>;
           return {
+            rawId: String(it['rawId'] ?? ''),
             id: String(it['id'] ?? ''),
             title: String(it['title'] ?? '(未命名)'),
             createdAt: Number(it['createdAt'] ?? 0),
@@ -60,7 +67,12 @@ export const TraceView: React.FC = () => {
         <h2 style={{ fontSize: '16px', fontWeight: 700 }}>会话轨迹与时间流 (Trace)</h2>
         <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
           数据源 /api/trace/sessions · 15s 轮询 · 条形 = LLM 推理与工具执行的耗时占比。
-          这里的 id 来自投影缓存,与对话会话不是同一批,所以没有「接入」—— 落到错的会话比没有按钮更糟。
+          {/* ⚠️ 原文是「这里的 id 来自投影缓存,与对话会话不是同一批」—— **那句是假的**:
+              后端 dsh-trace-view/lib/index.js:45 就在跟 sessionPersistence.list() 取交集,
+              返回的是权威名册的**子集**;实测 2 行 rawId 全部在磁盘会话目录里(2/2)。
+              界面上说一句代码可证伪的假话,与它要清的「本条记录早于该字段」是同一个失败模式
+              (2026-08-22 验收 P1)。*/}
+          后端已与 sessionPersistence 名册取交集,所以这里每一行都是真实会话的子集。
         </p>
       </div>
 
