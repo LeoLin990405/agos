@@ -62,7 +62,7 @@ step "进控制台" opencli browser $S click ".app-rail button[aria-label=\"控�
 sleep 2
 # 用 aria-label 收窄到导航项:概览页的 KPI 卡片也叫「技能注册表」,
 # 按文本点会 semantic_ambiguous(2026-08-21 实测 exit 2)。
-for tab in "概览遥测" "机器与机架" "会话矩阵" "智能体谱系" "轨迹时间流" "计划与目标" "技能注册表" "读图台账"; do
+for tab in "概览遥测" "机器与机架" "会话矩阵" "智能体谱系" "轨迹时间流" "计划与目标" "技能注册表" "路由决策" "读图台账"; do
 	step "控制台→$tab" opencli browser $S click ".console-nav-item[aria-label=\"$tab\"]"
 	sleep 1.5
 done
@@ -70,18 +70,28 @@ done
 print "\n▸ 4 记忆星图"
 step "进星图" opencli browser $S click ".app-rail button[aria-label=\"记忆星图\"]"
 sleep 3
-assert_text "星图渲染" "节点"
+assert_text "星图渲染" "星图已采集"
+assert_text "补链对照" "补链对照已采集"
 
 print "\n▸ 5 控制台数据面真实性"
 step "回控制台" opencli browser $S click ".app-rail button[aria-label=\"控制台\"]"
 sleep 2
 # 内容断言(不只是"点得动"):此前 18 步里只有星图那步验了内容,
 # 其余全是导航冒烟,一整类"面渲染不出数据"的缺陷不会被抓到。
-# ⚠️ 锚点只用**静态 UI 文案**,不用数据相关字符串 —— 早前写死「实时」在空会话
-# 被自动选中时误报过一次,同一个坑不踩第二遍。
+# ⚠️ 锚点必须是「有数据才会出现」的文案,不能是无条件表头。
+# 每条 assert_text 都要能在对应路由 404 时变红。无条件表头会在失败态照样绿
+# —— TASK-015 W7 / 017 / 018 三次复发的同一类问题。
+# 早前写死「实时」在空会话被自动选中时误报过一次,那个坑也不踩。
 step "开技能面" opencli browser $S click ".console-nav-item[aria-label=\"技能注册表\"]"
 sleep 6
 assert_text "技能面渲染" "只报告"
+assert_text "技能分母" "使用率分母已采集"
+step "开路由面" opencli browser $S click ".console-nav-item[aria-label=\"路由决策\"]"
+sleep 6
+assert_text "路由面渲染" "路由档位"
+step "开读图台账" opencli browser $S click ".console-nav-item[aria-label=\"读图台账\"]"
+sleep 6
+assert_text "读图台账渲染" "读图台账已采集"
 
 print "\n▸ 6 收尾"
 step "关闭会话" opencli browser $S close
