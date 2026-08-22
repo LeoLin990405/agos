@@ -17,6 +17,10 @@ const AppContent: React.FC = () => {
     tab: ConsoleTab;
     fleetBatchId?: string;
   }>({ tab: 'overview' });
+  // ⚠️ 用完必须清:它是一次性的「跳转意图」,不是持久状态。不清的话,
+  // 从控制台点过一次「接入」之后,**之后每次回对话页都会被它拉回那条会话**
+  // (2026-08-22 验收 P1)。消费方 ChatPage 收到后回调 onConsumed 清掉。
+  const [pendingSessionId, setPendingSessionId] = useState<string | undefined>();
   // 徽标=真实运行中会话数(原先硬编码 1,属假数据)
   const sessions = useSyncExternalStore(sessionsStore.subscribe, sessionsStore.getSnapshot);
   const runningCount = sessions.rows.filter((r) => r.running).length;
@@ -34,6 +38,8 @@ const AppContent: React.FC = () => {
 
       {currentTab === 'chat' && (
         <ChatPage
+          initialSessionId={pendingSessionId}
+          onInitialSessionConsumed={() => setPendingSessionId(undefined)}
           onNavigateConsole={() => {
             setConsoleEntry({ tab: 'overview' });
             setCurrentTab('console');
@@ -50,7 +56,10 @@ const AppContent: React.FC = () => {
         <ConsolePage
           initialTab={consoleEntry.tab}
           initialFleetBatchId={consoleEntry.fleetBatchId}
-          onNavigateChat={() => setCurrentTab('chat')}
+          onNavigateChat={(sessionId) => {
+            setPendingSessionId(sessionId);
+            setCurrentTab('chat');
+          }}
           onNavigateGraph={() => setCurrentTab('graph')}
         />
       )}

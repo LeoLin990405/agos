@@ -1,16 +1,23 @@
 /**
- * 读图台账视图(W4):/api/cn/council-records 的可视化。
- * 三态口径复用 SkillsView 的 useResource 模式:加载中 / 错误+重试 / 空态;
- * 分歧行高亮复用 vision-diff(与对话流里的交叉读图卡同一把尺)。
+ * 读图 / 评审台账。分歧只渲染仲裁自己给的 disagreements 数组。
+ * 老记录缺字段时写「未采集」,绝不回退逐行 diff。
  */
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Chip } from '@/components/ui/Chip';
 import { Dot } from '@/components/ui/Dot';
+import { mediaRouteUrl } from '@/components/chat/media-blocks';
 import { fetchJsonResource, useResource } from '@/lib/useResource';
-import { markDivergentLines } from '@/components/chat/vision-diff';
-import { panelOkCount, parseVisionLedger, type CouncilRecord } from './council-ledger-model';
+import {
+  collectedDisagreements,
+  kindChip,
+  panelOkCount,
+  parseVisionLedger,
+  type CouncilRecord,
+} from './council-ledger-model';
+
+export const LEDGER_READY_COPY = '读图台账已采集';
 
 const quietText: React.CSSProperties = {
   color: 'var(--text-tertiary)',
@@ -29,25 +36,41 @@ function formatWhen(iso: string | undefined): string {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString('zh-CN', { hour12: false });
 }
 
-function PanelistText({ text, marked }: { text: string; marked: ReturnType<typeof markDivergentLines>[number] }) {
+function DisagreementsBlock({ record }: { record: CouncilRecord }) {
+  const collected = collectedDisagreements(record);
+  if (collected.status === 'absent') {
+    return (
+      <div>
+        <div className="u-microlabel" style={{ marginBottom: '4px' }}>分歧</div>
+        <p style={{ ...quietText, margin: 0 }}>未采集(本条记录早于该字段)</p>
+        {record.verdict !== undefined && (
+          <div style={{ color: 'var(--text-secondary)', fontSize: '12px', lineHeight: 1.6, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', marginTop: '8px' }}>
+            {record.verdict}
+          </div>
+        )}
+      </div>
+    );
+  }
   return (
-    <div style={{ color: 'var(--text-secondary)', fontSize: '11.5px', lineHeight: 1.55, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-      {marked.map((line, i) => (
-        <div
-          key={i}
-          style={line.divergent ? {
-            // impeccable 绝对禁项:>1px 的彩色左右边框(side-stripe)。改用低透明度全边框
-            // + 背景色调,视觉权重相当但不触禁(2026-08-21 验收)。
-            border: '1px solid color-mix(in oklch, var(--accent-amber) 34%, transparent)',
-            background: 'color-mix(in oklch, var(--accent-amber) 9%, transparent)',
-            padding: '0 6px',
-            borderRadius: '3px',
-          } : undefined}
-        >
-          {line.text === '' ? ' ' : line.text}
+    <div>
+      {record.verdict !== undefined && (
+        <div>
+          <div className="u-microlabel" style={{ marginBottom: '4px' }}>仲裁结论</div>
+          <div style={{ color: 'var(--text-secondary)', fontSize: '12px', lineHeight: 1.6, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+            {record.verdict}
+          </div>
         </div>
-      ))}
-      {marked.length === 0 && <span>{text}</span>}
+      )}
+      {collected.status === 'present' && (
+        <div style={{ marginTop: record.verdict !== undefined ? '8px' : 0 }}>
+          <div className="u-microlabel" style={{ color: 'var(--accent-amber)', marginBottom: '4px' }}>仍有分歧</div>
+          {collected.items.map((item, index) => (
+            <div key={index} style={{ color: 'var(--text-secondary)', fontSize: '11.5px', lineHeight: 1.5 }}>
+              {index + 1}. {item}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -55,16 +78,12 @@ function PanelistText({ text, marked }: { text: string; marked: ReturnType<typeo
 function LedgerRow({ record }: { record: CouncilRecord }) {
   const [open, setOpen] = useState(false);
   const { ok, total } = panelOkCount(record);
-  const flagged = record.flagged;
-  const marked = useMemo(
-    () => (open ? markDivergentLines(record.panelists.map((p) => (p.ok ? p.text : undefined))) : []),
-    [open, record.panelists],
-  );
   return (
-    <section style={panelStyle} aria-label={record.question ?? '读图记录'}>
+    <section style={panelStyle} aria-label={record.question ?? '台账记录'}>
       <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
         <Dot state={ok === total && total > 0 ? 'done' : ok === 0 ? 'failed' : 'running'} size={6} />
         <span className="u-num" style={{ ...quietText, color: 'var(--text-secondary)' }}>{formatWhen(record.time)}</span>
+        <Chip>{kindChip(record.kind)}</Chip>
         <strong style={{ color: 'var(--text-primary)', fontSize: '12.5px', overflowWrap: 'anywhere' }}>
           {record.question ?? '(无题注)'}
         </strong>
@@ -73,7 +92,7 @@ function LedgerRow({ record }: { record: CouncilRecord }) {
           {record.arbiter !== undefined && <Chip>仲裁 {record.arbiter}</Chip>}
           {record.inconclusive === true && <Chip variant="amber">证据不足</Chip>}
           {record.parsedOk === false && <Chip variant="amber">非结构化返回</Chip>}
-          {flagged.map((f) => <Chip key={f} variant="red">标记 {f}</Chip>)}
+          {record.flagged.map((f) => <Chip key={f} variant="red">标记 {f}</Chip>)}
           <Button size="sm" variant="ghost" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
             {open ? '收起' : '展开'}
           </Button>
@@ -81,13 +100,13 @@ function LedgerRow({ record }: { record: CouncilRecord }) {
       </div>
       {open && (
         <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          {record.verdict !== undefined && (
-            <div>
-              <div className="u-microlabel" style={{ marginBottom: '4px' }}>仲裁结论</div>
-              <div style={{ color: 'var(--text-secondary)', fontSize: '12px', lineHeight: 1.6, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-                {record.verdict}
-              </div>
-            </div>
+          <DisagreementsBlock record={record} />
+          {record.imagePath !== undefined && (
+            <img
+              src={mediaRouteUrl(record.imagePath)}
+              alt={record.question ?? '台账原图'}
+              style={{ maxWidth: '100%', maxHeight: '280px', objectFit: 'contain', border: '1px solid var(--border-dim)', borderRadius: '6px' }}
+            />
           )}
           {record.panelists.map((p, i) => (
             <div key={`${p.provider}:${i}`} style={{ border: '1px solid var(--border-dim)', borderRadius: '8px', padding: '8px 10px' }}>
@@ -99,7 +118,9 @@ function LedgerRow({ record }: { record: CouncilRecord }) {
                 {p.error !== undefined && <span style={{ color: 'var(--state-failed)', fontSize: '11px' }}>{p.error}</span>}
               </div>
               {p.text !== undefined && (
-                <PanelistText text={p.text} marked={marked[i] ?? [{ text: p.text, divergent: false }]} />
+                <div style={{ color: 'var(--text-secondary)', fontSize: '11.5px', lineHeight: 1.55, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+                  {p.text}
+                </div>
               )}
             </div>
           ))}
@@ -124,7 +145,7 @@ export const CouncilLedgerView: React.FC = () => {
         <div>
           <h2 style={{ fontSize: '16px', fontWeight: 800, margin: 0 }}>读图台账</h2>
           <p style={{ ...quietText, margin: '4px 0 0' }}>
-            只读数据源 <code>/api/cn/council-records</code> · 最近 30 条交叉读图记录,倒序
+            只读数据源 <code>/api/cn/council-records</code> · 最近 30 条全类型记录,倒序
           </p>
         </div>
         <Button size="sm" disabled={isBusy} onClick={() => resource.refresh()}>
@@ -143,20 +164,15 @@ export const CouncilLedgerView: React.FC = () => {
         </div>
       )}
 
-      {payload !== undefined && payload.length === 0 && (
-        <div style={panelStyle}>
-          <p style={{ ...quietText, margin: 0 }}>
-            {/* 30 条窗口是**全类型**的,本视图只留 kind==='vision'。笼统说「还没有记录」
-                会把「窗口里全是评审类记录」谎报成「你从没读过图」(2026-08-21 验收 P1)。*/}
-            最近 30 条台账窗口里没有交叉读图(kind=vision)记录。该窗口是全类型的,
-            评审类记录另有其主、不在本视图。在对话里贴图并点「交叉读图」后,
-            这里会出现三家面板与仲裁结论。
-          </p>
+      {payload !== undefined && (
+        <div>
+          <h3 style={{ fontSize: '13px', fontWeight: 700, margin: '0 0 8px' }}>{LEDGER_READY_COPY}</h3>
+          {payload.length === 0 ? (
+            <p style={{ ...quietText, margin: 0 }}>最近 30 条窗口是空的。贴图交叉读图或跑评审后会出现记录。</p>
+          ) : (
+            payload.map((record, index) => <LedgerRow key={`${record.time ?? ''}:${index}`} record={record} />)
+          )}
         </div>
-      )}
-
-      {payload !== undefined && payload.length > 0 && (
-        <div>{payload.map((record, index) => <LedgerRow key={`${record.time ?? ''}:${index}`} record={record} />)}</div>
       )}
     </div>
   );

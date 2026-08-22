@@ -16,6 +16,7 @@ import {
   type MemorySearchResponse,
 } from './memory-graph-api';
 import { adaptRealGraph, deriveMemorySearchPresentation } from './memory-graph-model';
+import { edgeKeySet, suggestionAdopted } from './memory-slug';
 
 export { adaptRealGraph, TYPE_MAP } from './memory-graph-model';
 
@@ -79,6 +80,23 @@ export const MemoryGraphPage: React.FC = () => {
     refreshOnFocus: true,
     fetcher: fetchLinkSuggestionsResource,
   });
+
+  const adoptionKeys = useMemo(() => {
+    const graph = graphResource.data;
+    // 软错误也要当「没拿到图」:dsh-civ 的 errorGraph() 以 **HTTP 200** 返回
+    // {nodes:[], edges:[], error:{…}},于是 edges 是 [] 而不是 undefined,
+    // 空 Set 会让每条建议都被判成确定的「仍待办」—— 那是拿「图谱这一来源的空」
+    // 去填「采纳状态」的确定答案(2026-08-22 验收)。第三态「采纳状态未采集」
+    // 就在 GraphControls 同一行里,只差这个条件。
+    if (graph === undefined || graph.error !== undefined) return undefined;
+    const edges = graph.edges;
+    return edges === undefined ? undefined : edgeKeySet(edges);
+  }, [graphResource.data]);
+  const suggestionsWithAdoption = useMemo(() => {
+    const rows = suggestionsResource.data?.suggestions;
+    if (rows === undefined || adoptionKeys === undefined) return rows;
+    return rows.map((row) => ({ ...row, adopted: suggestionAdopted(row, adoptionKeys) }));
+  }, [adoptionKeys, suggestionsResource.data]);
 
   const searchPresentation = deriveMemorySearchPresentation(
     normalizedQuery,
@@ -164,7 +182,7 @@ export const MemoryGraphPage: React.FC = () => {
               isSimulating={isSimulating}
               onToggleSimulation={() => setIsSimulating((value) => !value)}
               suggestionsStatus={suggestionsResource.status}
-              suggestions={suggestionsResource.data?.suggestions}
+              suggestions={suggestionsWithAdoption}
               suggestionsError={suggestionsResource.error
                 ? failureText(suggestionsResource.error.status, suggestionsResource.error.message)
                 : suggestionsResource.data?.error}

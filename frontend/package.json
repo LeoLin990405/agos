@@ -10,9 +10,11 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
-    "verify": "npm run typecheck && npm run test && npm run build && npm run vendor:diff",
+    "verify": "npm run upgrade:dsh:check && npm run typecheck && npm run test && npm run build && npm run vendor:diff",
     "smoke": "tsx scripts/smoke.ts",
     "vendor:diff": "sh scripts/vendor-diff.sh",
+    "upgrade:dsh": "sh scripts/upgrade-dsh.sh --upgrade",
+    "upgrade:dsh:check": "sh scripts/upgrade-dsh.sh --check",
     "replay": "tsx scripts/replay-check.ts"
   },
   "dependencies": {

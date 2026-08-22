@@ -67,6 +67,8 @@ export interface LinkSuggestion {
   target: string;
   score: number;
   createdAt: string;
+  /** Derived vs graph edges. undefined = graph not loaded, not "pending". */
+  adopted?: boolean;
 }
 
 export interface LinkSuggestionsResponse {

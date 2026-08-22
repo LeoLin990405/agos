@@ -20,11 +20,6 @@ export interface SwarmBatchCardProps {
   totalCount: number;
   isRunning?: boolean;
   rows: SubagentRowData[];
-  civStats?: {
-    passed: string;
-    vetoed: number;
-    gateState: string;
-  };
 }
 
 export const SwarmBatchCard: React.FC<SwarmBatchCardProps> = ({
@@ -34,7 +29,6 @@ export const SwarmBatchCard: React.FC<SwarmBatchCardProps> = ({
   totalCount,
   isRunning = true,
   rows,
-  civStats,
 }) => {
   const ratio = Math.min(1, Math.max(0, completedCount / totalCount));
   const percentage = (ratio * 100).toFixed(1);
@@ -115,23 +109,6 @@ export const SwarmBatchCard: React.FC<SwarmBatchCardProps> = ({
         ))}
       </div>
 
-      {/* CivStrip 治理统计底条 */}
-      {civStats && (
-        <div className="u-civstrip">
-          <div className="u-civ-metric is-pass">
-            <span className="u-microlabel">安全巡检通过:</span>
-            <span className="val u-num">{civStats.passed}</span>
-          </div>
-          <div className={`u-civ-metric ${civStats.vetoed > 0 ? 'is-veto' : 'is-zero'}`}>
-            <span className="u-microlabel">策略否决:</span>
-            <span className="val u-num">{civStats.vetoed}</span>
-          </div>
-          <div className="u-civ-metric" style={{ color: 'var(--accent-amber)' }}>
-            <span className="u-microlabel">晋升门:</span>
-            <span className="val">{civStats.gateState}</span>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

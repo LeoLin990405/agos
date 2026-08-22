@@ -12,6 +12,9 @@ import {
   neverUsedCount,
   parseSkillsPayload,
   sortCatalog,
+  SKILLS_USAGE_READY_COPY,
+  usageDenominatorReady,
+  vanishedUsageSkills,
   type SkillAuditRoot,
   type SkillCatalogEntry,
   type SkillFinding,
@@ -166,8 +169,15 @@ export const SkillsView: React.FC = () => {
   );
   const groups = useMemo(() => groupCatalogByCategory(filtered), [filtered]);
   const unused = neverUsedCount(catalogMerged, payload?.usage);
+  const vanished = useMemo(
+    () => vanishedUsageSkills(catalogMerged, payload?.usage),
+    [catalogMerged, payload?.usage],
+  );
+  const [vanishedOpen, setVanishedOpen] = useState(false);
   const consistency = payload?.consistency;
   const budget = payload?.budget;
+  const usageReady = usageDenominatorReady(payload?.usageMeta);
+  const unreadRoots = payload?.usageMeta?.errors?.length ?? 0;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
@@ -261,6 +271,12 @@ export const SkillsView: React.FC = () => {
                 </span>
               )}
             </Badge>
+            {usageReady && (
+              <Badge state="done">{SKILLS_USAGE_READY_COPY}</Badge>
+            )}
+            {unreadRoots > 0 && (
+              <Badge state="running">{unreadRoots} 个根不可读</Badge>
+            )}
             {budget?.indexTokensEstimate != null && (
               <Badge state={(budget.indexTokensEstimate ?? 0) > (budget.indexBudgetTarget ?? 1000) ? 'running' : 'done'}>
                 索引≈{budget.indexTokensEstimate} tok / 目标 {budget.indexBudgetTarget ?? 1000}
@@ -284,7 +300,31 @@ export const SkillsView: React.FC = () => {
           <p style={{ ...quietText, margin: 0 }}>
             「从未用过」是使用率信号，不是删除判决。
             {payload.usageMeta?.note ? ` ${payload.usageMeta.note}` : ''}
+            {payload.usageMeta?.roots && payload.usageMeta.roots.length > 0
+              ? ` 实扫根: ${payload.usageMeta.roots.join(' · ')}`
+              : ''}
           </p>
+
+          {vanished.length > 0 && (
+            <div style={panelStyle}>
+              <button
+                type="button"
+                onClick={() => setVanishedOpen((open) => !open)}
+                style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '12px' }}
+              >
+                另有 {vanished.length} 个技能有调用证据但已不在任何根里
+              </button>
+              {vanishedOpen && (
+                <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0 0', fontSize: '12px' }}>
+                  {vanished.map((name) => (
+                    <li key={name} style={{ padding: '3px 0' }}>
+                      <code style={{ color: 'var(--text-primary)' }}>{name}</code>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
 
           {budget?.topExpensiveDescriptions && budget.topExpensiveDescriptions.length > 0 && (
             <section style={panelStyle} aria-label="索引预算">

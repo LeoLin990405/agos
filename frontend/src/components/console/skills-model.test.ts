@@ -9,6 +9,8 @@ import {
   neverUsedCount,
   parseSkillsPayload,
   sortCatalog,
+  usageDenominatorReady,
+  vanishedUsageSkills,
   type SkillCatalogEntry,
   type SkillFinding,
 } from './skills-model.ts';
@@ -61,4 +63,24 @@ test('catalog filter/sort/group and never-used signal', () => {
   const merged = mergeRpcCatalog(catalog, [{ name: 'ask', description: 'RPC desc', modelInvocable: true, whenToUse: 'when asking' }]);
   assert.equal(merged.find((r) => r.name === 'ask')?.modelInvocable, true);
   assert.equal(merged.find((r) => r.name === 'ask')?.whenToUse, 'when asking');
+});
+
+test('usageDenominatorReady is success-only', () => {
+  assert.equal(usageDenominatorReady(undefined), false);
+  assert.equal(usageDenominatorReady({ error: 'scan failed', files: 0, roots: [] }), false);
+  assert.equal(usageDenominatorReady({ note: 'x' }), false);
+  assert.equal(usageDenominatorReady({ files: 429, roots: ['/a'] }), true);
+  assert.equal(usageDenominatorReady({ files: 10, roots: ['/a'], errors: [{ root: '/b', error: 'EACCES' }] }), true);
+});
+
+test('vanishedUsageSkills lists used names missing from catalog', () => {
+  assert.deepEqual(
+    vanishedUsageSkills(catalog, {
+      ask: { count: 1, lastAt: 1 },
+      'systems-science': { count: 2, lastAt: 2 },
+      'gone-skill': { count: 0, lastAt: 0 },
+    }),
+    ['systems-science'],
+  );
+  assert.equal(neverUsedCount(catalog, { ask: { count: 1, lastAt: 1 }, 'systems-science': { count: 2, lastAt: 2 } }), 2);
 });

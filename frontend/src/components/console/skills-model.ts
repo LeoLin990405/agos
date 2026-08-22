@@ -90,9 +90,34 @@ export interface SkillsPayload {
     at?: number;
     files?: number;
     events?: number;
+    roots?: string[];
     cache?: string;
     note?: string;
+    error?: string;
+    errors?: Array<{ root?: string; error?: string }>;
   };
+}
+
+export const SKILLS_USAGE_READY_COPY = '使用率分母已采集';
+
+/** 分母锚点只在扫描成功态出现。error 或缺 files/roots = 失败,不能绿。 */
+export function usageDenominatorReady(meta: SkillsPayload['usageMeta'] | undefined): boolean {
+  if (meta === undefined) return false;
+  if (typeof meta.error === 'string' && meta.error !== '') return false;
+  if (!Number.isFinite(meta.files)) return false;
+  if (!Array.isArray(meta.roots)) return false;
+  return true;
+}
+
+export function vanishedUsageSkills(
+  catalog: readonly SkillCatalogEntry[],
+  usage: Record<string, SkillUsageStat> | undefined,
+): string[] {
+  const names = new Set(catalog.map((row) => row.name));
+  return Object.entries(usage ?? {})
+    .filter(([name, stat]) => (stat.count ?? 0) > 0 && !names.has(name))
+    .map(([name]) => name)
+    .sort((a, b) => a.localeCompare(b));
 }
 
 export type SkillsSort = 'name' | 'recent' | 'never';

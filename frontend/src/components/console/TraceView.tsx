@@ -17,7 +17,7 @@ interface TraceRow {
 const fmtMs = (ms: number): string =>
   ms <= 0 ? '0s' : ms < 1000 ? `${ms}ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1)}s` : `${(ms / 60_000).toFixed(1)}m`;
 
-export const TraceView: React.FC<{ onSelectSession?: (id: string) => void }> = ({ onSelectSession }) => {
+export const TraceView: React.FC = () => {
   const [rows, setRows] = useState<TraceRow[]>([]);
   const [loaded, setLoaded] = useState(false);
 
@@ -59,7 +59,8 @@ export const TraceView: React.FC<{ onSelectSession?: (id: string) => void }> = (
       <div>
         <h2 style={{ fontSize: '16px', fontWeight: 700 }}>会话轨迹与时间流 (Trace)</h2>
         <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
-          数据源 /api/trace/sessions · 15s 轮询 · 条形 = LLM 推理与工具执行的耗时占比
+          数据源 /api/trace/sessions · 15s 轮询 · 条形 = LLM 推理与工具执行的耗时占比。
+          这里的 id 来自投影缓存,与对话会话不是同一批,所以没有「接入」—— 落到错的会话比没有按钮更糟。
         </p>
       </div>
 
@@ -77,10 +78,9 @@ export const TraceView: React.FC<{ onSelectSession?: (id: string) => void }> = (
           return (
             <div
               key={r.id}
-              onClick={() => onSelectSession?.(r.id)}
               style={{
                 display: 'flex', flexDirection: 'column', gap: '8px',
-                padding: '13px 16px', borderRadius: '12px', cursor: 'pointer',
+                padding: '13px 16px', borderRadius: '12px',
                 backgroundColor: 'var(--bg-layer-1)', boxShadow: 'var(--shadow-card)',
               }}
             >

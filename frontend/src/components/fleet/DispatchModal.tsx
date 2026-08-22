@@ -1,7 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
-import type { FleetDispatchResult, FleetHost } from '@/stores/live';
+import { fleetHostsStore, type FleetDispatchResult, type FleetHost } from '@/stores/live';
+import { HostPowerBadge } from '@/components/fleet/HostPowerBadge';
+import { fleetHostVisualState } from '@/components/console/fleet-model';
 import {
   describeDispatchTargets,
   parseDispatchItems,
@@ -47,6 +49,11 @@ export const DispatchModal: React.FC<DispatchModalProps> = ({
     setSubmitting(false);
   }, [open]);
 
+  const hostsState = useSyncExternalStore(fleetHostsStore.subscribe, fleetHostsStore.getSnapshot);
+  const powerByHost = useMemo(
+    () => new Map(hostsState.power.map((node) => [node.host, node])),
+    [hostsState.power],
+  );
   const remoteHosts = useMemo(
     () => hosts.filter((host) => host.kind === 'remote' && host.enabled),
     [hosts],
@@ -153,19 +160,27 @@ export const DispatchModal: React.FC<DispatchModalProps> = ({
               <div className="dispatch-modal__quiet">没有已启用的远端机器。</div>
             ) : (
               <div className="dispatch-modal__host-grid">
-                {remoteHosts.map((host) => (
-                  <label key={host.name} className="dispatch-modal__host-option">
-                    <input
-                      type="checkbox"
-                      checked={form.hosts.includes(host.name)}
-                      onChange={() => toggleHost(host.name)}
-                    />
-                    <span>
-                      <strong>{host.name}</strong>
-                      {host.model && <small>{host.model}</small>}
-                    </span>
-                  </label>
-                ))}
+                {remoteHosts.map((host) => {
+                  const power = powerByHost.get(host.name);
+                  return (
+                    <label key={host.name} className="dispatch-modal__host-option">
+                      <input
+                        type="checkbox"
+                        checked={form.hosts.includes(host.name)}
+                        onChange={() => toggleHost(host.name)}
+                      />
+                      <span>
+                        <strong>{host.name}</strong>
+                        {host.model && <small>{host.model}</small>}
+                        <HostPowerBadge
+                          state={fleetHostVisualState(host.ok, power)}
+                          etaMs={power?.etaMs}
+                          error={host.error ?? power?.wakeError ?? undefined}
+                        />
+                      </span>
+                    </label>
+                  );
+                })}
               </div>
             )}
           </fieldset>

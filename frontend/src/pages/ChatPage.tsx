@@ -54,6 +54,7 @@ import { LiveTranscript, useTranscriptItemCount, type OptimisticImageMessage } f
 import { AgosComputer } from '@/components/stage/AgosComputer';
 import { ReplayScrubber } from '@/components/stage/ReplayScrubber';
 import { deriveChatConnectionState } from '@/pages/chat-connection-state';
+import { shortSessionRef } from '@/pages/session-short-id';
 
 /** DeepSeek 原生四模式 id → 名(agentPreset.list 实测)。 */
 const PRESET_NAMES: Record<string, string> = { standard: '标准模式', code: 'PTC 模式', minimal: '极简模式', cordis: '创造模式' };
@@ -102,8 +103,11 @@ export const ChatPage: React.FC<{
   onNavigateConsole?: () => void;
   onNavigateFleet?: (batchId?: string) => void;
   onNavigateGraph?: (nodeId?: string) => void;
-}> = ({ onNavigateConsole, onNavigateFleet, onNavigateGraph }) => {
-  const [activeSessionId, setActiveSessionId] = useState('');
+  initialSessionId?: string;
+  /** 消费掉 initialSessionId 后回调,由 App 清空 —— 它是一次性跳转意图,不是持久状态。 */
+  onInitialSessionConsumed?: () => void;
+}> = ({ onNavigateConsole, onNavigateFleet, onNavigateGraph, initialSessionId, onInitialSessionConsumed }) => {
+  const [activeSessionId, setActiveSessionId] = useState(initialSessionId ?? '');
   const [searchQuery, setSearchQuery] = useState('');
   const [isNewSessionOpen, setIsNewSessionOpen] = useState(false);
   const [pendingPresetId, setPendingPresetId] = useState<string | undefined>(undefined);
@@ -326,6 +330,16 @@ export const ChatPage: React.FC<{
     setActiveSessionId(id);
     openConversation(id);
   };
+
+  useEffect(() => {
+    if (!initialSessionId) return;
+    setActiveSessionId(initialSessionId);
+    openConversation(initialSessionId);
+    // 用完即清。不清的话,从控制台点过一次「接入」之后,每次导航回对话页
+    // 组件重挂载会再取一次 initialSessionId 并再跑一次这个 effect,
+    // **之后每次回来都被强制拉回那条会话**(2026-08-22 验收 P1)。
+    onInitialSessionConsumed?.();
+  }, [initialSessionId, onInitialSessionConsumed]);
 
   const openMenuAt = (sessionId: string, point: MenuPoint, returnFocus: HTMLElement): void => {
     if (!liveMode) return;
@@ -820,7 +834,34 @@ export const ChatPage: React.FC<{
                 ? `${disconnectedService} 未连接`
                 : 'AgOS 对话甲板'}
           badge={liveMode
-            ? (() => { const p = liveSessions.rows.find((x) => x.sessionId === activeSessionId)?.agentPreset ?? ''; const n = PRESET_NAMES[p] ?? p; return n !== '' ? <Chip active>{n}</Chip> : undefined; })()
+            ? (() => {
+              const p = liveSessions.rows.find((x) => x.sessionId === activeSessionId)?.agentPreset ?? '';
+              const n = PRESET_NAMES[p] ?? p;
+              const header = convo.snapshot?.header;
+              const parent = header?.parentSession;
+              const isSub = header !== undefined && header.origin !== 'top';
+              return (
+                <>
+                  {n !== '' ? <Chip active>{n}</Chip> : undefined}
+                  {isSub && (
+                    parent !== undefined ? (
+                      <button
+                        type="button"
+                        onClick={() => handleSelectSession(parent)}
+                        style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer' }}
+                        aria-label={`跳回父会话 ${parent}`}
+                      >
+                        <Chip variant="amber">
+                          {`子代理 · 深度 ${header.delegationDepth} · 父会话 #${shortSessionRef(parent)}`}
+                        </Chip>
+                      </button>
+                    ) : (
+                      <Chip variant="amber">{`子代理 · 深度 ${header.delegationDepth}`}</Chip>
+                    )
+                  )}
+                </>
+              );
+            })()
             : undefined}
           rightActions={
             <>

@@ -15,9 +15,9 @@ export interface GoalBannerProps {
 }
 
 export const GoalBanner: React.FC<GoalBannerProps> = ({
-  goalId = 'GOAL-01',
-  title = '完成 AgOS 遥测甲板 V2 旗舰级设计系统与后端能力全映射',
-  progressPercent = 65,
+  goalId,
+  title,
+  progressPercent,
   status = 'active',
   onPause,
   onResume,
@@ -31,28 +31,32 @@ export const GoalBanner: React.FC<GoalBannerProps> = ({
       <div className="goal-banner-left">
         <Dot state={currentStatus === 'active' ? 'running' : currentStatus === 'completed' ? 'done' : 'queued'} />
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-          <Chip variant="purple" style={{ height: '18px', padding: '0 5px' }}>
-            🎯 目标 #{goalId}
-          </Chip>
+          {goalId !== undefined && (
+            <Chip variant="purple" style={{ height: '18px', padding: '0 5px' }}>
+              目标 {goalId}
+            </Chip>
+          )}
           <span className="goal-banner-title">{title}</span>
         </div>
       </div>
 
       <div className="goal-banner-actions">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginRight: '8px' }}>
-          <div style={{ width: '80px', height: '6px', backgroundColor: 'var(--bg-layer-1)', borderRadius: '3px', overflow: 'hidden' }}>
-            <div
-              style={{
-                width: `${progressPercent}%`,
-                height: '100%',
-                backgroundColor: currentStatus === 'completed' ? 'var(--state-done)' : 'var(--accent-purple)',
-              }}
-            />
+        {progressPercent !== undefined && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginRight: '8px' }}>
+            <div style={{ width: '80px', height: '6px', backgroundColor: 'var(--bg-layer-1)', borderRadius: '3px', overflow: 'hidden' }}>
+              <div
+                style={{
+                  width: `${progressPercent}%`,
+                  height: '100%',
+                  backgroundColor: currentStatus === 'completed' ? 'var(--state-done)' : 'var(--accent-purple)',
+                }}
+              />
+            </div>
+            <span className="u-num" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+              {progressPercent}%
+            </span>
           </div>
-          <span className="u-num" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-            {progressPercent}%
-          </span>
-        </div>
+        )}
 
         {currentStatus === 'active' && (
           <Button
@@ -64,7 +68,7 @@ export const GoalBanner: React.FC<GoalBannerProps> = ({
             }}
             title="暂停目标执行"
           >
-            ⏸ 暂停
+            暂停
           </Button>
         )}
 
@@ -78,7 +82,7 @@ export const GoalBanner: React.FC<GoalBannerProps> = ({
             }}
             title="继续目标执行"
           >
-            ▶ 继续
+            继续
           </Button>
         )}
 
@@ -91,7 +95,7 @@ export const GoalBanner: React.FC<GoalBannerProps> = ({
           }}
           title="标记目标已达成"
         >
-          ✓ 达成
+          达成
         </Button>
 
         <Button
@@ -101,7 +105,7 @@ export const GoalBanner: React.FC<GoalBannerProps> = ({
           title="移除目标横幅"
           style={{ padding: '0 6px' }}
         >
-          ✕
+          关闭
         </Button>
       </div>
     </div>

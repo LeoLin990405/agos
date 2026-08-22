@@ -157,6 +157,7 @@ function SuggestionList({
           建议源返回软错误：{error}
         </div>
       )}
+      {suggestions !== undefined && <h3 style={{ fontSize: '12px', fontWeight: 700, margin: '0 0 8px' }}>补链对照已采集</h3>}
       {suggestions?.length === 0 && <div style={quietText}>当前没有补链建议。</div>}
       {suggestions && suggestions.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
@@ -185,7 +186,9 @@ function SuggestionList({
               <span aria-hidden="true" style={{ color: 'var(--state-running)' }}>→</span>
               <code style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{suggestion.target}</code>
               <span className="u-microlabel" style={{ gridColumn: '1 / 4' }}>
-                分数 {suggestion.score} · {new Date(suggestion.createdAt).toLocaleString('zh-CN', { hour12: false })} · 只读建议
+                分数 {suggestion.score} · {new Date(suggestion.createdAt).toLocaleString('zh-CN', { hour12: false })}
+                {' · '}
+                {suggestion.adopted === true ? '已采纳' : suggestion.adopted === false ? '仍待办' : '采纳状态未采集'}
               </span>
             </button>
           ))}
@@ -244,7 +247,7 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
         />
         <div style={{ width: '1px', height: '16px', backgroundColor: 'var(--border-dim)' }} />
         <span className="u-num" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-          {totalNodes} 节点 · {totalEdges} 边
+          {totalNodes > 0 ? '星图已采集 · ' : ''}{totalNodes} 节点 · {totalEdges} 边
         </span>
       </div>
 
@@ -305,6 +308,7 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
             未知类型 {unknownEntries.map(([type, count]) => `${type}(${count})`).join('、')}
           </span>
         )}
+        {suggestions !== undefined && <span>补链对照已采集</span>}
         <Button variant="ghost" size="sm" onClick={onToggleSuggestions} aria-expanded={suggestionsOpen}>
           {suggestionLabel} {suggestionsOpen ? '▴' : '▾'}
         </Button>

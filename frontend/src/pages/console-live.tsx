@@ -209,7 +209,7 @@ const ResourceUnavailableNotice: React.FC<{
 export const RealOverview: React.FC<{
   live: ConsoleLive;
   density?: 'dense' | 'sparse';
-  onNavigateChat?: () => void;
+  onNavigateChat?: (sessionId?: string) => void;
   onNavigateLineage?: () => void;
 }> = ({ live, density = 'dense', onNavigateChat, onNavigateLineage }) => {
   if (!live.live) {
@@ -307,7 +307,7 @@ export const RealOverview: React.FC<{
           ? new Date(r.updatedAt).toLocaleTimeString('zh-CN', { hour12: false })
           : '未采集',
         actionText: '接入',
-        onAction: onNavigateChat,
+        onAction: () => onNavigateChat?.(r.sessionId),
       }))}
     /> : <p style={{ margin: 0, color: 'var(--text-tertiary)', fontSize: '12px' }}>会话列表尚未采集，session.list 尚未返回数据。</p>}
   </div>

@@ -8,15 +8,16 @@ import { LineageView } from '@/components/console/LineageView';
 import { PlansView } from '@/components/console/PlansView';
 import { SkillsView } from '@/components/console/SkillsView';
 import { CouncilLedgerView } from '@/components/console/CouncilLedgerView';
+import { RoutesView } from '@/components/console/RoutesView';
 import { TraceView } from '@/components/console/TraceView';
 import { overviewLamp, RealOverview, useConsoleLive } from '@/pages/console-live';
 
-export type ConsoleTab = 'overview' | 'fleet' | 'sessions' | 'lineage' | 'trace' | 'plans' | 'skills' | 'ledger';
+export type ConsoleTab = 'overview' | 'fleet' | 'sessions' | 'lineage' | 'trace' | 'plans' | 'skills' | 'ledger' | 'routes';
 
 export interface ConsolePageProps {
   initialTab?: ConsoleTab;
   initialFleetBatchId?: string;
-  onNavigateChat?: () => void;
+  onNavigateChat?: (sessionId?: string) => void;
   onNavigateGraph?: () => void;
 }
 
@@ -119,6 +120,15 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
 
         <button
           type="button"
+          className={`console-nav-item ${activeTab === 'routes' ? 'is-active' : ''}`}
+          aria-label="路由决策"
+          onClick={() => setActiveTab('routes')}
+        >
+          <span>路由决策</span>
+        </button>
+
+        <button
+          type="button"
           className={`console-nav-item ${activeTab === 'ledger' ? 'is-active' : ''}`}
           aria-label="读图台账"
           onClick={() => setActiveTab('ledger')}
@@ -143,6 +153,8 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
               ? '轨迹时间流'
               : activeTab === 'plans'
               ? '计划与目标'
+              : activeTab === 'routes'
+              ? '路由决策'
               : activeTab === 'ledger'
               ? '读图台账'
               : '技能注册表'
@@ -168,11 +180,12 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
               onSelectBatch={setSelectedFleetBatchId}
             />
           )}
-          {activeTab === 'sessions' && <SessionsView onSelectSession={() => onNavigateChat?.()} />}
+          {activeTab === 'sessions' && <SessionsView onSelectSession={(id) => onNavigateChat?.(id)} />}
           {activeTab === 'lineage' && <LineageView />}
-          {activeTab === 'trace' && <TraceView onSelectSession={() => onNavigateChat?.()} />}
+          {activeTab === 'trace' && <TraceView />}
           {activeTab === 'plans' && <PlansView overviewTotal={overviewFresh ? consoleLive.plansTotal : undefined} />}
           {activeTab === 'skills' && <SkillsView />}
+          {activeTab === 'routes' && <RoutesView />}
           {activeTab === 'ledger' && <CouncilLedgerView />}
 
           {activeTab === 'overview' && (
