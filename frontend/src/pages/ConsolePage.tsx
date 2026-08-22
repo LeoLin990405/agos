@@ -182,7 +182,7 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
           )}
           {activeTab === 'sessions' && <SessionsView onSelectSession={(id) => onNavigateChat?.(id)} />}
           {activeTab === 'lineage' && <LineageView />}
-          {activeTab === 'trace' && <TraceView />}
+          {activeTab === 'trace' && <TraceView onSelectSession={(id) => onNavigateChat?.(id)} />}
           {activeTab === 'plans' && <PlansView overviewTotal={overviewFresh ? consoleLive.plansTotal : undefined} />}
           {activeTab === 'skills' && <SkillsView />}
           {activeTab === 'routes' && <RoutesView />}

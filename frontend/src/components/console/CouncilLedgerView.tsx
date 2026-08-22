@@ -11,6 +11,8 @@ import { mediaRouteUrl } from '@/components/chat/media-blocks';
 import { fetchJsonResource, useResource } from '@/lib/useResource';
 import {
   collectedDisagreements,
+  inconclusiveBanner,
+  INCONCLUSIVE_COPY,
   kindChip,
   panelOkCount,
   parseVisionLedger,
@@ -37,6 +39,19 @@ function formatWhen(iso: string | undefined): string {
 }
 
 function DisagreementsBlock({ record }: { record: CouncilRecord }) {
+  const banner = inconclusiveBanner(record);
+  if (banner !== undefined) {
+    return (
+      <div>
+        <p style={{ margin: 0, color: 'var(--accent-amber)', fontSize: '12px' }}>{banner}</p>
+        {record.verdict !== undefined && (
+          <div style={{ color: 'var(--text-secondary)', fontSize: '12px', lineHeight: 1.6, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', marginTop: '8px' }}>
+            {record.verdict}
+          </div>
+        )}
+      </div>
+    );
+  }
   const collected = collectedDisagreements(record);
   if (collected.status === 'absent') {
     return (
@@ -98,6 +113,9 @@ function LedgerRow({ record }: { record: CouncilRecord }) {
           </Button>
         </span>
       </div>
+      {record.inconclusive === true && (
+        <p style={{ ...quietText, color: 'var(--accent-amber)', margin: '8px 0 0' }}>{INCONCLUSIVE_COPY}</p>
+      )}
       {open && (
         <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
           <DisagreementsBlock record={record} />

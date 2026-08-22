@@ -6,6 +6,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   collectedDisagreements,
+  inconclusiveBanner,
+  INCONCLUSIVE_COPY,
   kindChip,
   lineDivergenceMarks,
   panelOkCount,
@@ -75,4 +77,21 @@ test('老格式记录不得产生任何分歧标记,不从 verdict 回填', () =
   const cardSrc = readFileSync(join(here, '../chat/VisionArbiterCard.tsx'), 'utf8')
   assert.equal(ledgerSrc.includes('markDivergentLines'), false)
   assert.equal(cardSrc.includes('markDivergentLines'), false)
+})
+
+test('inconclusive records show the insufficient-answers banner, not an invented verdict', () => {
+  const [r] = parseVisionLedger({
+    records: [{
+      kind: 'review',
+      inconclusive: true,
+      consensus: false,
+      disagreements: [],
+      verdict: '有效答案不足 0/2,无法交叉核验。失败原因见各行。',
+      panelists: [{ provider: 'qwen', ok: false, error: '超时' }],
+    }],
+  })
+  assert.ok(r)
+  assert.equal(r.inconclusive, true)
+  assert.equal(inconclusiveBanner(r), INCONCLUSIVE_COPY)
+  assert.equal(inconclusiveBanner({ ...r, inconclusive: false }), undefined)
 })

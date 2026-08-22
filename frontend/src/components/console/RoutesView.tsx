@@ -6,7 +6,9 @@ import {
   formatCoverage,
   outcomeLabel,
   parseRoutesPayload,
+  routesTierNote,
   ROUTES_READY_COPY,
+  ruleReasonCopy,
   type RouteDecision,
   type RoutesPayload,
 } from './routes-model';
@@ -49,8 +51,14 @@ function DecisionRow({ row }: { row: RouteDecision }) {
         <p style={{ ...quietText, margin: '6px 0 0' }}>
           候选 {(row.candidates || []).join(' / ') || '未采集'}
           {row.reason ? ` · ${row.reason}` : ''}
+          {ruleReasonCopy(row.rule?.reason) ? ` · ${ruleReasonCopy(row.rule?.reason)}` : ''}
           {row.fallbackReason ? ` · 回落 ${row.fallbackReason}` : ''}
         </p>
+        {Array.isArray(row.annotations) && row.annotations.length > 0 && (
+          <p style={{ ...quietText, margin: '6px 0 0', color: 'var(--accent-amber)' }}>
+            {row.annotations.join(' · ')}
+          </p>
+        )}
       </div>
       <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
         <Badge state={pending ? 'queued' : 'done'}>{pending ? '待回填' : '已回填'}</Badge>
@@ -104,7 +112,7 @@ export const RoutesView: React.FC = () => {
           <h3 style={{ fontSize: '13px', fontWeight: 700, margin: '0 0 8px' }}>{ROUTES_READY_COPY}</h3>
           <p style={{ margin: '0 0 12px', color: 'var(--text-secondary)', fontSize: '12px' }}>{formatCoverage(payload.stats)}</p>
           <p style={{ ...quietText, margin: '0 0 12px' }}>
-            三档阶梯已收起：真实路径没有逐候选判断可聚,不会显示一个永远只有「升级」的阶梯。
+            {routesTierNote(payload.decisions)}
           </p>
           {payload.decisions.length === 0 ? (
             <p style={{ ...quietText, margin: 0 }}>还没有决策记录。成功读到空台账时这里仍会显示路由档位。</p>

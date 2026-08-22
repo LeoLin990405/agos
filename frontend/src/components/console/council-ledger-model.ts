@@ -106,3 +106,10 @@ export function panelOkCount(record: CouncilRecord): { ok: number; total: number
     total: record.panelists.length,
   };
 }
+
+export const INCONCLUSIVE_COPY = '本次评审有效答案不足,未产出仲裁'
+
+export function inconclusiveBanner(record: CouncilRecord): string | undefined {
+  if (record.inconclusive !== true) return undefined
+  return INCONCLUSIVE_COPY
+}
