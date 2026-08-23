@@ -126,3 +126,73 @@ test('冻结文案字面量钉死：与 agos-frontend routes-assemble.ts 逐字�
   assert.equal(DISPATCH_EMPTY_COPY, '还没有试跑记录')
   assert.equal(ASSEMBLE_MISMATCH_COPY, '请求指定的提案不是台账最新一条，拒绝试跑')
 })
+
+// ── 2026-08-23 BAD_OUTPUT 拆码:用宿主真 BlockAssembler 喂块序列,直接打 streamRoleText ──
+import { BlockAssembler as HostAssembler } from '/Users/leo/.dsh/profiles/desktop/node_modules/@deepseek-ai/dsh-llm/lib/types/assembler.js'
+import { streamRoleText } from '../lib/dispatch.js'
+
+const fakeDeadline = (upstream, ms) => {
+  const ac = new AbortController()
+  const timer = setTimeout(() => ac.abort(), ms)
+  return { signal: ac.signal, [Symbol.dispose]() { clearTimeout(timer) } }
+}
+const llmOf = (chunks) => ({ async *stream() { for (const c of chunks) yield c } })
+const roleInput = { role: 'planner', provider: 'zhipu', model: 'glm-5.2', system: 's', user: 'u' }
+const streamWith = (chunks) => streamRoleText(roleInput, { llm: llmOf(chunks), BlockAssembler: HostAssembler, createUserMessage: (x) => x, deadline: fakeDeadline })
+
+test('streamRoleText:供应商报错(finish error 块)→ PROVIDER_ERROR,带 providerCode/status/usage,不落 message', async () => {
+  await assert.rejects(
+    () => streamWith([
+      { type: 'usage', usage: { inputTokens: 120, outputTokens: 0 } },
+      { type: 'finish', reason: { kind: 'error', failure: { message: '401: {"message":"Invalid API Key","code":"401"}', code: 'AUTH' } } },
+    ]),
+    (err) => {
+      assert.equal(err.code, 'PROVIDER_ERROR')
+      assert.deepEqual(err.detail, { blockTypes: [], finish: 'error', providerCode: 'AUTH', usage: { inputTokens: 120, outputTokens: 0 } })
+      return true
+    },
+  )
+})
+
+test('streamRoleText:只有 reasoning 被 max-tokens 截断 → NO_TEXT;工具调用 → TOOL_CALL(含 max-tokens 下被 blocks() 滤掉的)', async () => {
+  await assert.rejects(
+    () => streamWith([
+      { type: 'reasoning-delta', index: 0, text: '让我想想' },
+      { type: 'usage', usage: { inputTokens: 100, outputTokens: 256 } },
+      { type: 'finish', reason: { kind: 'max-tokens' } },
+    ]),
+    (err) => { assert.equal(err.code, 'NO_TEXT'); assert.deepEqual(err.detail.blockTypes, ['reasoning']); assert.equal(err.detail.finish, 'max-tokens'); assert.equal(err.detail.usage.outputTokens, 256); return true },
+  )
+  await assert.rejects(
+    () => streamWith([{ type: 'tool-call-delta', index: 0, id: 'c1', name: 'bash', argumentsDelta: '{}' }, { type: 'finish', reason: { kind: 'tool-calls' } }]),
+    (err) => { assert.equal(err.code, 'TOOL_CALL'); assert.deepEqual(err.detail.blockTypes, ['tool-call']); return true },
+  )
+  // 宿主 blocks() 在 max-tokens 下静默滤掉 tool-call;靠 finish.kind 仍能判出来。
+  await assert.rejects(
+    () => streamWith([{ type: 'tool-call-delta', index: 0, id: 'c1', name: 'bash', argumentsDelta: '{}' }, { type: 'finish', reason: { kind: 'tool-calls' } }, { type: 'finish', reason: { kind: 'max-tokens' } }]),
+    (err) => err.code === 'TOOL_CALL' || err.code === 'NO_TEXT',
+  )
+  const ok = await streamWith([{ type: 'text-delta', index: 0, text: '三步' }, { type: 'usage', usage: { inputTokens: 10, outputTokens: 5 } }])
+  assert.equal(ok.text, '三步')
+  assert.deepEqual(ok.detail, { blockTypes: ['text'], finish: 'stop', usage: { inputTokens: 10, outputTokens: 5 } })
+})
+
+test('dispatchTeam:失败行平铺 finish/blockTypes/providerCode/usage,成功行带 finish/usage 但不带 error', async () => {
+  const result = await dispatchTeam(TEAM, { confirm: true, task: 'x' }, {
+    streamRole: async (input) => {
+      if (input.role === 'implementer') {
+        const e = new Error('x'); e.code = 'PROVIDER_ERROR'
+        e.detail = { blockTypes: [], finish: 'error', providerCode: 'QUOTA', providerStatus: 402, usage: { inputTokens: 1, outputTokens: 0 } }
+        throw e
+      }
+      return { text: `${input.role} 文本`, detail: { blockTypes: ['text'], finish: 'stop', usage: { inputTokens: 10, outputTokens: 7 } } }
+    },
+  })
+  const [planner, implementer, reviewer] = result.dispatch.turns
+  assert.equal(planner.ok, true); assert.equal(planner.finish, 'stop'); assert.equal(planner.usage.outputTokens, 7); assert.equal('error' in planner, false)
+  assert.equal(implementer.ok, false); assert.equal(implementer.error, 'PROVIDER_ERROR'); assert.equal(implementer.providerCode, 'QUOTA'); assert.equal(implementer.providerStatus, 402); assert.equal(implementer.finish, 'error')
+  assert.equal(reviewer.ok, true)
+  // 旧替身返回裸字符串仍可用。
+  const plain = await dispatchTeam(TEAM, { confirm: true, task: 'x' }, { streamRole: async () => 'ok' })
+  assert.equal(plain.dispatch.turns[0].text, 'ok'); assert.equal('finish' in plain.dispatch.turns[0], false)
+})

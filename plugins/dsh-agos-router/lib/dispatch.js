@@ -5,6 +5,7 @@
 // Does not switch the live session model, does not spawn tools, does not write outcome.
 import { ASSEMBLE_EMPTY_COPY, LIVE_DISPATCH_OFF_COPY } from './assemble.js'
 import { sanitizePreview } from './sanitize.js'
+import { classifyStream, streamError } from './stream-outcome.js'
 
 export const DISPATCH_COPY = '本次是三角色试跑，未换本跳会话模型'
 export const DISPATCH_NO_TOOLS_COPY = '三角色只出文本，不改仓库'
@@ -114,19 +115,10 @@ export async function streamRoleText(input, deps) {
       }
       assembler.push(chunk)
     }
-    const blocks = assembler.blocks()
-    if (blocks.some((block) => block.type === 'tool-call')) {
-      const err = new Error('dispatch output contained a tool-call block')
-      err.code = 'BAD_OUTPUT'
-      throw err
-    }
-    const text = blocks.filter((block) => block.type === 'text').map((block) => block.text).join('\n').trim()
-    if (!text) {
-      const err = new Error('dispatch produced no text')
-      err.code = 'BAD_OUTPUT'
-      throw err
-    }
-    return text
+    // 先看 finish 再看块:供应商报错是 finish 块不是 throw(见 stream-outcome.js)。
+    const outcome = classifyStream(assembler)
+    if ('code' in outcome) throw streamError(outcome.code, `dispatch: ${outcome.message}`, outcome.detail)
+    return outcome
   } finally {
     handle[Symbol.dispose]()
   }
@@ -180,13 +172,16 @@ export async function dispatchTeam(assemble, input, deps = {}) {
       continue
     }
     try {
-      const text = await deps.streamRole({
+      const streamed = await deps.streamRole({
         role,
         provider: route.provider,
         model: route.model,
         system: roleSystemPrompt(role),
         user: roleUserPrompt(role, task, turns),
       })
+      // streamRole 可返回裸字符串(测试替身)或 {text, detail}(streamRoleText)。
+      const text = typeof streamed === 'string' ? streamed : streamed && typeof streamed.text === 'string' ? streamed.text : ''
+      const detail = streamed && typeof streamed === 'object' && streamed.detail ? streamed.detail : undefined
       turns.push({
         role,
         model,
@@ -194,8 +189,11 @@ export async function dispatchTeam(assemble, input, deps = {}) {
         hostModel: route.model,
         ok: true,
         text: sanitizePreview(text, TURN_TEXT_LIMIT) || '',
+        // 成功行也记 finish/usage:回答「256 的上限为什么 output 334」要靠它。不带 error(前端契约:ok 行无 error)。
+        ...(detail ? { finish: detail.finish, blockTypes: detail.blockTypes, ...(detail.usage ? { usage: detail.usage } : {}) } : {}),
       })
     } catch (err) {
+      const detail = err && err.detail && typeof err.detail === 'object' ? err.detail : undefined
       turns.push({
         role,
         model,
@@ -204,6 +202,13 @@ export async function dispatchTeam(assemble, input, deps = {}) {
         ok: false,
         error: err && typeof err.code === 'string' && err.code ? err.code : 'STREAM_ERROR',
         text: '',
+        ...(detail ? {
+          finish: detail.finish,
+          blockTypes: detail.blockTypes,
+          ...(detail.providerCode ? { providerCode: detail.providerCode } : {}),
+          ...(detail.providerStatus !== undefined ? { providerStatus: detail.providerStatus } : {}),
+          ...(detail.usage ? { usage: detail.usage } : {}),
+        } : {}),
       })
     }
   }

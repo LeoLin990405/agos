@@ -137,6 +137,7 @@ export async function decide(input, deps = {}) {
   let decision
   let source = 'fallback'
   let fallbackReason
+  let fallbackDetail
   if (typeof select === 'function') {
     try {
       decision = await select(input)
@@ -145,6 +146,7 @@ export async function decide(input, deps = {}) {
       decision = fallbackPick(input)
       source = 'fallback'
       fallbackReason = err && typeof err.code === 'string' && err.code ? err.code : 'UNKNOWN'
+      if (err && err.detail && typeof err.detail === 'object') fallbackDetail = err.detail
     }
   } else {
     decision = fallbackPick(input)
@@ -165,6 +167,8 @@ export async function decide(input, deps = {}) {
     agreementShare: rule.agreementShare,
   }
   if (fallbackReason) record.fallbackReason = fallbackReason
+  // 选择器失败的真相(blockTypes / finish / providerCode / usage)落盘;不改 buildDecisionRecord。
+  if (fallbackDetail) record.fallbackDetail = fallbackDetail
   if (ledgerFile) appendLine(ledgerFile, record)
   return record
 }

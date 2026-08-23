@@ -5,8 +5,13 @@
  *   3. caller caches by config key; empty provider/model → null (not throw)
  *   4. system prompt = default + user appendix; JSON contract forced to the tail
  */
+import { classifyStream } from './stream-outcome.js'
+
+// BAD_OUTPUT 保留在表里只为认得台账历史行(2026-08-22 的三条决策行与一条试跑行);新代码不再抛它。
+// 2026-08-23 拆成 PROVIDER_ERROR / TOOL_CALL / NO_TEXT / UNPARSEABLE(见 stream-outcome.js)。
 export const SELECTOR_ERROR_CODES = Object.freeze([
   'NO_ADAPTER', 'TIMEOUT', 'ABORTED', 'BAD_OUTPUT', 'STREAM_ERROR', 'OVERLOAD',
+  'PROVIDER_ERROR', 'TOOL_CALL', 'NO_TEXT', 'UNPARSEABLE',
 ])
 
 export class SelectorError extends Error {
@@ -14,6 +19,7 @@ export class SelectorError extends Error {
     super(message ?? `agos-router selector failed: ${code}`, options)
     this.name = 'SelectorError'
     this.code = code
+    if (options && options.detail) this.detail = options.detail
   }
 }
 
@@ -219,18 +225,15 @@ export function createSelector({
         if (err instanceof SelectorError) throw err
         throw new SelectorError('STREAM_ERROR', `agos-router selector stream threw: ${err && err.message ? err.message : String(err)}`, { cause: err })
       }
-      const blocks = assembler.blocks()
-      if (blocks.some((b) => b.type === 'tool-call')) {
-        throw new SelectorError('BAD_OUTPUT', 'agos-router selector output contained a tool-call block')
-      }
-      const text = blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n')
-      if (typeof text !== 'string' || text.trim() === '') {
-        throw new SelectorError('BAD_OUTPUT', 'agos-router selector produced no text')
+      // 先看 finish 再看块:供应商报错是 finish 块不是 throw(见 stream-outcome.js)。
+      const outcome = classifyStream(assembler)
+      if ('code' in outcome) {
+        throw new SelectorError(outcome.code, `agos-router selector: ${outcome.message}`, { detail: outcome.detail })
       }
       const allowed = Array.isArray(input.candidates) ? input.candidates.map((c) => c.id).filter(Boolean) : []
-      const parsed = parseSelectorOutput(text, allowed)
+      const parsed = parseSelectorOutput(outcome.text, allowed)
       if (parsed === null) {
-        throw new SelectorError('BAD_OUTPUT', 'agos-router selector produced unparseable output')
+        throw new SelectorError('UNPARSEABLE', 'agos-router selector produced unparseable output', { detail: outcome.detail })
       }
       return parsed
     } finally {

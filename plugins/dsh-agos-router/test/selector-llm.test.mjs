@@ -5,6 +5,7 @@ import {
   createSelector,
   parseSelectorOutput,
   resolveCachedSelector,
+  SELECTOR_ERROR_CODES,
   SELECTOR_IO_CONTRACT,
   USER_RULES_HEADER,
 } from '../lib/selector-llm.js'
@@ -16,10 +17,17 @@ import { join } from 'node:path'
 
 const CONTRACT_LINE = '{"pick":"<candidate id>","role":"<role>","confidence":0.0,"reason":"一句理由","alternates":[],"label":"<kebab>"}'
 
+/** 替身:块直接当 blocks;认得 finish / usage 块(宿主 BlockAssembler 的 getter 口径)。 */
 class FakeAssembler {
-  constructor() { this.chunks = [] }
-  push(chunk) { this.chunks.push(chunk) }
+  constructor() { this.chunks = []; this._finish = undefined; this._usage = undefined }
+  push(chunk) {
+    if (chunk && chunk.type === 'finish') { this._finish = chunk.reason; return }
+    if (chunk && chunk.type === 'usage') { this._usage = chunk.usage; return }
+    this.chunks.push(chunk)
+  }
   blocks() { return this.chunks }
+  get finish() { return this._finish ?? { kind: 'stop' } }
+  get usage() { return this._usage }
 }
 
 const createUserMessage = (x) => x
@@ -65,9 +73,10 @@ test('illegal JSON / tool-call / empty text are rejected', async () => {
     createUserMessage,
     deadline,
   })
+  // 「选 qwen 就行」有文本但不是约定 JSON → UNPARSEABLE(原来统统 BAD_OUTPUT)。
   await assert.rejects(
     () => selectBad({ task: 'x', role: 'coder', candidates: CANDIDATES }),
-    (err) => err.code === 'BAD_OUTPUT',
+    (err) => err.code === 'UNPARSEABLE' && Array.isArray(err.detail?.blockTypes) && err.detail.finish === 'stop',
   )
 
   const selectTool = createSelector({
@@ -80,8 +89,37 @@ test('illegal JSON / tool-call / empty text are rejected', async () => {
   })
   await assert.rejects(
     () => selectTool({ task: 'x', role: 'coder', candidates: CANDIDATES }),
-    (err) => err.code === 'BAD_OUTPUT',
+    (err) => err.code === 'TOOL_CALL' && err.detail?.blockTypes?.includes('tool-call'),
   )
+
+  // 供应商报错在宿主里是 finish{kind:'error'} 块,不是 throw:原来 blocks()=[] 被记成「无文本」。
+  const selectQuota = createSelector({
+    llm: streamOf([
+      { type: 'usage', usage: { inputTokens: 120, outputTokens: 0 } },
+      { type: 'finish', reason: { kind: 'error', failure: { message: '402: {"message":"You exceeded your current quota"}', code: 'QUOTA', status: 402 } } },
+    ]),
+    provider: 'stepfun', model: 'step-3.7-flash', BlockAssembler: FakeAssembler, createUserMessage, deadline,
+  })
+  await assert.rejects(
+    () => selectQuota({ task: 'x', role: 'coder', candidates: CANDIDATES }),
+    (err) => err.code === 'PROVIDER_ERROR' && err.detail.providerCode === 'QUOTA' && err.detail.providerStatus === 402
+      && err.detail.usage.outputTokens === 0 && !JSON.stringify(err.detail).includes('exceeded'),
+  )
+
+  // 只吐 reasoning、被 max-tokens 截断 → NO_TEXT,detail 记下 blockTypes 与 finish。
+  const selectReasoning = createSelector({
+    llm: streamOf([
+      { type: 'reasoning', text: '让我想想' },
+      { type: 'usage', usage: { inputTokens: 100, outputTokens: 256 } },
+      { type: 'finish', reason: { kind: 'max-tokens' } },
+    ]),
+    provider: 'stepfun', model: 'step-3.7-flash', BlockAssembler: FakeAssembler, createUserMessage, deadline,
+  })
+  await assert.rejects(
+    () => selectReasoning({ task: 'x', role: 'coder', candidates: CANDIDATES }),
+    (err) => err.code === 'NO_TEXT' && err.detail.finish === 'max-tokens' && err.detail.blockTypes.join() === 'reasoning' && err.detail.usage.outputTokens === 256,
+  )
+  for (const code of ['PROVIDER_ERROR', 'TOOL_CALL', 'NO_TEXT', 'UNPARSEABLE', 'BAD_OUTPUT']) assert.ok(SELECTOR_ERROR_CODES.includes(code), code)
 
   assert.equal(parseSelectorOutput('not json', ['qwen3.8-max']), null)
   assert.equal(parseSelectorOutput('{"pick":"nope","role":"coder","confidence":0.9,"reason":"x"}', ['qwen3.8-max']), null)
@@ -155,4 +193,24 @@ test('valid selector JSON is accepted and ledger stays pending', async () => {
   assert.equal(record.label, 'coding')
   assert.ok(record.rule && record.rule.outcome)
   assert.equal(JSON.parse((await readFile(file, 'utf8')).trim()).task, undefined)
+})
+
+test('decide():选择器 PROVIDER_ERROR 回落静态表,决策行落盘 fallbackReason + fallbackDetail,reason 不再说「超时」', async () => {
+  const select = createSelector({
+    llm: streamOf([
+      { type: 'usage', usage: { inputTokens: 120, outputTokens: 0 } },
+      { type: 'finish', reason: { kind: 'error', failure: { message: '402: quota', code: 'QUOTA', status: 402 } } },
+    ]),
+    provider: 'stepfun', model: 'step-3.7-flash', BlockAssembler: FakeAssembler, createUserMessage, deadline,
+  })
+  const dir = await mkdtemp(join(tmpdir(), 'agos-router-'))
+  const file = join(dir, 'route-outcome.jsonl')
+  const record = await decide({ task: 'x', role: 'sql', taskType: 'sql', candidates: CANDIDATES }, { select, auditFile: file })
+  assert.equal(record.source, 'fallback')
+  assert.equal(record.fallbackReason, 'PROVIDER_ERROR')
+  assert.deepEqual(record.fallbackDetail, { blockTypes: [], finish: 'error', providerCode: 'QUOTA', providerStatus: 402, usage: { inputTokens: 120, outputTokens: 0 } })
+  assert.equal(record.reason, 'static table')
+  assert.doesNotMatch(JSON.stringify(record), /timed out|quota/)
+  const stored = JSON.parse((await readFile(file, 'utf8')).trim())
+  assert.equal(stored.fallbackDetail.providerCode, 'QUOTA')
 })

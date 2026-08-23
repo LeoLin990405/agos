@@ -1,6 +1,6 @@
 import { normalizeRole } from './roles.js'
 
-/** Static role table — used when the selector times out or is unconfigured. Not a quality label. */
+/** Static role table — used when the selector fails or is unconfigured (the cause is in fallbackReason). Not a quality label. */
 export const STATIC_FALLBACK = Object.freeze({
   planner: { pick: 'glm-5.2', role: 'planner' },
   implementer: { pick: 'qwen3.8-max', role: 'implementer' },
@@ -18,7 +18,8 @@ export function fallbackPick(input) {
     pick,
     role: row.role,
     confidence: 0,
-    reason: 'selector unavailable or timed out; static table',
+    // 原来写「unavailable or timed out」,把每种失败都说成超时;真因在决策行的 fallbackReason。
+    reason: 'static table',
     alternates: ids.filter((id) => id !== pick).slice(0, 3),
     label: role,
   }
