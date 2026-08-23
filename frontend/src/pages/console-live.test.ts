@@ -171,7 +171,8 @@ import type { CouncilRecord } from '@/components/console/council-ledger-model';
 const routesLive: RoutesPayload = {
   at: 1787480000000,
   decisions: [{ ts: 1787329561900, taskType: 'sql', role: 'coder', pick: 'qwen3.8-max', candidates: [], outcome: null } as unknown as RoutesPayload['decisions'][number], { ts: 1787409999000, role: 'coder', pick: 'x', candidates: [], outcome: null } as unknown as RoutesPayload['decisions'][number]],
-  stats: { total: 8, window: 8, limit: 50, filled: 1, pending: 7, cells: 5, posterior: { observations: 1, cells: 1 } },
+  // 2026-08-23 22:04 后台账多了 1 条影子行:total 9、pending 仍 7(影子行不计)、shadow 小计 1
+  stats: { total: 9, window: 8, limit: 50, filled: 1, pending: 7, cells: 5, shadow: { total: 1, filled: 0, pending: 1, suggested: 1, agreed: 0 }, posterior: { observations: 1, cells: 1 } },
 };
 const councilFlagged: CouncilRecord = {
   kind: undefined, time: '2026-08-18T06:52:21.966Z', question: 'Python 的 GIL 在 3.13 里发生了什么变化?', arbiter: 'stepfun',
@@ -190,6 +191,9 @@ test('W16 inboxFromRoutes: pending>0 才产出一条 warning,口径是 stats.pen
   assert.equal(item.source, 'routes');
   assert.match(item.title, /^7 条路由决策待回填结果$/);
   assert.match(item.description, /不是等人批准/);
+  assert.equal(item.description, '模型路由 8 条,已回填 1 条;另有 1 条影子建议行不计入。待回填是 outcome 仍为空,不是等人批准。', '同屏数字要自洽:8−1=7 条待回填');
+  const noShadow = inboxFromRoutes({ ...routesLive, stats: { ...routesLive.stats, total: 8, shadow: undefined } })[0];
+  assert.equal(noShadow?.description, '模型路由 8 条,已回填 1 条。待回填是 outcome 仍为空,不是等人批准。');
   assert.equal(item.timestamp, `最近决策 ${new Date(1787409999000).toLocaleString('zh-CN', { hour12: false })}`, '时间槽是台账里最近一条决策,不是 GET 响应时间');
   assert.equal(inboxFromRoutes({ ...routesLive, decisions: [] })[0]?.timestamp, '决策时间未采集');
   assert.deepEqual(inboxFromRoutes({ ...routesLive, stats: { ...routesLive.stats, pending: 0 } }), []);

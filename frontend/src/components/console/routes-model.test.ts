@@ -35,7 +35,7 @@ test('null outcome is pending, never success or failure', () => {
   assert.equal(outcomeValueCopy('weird'), '已回填')
   assert.equal(
     formatCoverage({ total: 3, filled: 1, pending: 2, cells: 2, window: 2 }),
-    '显示最近 2 条，台账共 3 条 · 已回填结果 1 条 · 覆盖 2 个 (角色, 模型) 格',
+    '显示最近 2 条，台账共 3 条（模型路由 3 条）· 已回填结果 1 条 · 覆盖 2 个 (角色, 模型) 格',
   )
 })
 
@@ -126,4 +126,23 @@ test('posteriorCopy 与 decisionReasonCopy 由数据算出,不搬运原码', () 
   assert.equal(decisionReasonCopy({ reason: 'whatever', source: 'fallback' }), '静态表（回落理由未识别）')
   assert.equal(decisionReasonCopy({ reason: '该候选明确标注为 SQL coder', source: 'selector' }), '选择器原话 · 该候选明确标注为 SQL coder')
   assert.equal(decisionReasonCopy({ source: 'selector' }), undefined)
+})
+
+test('W17 路由页文案:覆盖句把影子行单列;影子行徽章按 pick/batchRef/adopted/outcome 算;shadowRowCopy 各分支', async () => {
+  const { formatCoverage, routedTotal, shadowOutcomeCopy, shadowRowCopy } = await import('./routes-model.ts')
+  const stats = { total: 9, window: 8, limit: 50, filled: 1, pending: 7, cells: 5, shadow: { total: 1, filled: 0, pending: 1, suggested: 1, agreed: 0 } }
+  assert.equal(routedTotal(stats), 8)
+  assert.equal(formatCoverage(stats), '显示最近 8 条，台账共 9 条（模型路由 8 条）· 已回填结果 1 条 · 覆盖 5 个 (角色, 模型) 格 · 另有 1 条影子建议行（1 条有建议、0 条已按 fleet 终态回填；不计入格与待回填）')
+  assert.equal(formatCoverage({ total: 8, filled: 1, pending: 7, cells: 5 }), '显示最近 8 条，台账共 8 条（模型路由 8 条）· 已回填结果 1 条 · 覆盖 5 个 (角色, 模型) 格')
+  const base = { id: 'dec-1', mode: 'shadow', pick: 'knowledge-m4', source: 'selector', outcome: null, shadow: { chosen: ['leo-01'], agreed: false } }
+  assert.equal(shadowOutcomeCopy(base), '待派发关联')
+  assert.equal(shadowOutcomeCopy({ ...base, batchRef: 'b-1', adopted: false }), '未被采用，不回填')
+  assert.equal(shadowOutcomeCopy({ ...base, batchRef: 'b-1', adopted: true }), '待 fleet 终态回填')
+  assert.equal(shadowOutcomeCopy({ ...base, batchRef: 'b-1', adopted: null }), '是否采用判不了')
+  assert.equal(shadowOutcomeCopy({ ...base, pick: null as unknown as string }), '无建议，不回填')
+  assert.equal(shadowOutcomeCopy({ ...base, outcome: 'ok' }), '建议机器上的 run 成功')
+  assert.equal(shadowOutcomeCopy({ ...base, outcome: 'fail' }), '建议机器上的 run 失败/取消')
+  assert.equal(shadowRowCopy(base), '用户勾选 leo-01 · 建议与勾选不一致 · 尚未派发或未关联批次')
+  assert.equal(shadowRowCopy({ ...base, batchRef: 'b-f785f00d-8463-4369-9a02-4bf6dc7e3024', actualHosts: ['leo-01'], adopted: false }), '用户勾选 leo-01 · 建议与勾选不一致 · 批次 b-f785f00d… · 实际落在 leo-01 · 建议未被采用，批次成败不回填到本行（那是勾选机器的结果）')
+  assert.equal(shadowRowCopy({ id: 'dec-2', source: 'selector' }), undefined)
 })

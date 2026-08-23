@@ -44,6 +44,8 @@ export interface RoutesPayload {
     cells: number
     window?: number
     limit?: number
+    /** W17:影子行小计(total 含它们,filled/pending/cells 不含)。老载荷没有。 */
+    shadow?: { total: number; filled: number; pending: number; suggested: number; agreed: number }
     /** 后验分母:真实观测条数(outcome∈{ok,fail} 的决策)与 (角色,模型) 格数。老载荷没有。 */
     posterior?: { observations: number; cells: number }
   }
@@ -74,9 +76,29 @@ export function outcomeValueCopy(outcome: string | null | undefined): string {
   return '已回填'
 }
 
+/** 台账里模型路由行的数量(总数减影子行);没有 shadow 小计的老载荷 = 全部。 */
+export function routedTotal(stats: RoutesPayload['stats']): number {
+  return stats.total - (stats.shadow?.total ?? 0)
+}
+
 export function formatCoverage(stats: RoutesPayload['stats']): string {
   const window = stats.window ?? stats.total
-  return `显示最近 ${window} 条，台账共 ${stats.total} 条 · 已回填结果 ${stats.filled} 条 · 覆盖 ${stats.cells} 个 (角色, 模型) 格`
+  const shadow = stats.shadow
+  const shadowPart = shadow !== undefined && shadow.total > 0
+    ? ` · 另有 ${shadow.total} 条影子建议行（${shadow.suggested} 条有建议、${shadow.filled} 条已按 fleet 终态回填；不计入格与待回填）`
+    : ''
+  return `显示最近 ${window} 条，台账共 ${stats.total} 条（模型路由 ${routedTotal(stats)} 条）· 已回填结果 ${stats.filled} 条 · 覆盖 ${stats.cells} 个 (角色, 模型) 格${shadowPart}`
+}
+
+/** W17:影子行的结果徽章文案——它的 outcome 只会来自 fleet 终态回填,没被采用就永远不回填。 */
+export function shadowOutcomeCopy(row: RouteDecision): string {
+  if (row.outcome === 'ok') return '建议机器上的 run 成功'
+  if (row.outcome === 'fail') return '建议机器上的 run 失败/取消'
+  if (row.pick === null || row.pick === undefined || row.pick === '') return '无建议，不回填'
+  if (row.batchRef === undefined) return '待派发关联'
+  if (row.adopted === false) return '未被采用，不回填'
+  if (row.adopted === true) return '待 fleet 终态回填'
+  return '是否采用判不了'
 }
 
 /**

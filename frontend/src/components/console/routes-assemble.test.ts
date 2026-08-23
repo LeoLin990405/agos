@@ -550,6 +550,9 @@ test('RoutesView 只渲染 deriveAssembleView 的结果与冻结常量，不自�
   assert.equal((view.match(/resource\.refresh\(\);/g) ?? []).length, 5);
   assert.match(view, /setDispatchNote\(\{ tone: 'error', text: posted\.error \}\);\s*setProposed\(null\);\s*setLocalRun\(null\);\s*resource\.refresh\(\);/);
   assert.match(view, /row\.mode === 'shadow' \? shadowSourceCopy\(row\.mode, row\.source\) : sourceCopy\(row\.source\)/);
+  // W17:影子行不出「记成功/记失败」手工按钮;徽章走影子专用文案
+  assert.match(view, /\{pending && ref !== '' && !isShadow && \(/);
+  assert.match(view, /isShadow \? shadowOutcomeCopy\(row\) : outcomeValueCopy\(row\.outcome\)/);
   assert.match(view, /只报告/);
 });
 

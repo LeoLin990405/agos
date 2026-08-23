@@ -12,7 +12,7 @@ import { useResource, type ResourceFetcher } from '@/lib/useResource';
 import type { ResourceFailure, ResourceStatus } from '@/lib/resource';
 import { sessionsStore, type SessionSummaryRow, type TelemetryState } from '@/stores/live';
 import { fetchJsonResource } from '@/lib/useResource';
-import { parseRoutesPayload, type RoutesPayload } from '@/components/console/routes-model';
+import { parseRoutesPayload, routedTotal, type RoutesPayload } from '@/components/console/routes-model';
 import { parseVisionLedger, type CouncilRecord } from '@/components/console/council-ledger-model';
 import type { InboxItemData, InboxSource, InboxSourceState } from '@/components/console/AttentionInbox';
 
@@ -138,7 +138,7 @@ export function inboxFromRoutes(routes: RoutesPayload | undefined): InboxRow[] {
   return [{
     id: 'routes:pending', type: 'warning', source: 'routes',
     title: `${pending} 条路由决策待回填结果`,
-    description: `台账 ${routes.stats.total} 条,已回填 ${routes.stats.filled} 条。待回填是 outcome 仍为空,不是等人批准。`,
+    description: `模型路由 ${routedTotal(routes.stats)} 条,已回填 ${routes.stats.filled} 条${routes.stats.shadow !== undefined && routes.stats.shadow.total > 0 ? `;另有 ${routes.stats.shadow.total} 条影子建议行不计入` : ''}。待回填是 outcome 仍为空,不是等人批准。`,
     timestamp: latestTs > 0 ? `最近决策 ${new Date(latestTs).toLocaleString('zh-CN', { hour12: false })}` : '决策时间未采集',
     actionText: '去路由决策',
   }];

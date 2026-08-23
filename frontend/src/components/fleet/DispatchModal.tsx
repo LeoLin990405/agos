@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { fleetHostsStore, type FleetDispatchResult, type FleetHost } from '@/stores/live';
@@ -13,7 +13,7 @@ import {
 } from './dispatch-form';
 import { postShadowLink, postShadowSelection, shadowSuggestionCopy } from '@/components/console/routes-assemble';
 import { fallbackReasonCopy } from '@/components/console/routes-model';
-import { shadowCostCopy, shadowSignature, type ShadowState } from './dispatch-shadow';
+import { shadowCostCopy, shadowIntroCopy, shadowRelationCopy, shadowSignature, type ShadowState } from './dispatch-shadow';
 import './DispatchModal.css';
 
 export interface DispatchModalProps {
@@ -44,14 +44,16 @@ export const DispatchModal: React.FC<DispatchModalProps> = ({
   const [pending, setPending] = useState<FleetDispatchRequest>();
   const [error, setError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
+  // 影子状态不随 open 重置:关了再开、内容没变就不该再烧一次;签名(不含勾选)变了才会再调。
   const [shadow, setShadow] = useState<ShadowState>({ status: 'idle' });
+  const shadowRef = useRef<ShadowState>(shadow);
+  shadowRef.current = shadow;
 
   useEffect(() => {
     if (!open) return;
     setPending(undefined);
     setError(undefined);
     setSubmitting(false);
-    setShadow({ status: 'idle' });
   }, [open]);
 
   const hostsState = useSyncExternalStore(fleetHostsStore.subscribe, fleetHostsStore.getSnapshot);
@@ -84,7 +86,13 @@ export const DispatchModal: React.FC<DispatchModalProps> = ({
   /** W17:校验通过后做一次影子调用。同签名不重复;结果只进 shadow state。 */
   const runShadow = (request: FleetDispatchRequest) => {
     const signature = shadowSignature(request, remoteHosts.map((h) => h.name));
-    if ((shadow.status === 'done' || shadow.status === 'calling') && shadow.signature === signature) return;
+    // done / calling / failed 同签名都不再调:failed 也可能是超时——已经打出去、已经计费
+    if (shadow.status !== 'idle' && shadow.signature === signature) return;
+    if (remoteHosts.length === 0) {
+      // 前端就能判定的「跳过」不发请求,也不显示成「失败」
+      setShadow({ status: 'done', signature, result: { kind: 'skipped', message: '没有可用的远端机器，未调用选择器' } });
+      return;
+    }
     setShadow({ status: 'calling', signature });
     void postShadowSelection({
       items: request.items,
@@ -115,10 +123,12 @@ export const DispatchModal: React.FC<DispatchModalProps> = ({
     setError(undefined);
     try {
       const result = await onDispatch(pending);
-      // W17:派发真的发生了 → 把 batchId 与实际落的机器挂到影子决策上(失败不影响派发,只在控制台留痕)
-      if (shadow.status === 'done' && shadow.result.kind === 'decided') {
+      // W17:派发真的发生了 → 把 batchId 与实际落的机器挂到影子决策上(失败不影响派发,只在控制台留痕)。
+      // 读 ref 而不是渲染闭包:await 期间影子可能刚落定。
+      const latest = shadowRef.current;
+      if (latest.status === 'done' && latest.result.kind === 'decided') {
         const hostsHit = [...new Set(result.runs.map((run) => run.host))];
-        void postShadowLink({ ref: shadow.result.id, batchId: result.batchId, hosts: hostsHit }).then((r) => {
+        void postShadowLink({ ref: latest.result.id, batchId: result.batchId, hosts: hostsHit }).then((r) => {
           if (!r.ok) console.warn('影子决策关联批次失败', r.error);
         });
       }
@@ -132,18 +142,22 @@ export const DispatchModal: React.FC<DispatchModalProps> = ({
     }
   };
   const shadowCopy = shadow.status === 'done' ? shadowSuggestionCopy(shadow.result, fallbackReasonCopy) : undefined;
+  // 关系按**当前**勾选算(签名不含勾选,台账里的 agreed 是那次调用时的)
+  const shadowRelation = shadow.status === 'done' && shadow.result.kind === 'decided' ? shadowRelationCopy(shadow.result.pick, pending?.hosts ?? []) : shadowCopy?.relation;
+  // 影子调用在途时不许派发:否则 batchId 挂不上,这条已烧额度的影子行永远孤儿
+  const shadowInFlight = shadow.status === 'calling';
 
   const targetText = describeDispatchTargets(pending?.hosts ?? [], remoteHosts, pending?.tag ?? '');
   const footer = pending === undefined ? (
     <>
       <Button variant="ghost" onClick={close}>取消</Button>
-      <Button variant="primary" onClick={review} title="校验通过后会做一次选择器影子调用（消耗模型额度），只记台账，不改你的勾选">检查派发</Button>
+      <Button variant="primary" onClick={review} title={shadowIntroCopy(remoteHosts.length)}>检查派发</Button>
     </>
   ) : (
     <>
       <Button variant="ghost" disabled={submitting} onClick={() => setPending(undefined)}>返回修改</Button>
-      <Button data-dispatch-confirm variant="primary" disabled={submitting} onClick={() => void confirm()}>
-        {submitting ? '正在派发…' : '确认并派发'}
+      <Button data-dispatch-confirm variant="primary" disabled={submitting || shadowInFlight} onClick={() => void confirm()}>
+        {submitting ? '正在派发…' : shadowInFlight ? '等影子调用返回…' : '确认并派发'}
       </Button>
     </>
   );
@@ -244,7 +258,7 @@ export const DispatchModal: React.FC<DispatchModalProps> = ({
               />
             </div>
           </div>
-          <p className="dispatch-modal__quiet">「检查派发」会做一次选择器影子调用（消耗模型额度）：它只把「选择器会选哪台」记进路由台账并显示出来，不改你的勾选，也不改派发。</p>
+          <p className="dispatch-modal__quiet" data-shadow-intro>{shadowIntroCopy(remoteHosts.length)}</p>
           <label className="dispatch-modal__wake">
             <input
               type="checkbox"
@@ -271,7 +285,7 @@ export const DispatchModal: React.FC<DispatchModalProps> = ({
               {shadow.status === 'calling' && '选择器影子调用中…'}
               {shadow.status === 'failed' && `选择器影子调用失败：${shadow.error}`}
               {shadowCopy !== undefined && shadowCopy.head}
-              {shadowCopy?.relation !== undefined && ` · ${shadowCopy.relation}`}
+              {shadowRelation !== undefined && ` · ${shadowRelation}`}
             </p>
           </div>
         </div>

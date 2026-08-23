@@ -661,6 +661,7 @@ export function shadowSuggestionCopy(r: ShadowResult, fallbackCopy: (reason: str
   if (r.kind === 'skipped') return { head: `未调用选择器：${r.message}`, relation: undefined };
   if (r.source === 'selector' && r.pick !== null) {
     const head = `选择器建议：${r.pick}${r.reason !== undefined ? `（${r.reason}）` : '（选择器未留理由）'}`;
+    // relation 按台账里那次的勾选;DispatchModal 用 shadowRelationCopy 按**当前**勾选重算覆盖它
     const relation = r.agreed === true ? '与你勾选的机器一致'
       : r.agreed === false ? '与你勾选的机器不一致；派发仍按你的勾选'
       : '你没有勾选机器，派发由调度器分配；建议只记台账';
@@ -669,6 +670,9 @@ export function shadowSuggestionCopy(r: ShadowResult, fallbackCopy: (reason: str
   const why = fallbackCopy(r.fallbackReason) ?? (r.fallbackReason !== undefined ? `错误码 ${r.fallbackReason}` : '原因未记录');
   return { head: `选择器未产出建议（回落：${why}）`, relation: '本次仍记一条台账行，pick 为空' };
 }
+
+/** 选择器只看每项前 240 字(后端同值),请求体按此预截,免得 32×8000 字的合法派发撞 64KB body 上限。 */
+export const SHADOW_ITEM_CHARS = 240;
 
 export async function postShadowSelection(
   input: ShadowRequest & { confirm: boolean },
@@ -680,7 +684,7 @@ export async function postShadowSelection(
   const response = await fetch('/api/agos/routes/shadow', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ items: input.items, hosts: input.hosts, chosen: input.chosen, tag: input.tag, label: input.label }),
+    body: JSON.stringify({ items: input.items.map((s) => s.slice(0, SHADOW_ITEM_CHARS)), hosts: input.hosts, chosen: input.chosen, tag: input.tag, label: input.label }),
     signal,
   });
   const payload = await readJson(response);

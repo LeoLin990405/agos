@@ -37,7 +37,7 @@ import {
   ROUTES_READY_COPY,
   ruleReasonCopy,
   type RouteDecision,
-  type RoutesPayload, shadowRowCopy } from './routes-model';
+  type RoutesPayload, shadowRowCopy, shadowOutcomeCopy } from './routes-model';
 
 // 路由面唯一的 GET;写端点全部在 routes-assemble.ts,本文件不发请求(见那边的锁法说明)。
 const fetchRoutes = async (url: string, signal: AbortSignal): Promise<RoutesPayload> =>
@@ -75,6 +75,8 @@ function DecisionRow({
 }) {
   const pending = outcomeLabel(row.outcome) === 'pending';
   const ref = typeof row.id === 'string' ? row.id : '';
+  // W17:影子行的胜负只来自 fleet 终态回填,不给手工按钮(后端也拒);徽章用影子专用文案
+  const isShadow = row.mode === 'shadow';
   return (
     <li className="surface-row surface-row--3">
       <div>
@@ -103,12 +105,12 @@ function DecisionRow({
       </div>
       <div className="surface-meta">
         <Badge state={pending ? 'queued' : row.outcome === 'fail' ? 'failed' : 'done'}>
-          {outcomeValueCopy(row.outcome)}
+          {isShadow ? shadowOutcomeCopy(row) : outcomeValueCopy(row.outcome)}
         </Badge>
         <div className="u-num surface-quiet">
           {typeof row.confidence === 'number' ? `置信 ${row.confidence}` : '置信未采集'}
         </div>
-        {pending && ref !== '' && (
+        {pending && ref !== '' && !isShadow && (
           <div className="surface-cluster">
             <Button size="sm" disabled={!canRecord || busy} onClick={() => onRecord(ref, 'ok')}>记成功</Button>
             <Button size="sm" disabled={!canRecord || busy} onClick={() => onRecord(ref, 'fail')}>记失败</Button>
