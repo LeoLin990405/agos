@@ -1,0 +1,22 @@
+{
+  "name": "@dsh-local/cn-capabilities",
+  "description": "国产模型能力插件:视觉/语音/生图/委派/ACP(固化自动态插件)",
+  "version": "1.0.3",
+  "type": "module",
+  "main": "lib/index.js",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "3.18.1"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./bundle.patch.yml"
+    }
+  },
+  "files": [
+    "lib",
+    "bundle.patch.yml"
+  ]
+}

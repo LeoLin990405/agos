@@ -1,0 +1,5 @@
+# @dsh-local/agos bundle patch:AgOS-lite 控制台(纯客户端;host 半区为空实现,
+# 但 loader 只认有 host 入口的条目,所以必须显式 insert —— 同 dsh-ui-kit 的处理)。
+- insert:
+    - id: agos
+      name: '@dsh-local/agos'

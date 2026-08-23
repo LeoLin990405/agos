@@ -1,0 +1,3 @@
+- insert:
+    - id: cn-capabilities
+      name: '@dsh-local/cn-capabilities'

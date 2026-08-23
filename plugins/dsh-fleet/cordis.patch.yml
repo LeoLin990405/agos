@@ -1,0 +1,16 @@
+# @dsh-local/fleet bundle patch:homelab 多机并发(远程 subagent 传输)。
+- insert:
+    - id: fleet
+      name: '@dsh-local/fleet'
+      config:
+        enabled: true
+        announceToAgent: true
+        hosts:
+          - { name: local,    kind: local,  model: deepseek-v4-flash, tags: [general],                            maxConcurrency: 3 }
+          # Codex is opt-in only: default fleet traffic never selects kind=codex.
+          - { name: codex,    kind: codex,  model: '', tags: [codex], workspace: '~/.dsh/workspaces/codex', maxConcurrency: 1 }
+          - { name: agent-m4, kind: remote, ssh: agent-m4, model: deepseek-v4-flash, tags: [general, tool-heavy, mac],    maxConcurrency: 4 }
+          - { name: leo-01,   kind: remote, ssh: leo-01,   model: deepseek-v4-flash, tags: [general, tool-heavy, linux, writable], maxConcurrency: 6 }
+          - { name: leo-02,   kind: remote, ssh: leo-02,   model: deepseek-v4-flash, tags: [general, tool-heavy, linux, writable], maxConcurrency: 6 }
+          - { name: leo-03,   kind: remote, ssh: leo-03,   model: deepseek-v4-flash, tags: [general, tool-heavy, linux, writable], maxConcurrency: 6 }
+          - { name: knowledge-m4, kind: remote, ssh: knowledge-m4, model: deepseek-v4-flash, tags: [general, tool-heavy, mac, writable, knowledge], maxConcurrency: 2 }

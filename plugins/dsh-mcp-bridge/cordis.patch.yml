@@ -1,0 +1,4 @@
+# Local-only DSH-as-MCP bridge. The host webServer owns the loopback listener.
+- insert:
+    - id: dsh-mcp-bridge
+      name: '@dsh-local/mcp-bridge'

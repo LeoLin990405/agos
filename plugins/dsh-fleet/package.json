@@ -1,0 +1,22 @@
+{
+  "name": "@dsh-local/fleet",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Fleet 并发:把自包含子任务派到远端 DSH worker、本机子代理或显式 opt-in 的 Codex SDK host",
+  "main": "lib/index.js",
+  "exports": { ".": "./lib/index.js", "./client": "./lib/client.js", "./package.json": "./package.json" },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "3.18.1",
+    "@openai/codex-sdk": "0.147.0"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": ["@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-locale"]
+    },
+    "bundle": { "patch": "./cordis.patch.yml" }
+  },
+  "files": ["lib", "cordis.patch.yml"],
+  "scripts": { "test": "node --test test/*.test.mjs" }
+}
