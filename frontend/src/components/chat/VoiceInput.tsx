@@ -43,9 +43,35 @@ export interface VoiceInputLabels {
   audioFile: string;
 }
 
+/**
+ * W22(b):语音留痕。语音是最容易带口头语、重复起句的输入类,W20 的记忆抽取要按来源降权——
+ * 所以识别文本不再裸着交出去,随手带上来源与度量。组件仍然不提交聊天。
+ *   entry: 'mic' 是现场录音,'file' 是上传的音频文件;
+ *   ms: 录音时长(file 没有 → undefined,不是 0);bytes: 音频字节数;asrMs: 识别耗时;mime: 音频类型。
+ */
+export interface VoiceTranscriptMeta {
+  source: 'asr';
+  entry: 'mic' | 'file';
+  bytes: number;
+  ms: number | undefined;
+  asrMs: number;
+  mime: string;
+}
+
+export function buildTranscriptMeta(input: { entry: 'mic' | 'file'; blob: Blob; ms?: number; asrMs: number }): VoiceTranscriptMeta {
+  return {
+    source: 'asr',
+    entry: input.entry,
+    bytes: input.blob.size,
+    ms: typeof input.ms === 'number' && Number.isFinite(input.ms) && input.ms >= 0 ? Math.round(input.ms) : undefined,
+    asrMs: Math.max(0, Math.round(input.asrMs)),
+    mime: input.blob.type || '',
+  };
+}
+
 export interface VoiceInputProps {
-  /** Receives recognised text only. The component never submits the chat. */
-  onTranscript: (text: string) => void;
+  /** Receives recognised text plus provenance (W22 b). The component never submits the chat. */
+  onTranscript: (text: string, meta: VoiceTranscriptMeta) => void;
   onStatusChange?: (status: VoiceInputStatus) => void;
   onError?: (error: Error) => void;
   /** Injectable so previews and tests never need the real ASR route. */
@@ -302,7 +328,7 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
     onError?.(normalised);
   }, [onError]);
 
-  const runTranscription = useCallback(async (blob: Blob, operation: number) => {
+  const runTranscription = useCallback(async (blob: Blob, operation: number, origin: { entry: 'mic' | 'file'; ms?: number }) => {
     const controller = new AbortController();
     abortRef.current?.abort();
     abortRef.current = controller;
@@ -310,6 +336,7 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
     setStatus('transcribing');
 
     try {
+      const asrStartedAt = Date.now();
       const transcript = await transcribeAudioBlob(blob, {
         fetchImpl,
         endpoint,
@@ -317,7 +344,7 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
         maxRequestBytes,
       });
       if (!mountedRef.current || operation !== operationRef.current) return;
-      onTranscript(transcript);
+      onTranscript(transcript, buildTranscriptMeta({ entry: origin.entry, blob, ms: origin.ms, asrMs: Date.now() - asrStartedAt }));
       setStatus('idle');
     } catch (error) {
       if (controller.signal.aborted || operation !== operationRef.current) return;
@@ -406,7 +433,7 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
           fail(new Error('录音太短，请再试一次'));
           return;
         }
-        void runTranscription(blob, operation);
+        void runTranscription(blob, operation, { entry: 'mic', ms: elapsed });
       };
 
       recorder.start();
@@ -514,7 +541,7 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
     event.target.value = '';
     if (!file || disabled || status === 'recording' || status === 'transcribing') return;
     const operation = ++operationRef.current;
-    void runTranscription(file, operation);
+    void runTranscription(file, operation, { entry: 'file' });
   }, [disabled, runTranscription, status]);
 
   const isBusy = status === 'transcribing';

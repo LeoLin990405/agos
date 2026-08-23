@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/Button';
 import { Dot } from '@/components/ui/Dot';
 import { conversationStore } from '@/stores/live';
 import { ModelSelector } from './ModelSelector';
-import { VoiceInput } from './VoiceInput';
+import { VoiceInput, type VoiceTranscriptMeta } from './VoiceInput';
 import {
   ImageAttachments,
   buildPromptParts,
@@ -14,12 +14,20 @@ import {
   type OptimisticImageAttachment,
 } from './ImageAttachments';
 
+/** W22(b):本条消息里来自语音识别的片段及其度量。只在确有 ASR 片段时存在。 */
+export interface AsrSegment { text: string; meta: VoiceTranscriptMeta }
+
 export interface CommandDeckMessage {
   /** Text persisted by the fold; includes the image-count placeholder. */
   text: string;
   parts: PromptContentPart[];
   images: OptimisticImageAttachment[];
   optimisticId?: string;
+  /**
+   * 留痕:哪些片段是语音识别来的。PromptContentPart(冻结契约)没有 meta 槽,宿主事件也不收,
+   * 所以它今天只到 ChatPage 为止;落盘通道(给 W20 按来源降权)另开,不在本条里。
+   */
+  provenance?: { asr: AsrSegment[] };
 }
 
 export interface CommandDeckSendResult {
@@ -76,13 +84,20 @@ export function remainingDraftAfterSend(current: string, submitted: string): str
   return current;
 }
 
+/** 只保留仍出现在提交文本里的 ASR 片段(用户可能删掉/改写了识别结果;改写过的就不算语音来源)。 */
+export function selectAsrSegments(submittedText: string, segments: readonly AsrSegment[]): AsrSegment[] {
+  return segments.filter((s) => s.text.trim() !== '' && submittedText.includes(s.text.trim()));
+}
+
 export function buildCommandDeckMessage(
   inputText: string,
   snapshot: ImageAttachmentSnapshot,
+  asrSegments: readonly AsrSegment[] = [],
 ): CommandDeckMessage | null {
   const text = inputText.trim();
   const imageCount = snapshot.items.length;
   if (text === '' && imageCount === 0) return null;
+  const asr = selectAsrSegments(text, asrSegments);
   const optimisticId = imageCount > 0 ? nextMultimodalMessageId() : undefined;
   // fold 当前只投影 text part；把轻量占位写进同一条用户消息，刷新后仍能知道曾带图。
   const persistedText = imageCount > 0
@@ -93,6 +108,7 @@ export function buildCommandDeckMessage(
     parts: buildPromptParts(persistedText, snapshot.items),
     images: snapshot.optimisticImages,
     ...(optimisticId === undefined ? {} : { optimisticId }),
+    ...(asr.length === 0 ? {} : { provenance: { asr } }),
   };
 }
 
@@ -243,6 +259,8 @@ export const CommandDeck: React.FC<CommandDeckProps> = ({
   const imageInputRef = useRef<ImageAttachmentsHandle>(null);
   const sendInFlightRef = useRef(false);
   const mountedRef = useRef(true);
+  /** W22(b):本轮输入里尚未随消息发出的 ASR 片段(最多 20 段)。 */
+  const asrSegmentsRef = useRef<AsrSegment[]>([]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -264,7 +282,7 @@ export const CommandDeck: React.FC<CommandDeckProps> = ({
         parts: [],
         optimisticImages: [],
       };
-      const message = buildCommandDeckMessage(text, snapshot);
+      const message = buildCommandDeckMessage(text, snapshot, asrSegmentsRef.current);
       if (message === null) return;
       const submittedText = text;
       const result = await onSend?.(message);
@@ -276,6 +294,8 @@ export const CommandDeck: React.FC<CommandDeckProps> = ({
       // ASR may finish while session.prompt is in flight. Clear only the draft
       // that was actually submitted and retain any transcript appended meanwhile.
       setText((current) => remainingDraftAfterSend(current, submittedText));
+      // 已随本条发出的 ASR 片段清掉;在途识别追加的(不在 submittedText 里)留给下一条。
+      asrSegmentsRef.current = asrSegmentsRef.current.filter((s) => !submittedText.includes(s.text.trim()));
       imageInputRef.current?.clear();
     } catch (error) {
       if (mountedRef.current) setSendError(String((error as Error)?.message ?? error));
@@ -328,7 +348,8 @@ export const CommandDeck: React.FC<CommandDeckProps> = ({
           <div className="input-deck-tools">
             <VoiceInput
               disabled={sending}
-              onTranscript={(transcript) => {
+              onTranscript={(transcript, meta) => {
+                asrSegmentsRef.current = [...asrSegmentsRef.current, { text: transcript, meta }].slice(-20);
                 setText((previous) => previous.trim()
                   ? `${previous.trimEnd()} ${transcript}`
                   : transcript);

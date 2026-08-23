@@ -28,6 +28,7 @@ import {
   trashSession,
   type SessionMetaSnapshot,
 } from '@/components/chat/session-management';
+import { SessionTrashPanel } from '@/components/chat/SessionTrashPanel';
 import { EmptyStateHero, EmptyStateBelow } from '@/components/chat/EmptyState';
 import { NEW_SESSION_EVENT } from '@/components/layout/AppRail';
 import '@/design-system/chat-empty.css';
@@ -790,6 +791,8 @@ export const ChatPage: React.FC<{
                 {archivedExpanded && sectionedSessions.archived.map((session) => renderSessionRow(session, { archived: true }))}
               </div>
             </section>
+
+            <SessionTrashPanel />
 
             {sessionActionError !== undefined && (
               <div className="session-action-error" role="alert">{sessionActionError}</div>

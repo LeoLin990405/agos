@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildCommandDeckMessage,
+  selectAsrSegments,
   extractMultimodalMessageId,
   remainingDraftAfterSend,
   stripMultimodalMessageMarker,
@@ -55,4 +56,16 @@ test('empty composer stays inert while text-only behavior remains one text part'
     buildCommandDeckMessage(' 普通消息 ', createImageAttachmentSnapshot([]))?.parts,
     [{ type: 'text', text: '普通消息' }],
   );
+});
+
+test('W22(b) provenance: 只保留仍在提交文本里的 ASR 片段;全被改写/删除则不带 provenance 字段', () => {
+  const meta = { source: 'asr' as const, entry: 'mic' as const, bytes: 10, ms: 1200, asrMs: 300, mime: 'audio/webm' };
+  const segs = [{ text: '帮我看看这个', meta }, { text: '然后改一下', meta }];
+  const kept = buildCommandDeckMessage('帮我看看这个 再加一句', createImageAttachmentSnapshot([]), segs);
+  assert.deepEqual(kept?.provenance, { asr: [segs[0]] });
+  const rewritten = buildCommandDeckMessage('全部手打重写', createImageAttachmentSnapshot([]), segs);
+  assert.equal(rewritten?.provenance, undefined);
+  assert.equal('provenance' in (rewritten ?? {}), false);
+  assert.deepEqual(selectAsrSegments('x', [{ text: '  ', meta }]), []);
+  assert.equal(buildCommandDeckMessage('无语音', createImageAttachmentSnapshot([]))?.provenance, undefined, '旧两参调用不变');
 });

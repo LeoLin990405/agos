@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  buildTranscriptMeta,
   estimateAsrRequestBytes,
   transcribeAudioBlob,
   type VoiceInputFetch,
@@ -54,4 +55,10 @@ test('request size guard accounts for base64 expansion without fetching', async 
     /音频文件过大/,
   );
   assert.equal(called, false);
+});
+
+test('W22(b) buildTranscriptMeta: mic 带录音时长,file 没有(undefined 不是 0);bytes/mime 来自 blob;asrMs 取整不为负', () => {
+  const blob = new Blob([new Uint8Array(1234)], { type: 'audio/webm' });
+  assert.deepEqual(buildTranscriptMeta({ entry: 'mic', blob, ms: 2500.6, asrMs: 810.2 }), { source: 'asr', entry: 'mic', bytes: 1234, ms: 2501, asrMs: 810, mime: 'audio/webm' });
+  assert.deepEqual(buildTranscriptMeta({ entry: 'file', blob: new Blob(['x']), asrMs: -3 }), { source: 'asr', entry: 'file', bytes: 1, ms: undefined, asrMs: 0, mime: '' });
 });
