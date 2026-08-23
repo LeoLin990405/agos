@@ -22,6 +22,13 @@ export interface RouteDecision {
   fallbackReason?: string
   outcome?: string | null
   rule?: RouteRule
+  /** W17:影子决策行(只记不驱动);pick 是机器名不是模型。 */
+  mode?: 'shadow' | string
+  shadow?: { chosen?: string[]; agreed?: boolean | null; items?: number }
+  /** W17:派发真的发生后挂上的批次、实际落的机器、建议是否被采用(null = 判不了)。 */
+  batchRef?: string
+  actualHosts?: string[]
+  adopted?: boolean | null
   annotations?: string[]
 }
 
@@ -170,4 +177,24 @@ export function decisionReasonCopy(row: { reason?: string; source?: string }): s
   if (literal !== undefined) return literal
   if (row.source === 'fallback') return '静态表（回落理由未识别）'
   return `选择器原话 · ${row.reason}`
+}
+
+/** W17:影子行在路由页的一句话补充——全由行里的字段算出。 */
+export function shadowRowCopy(row: RouteDecision): string | undefined {
+  if (row.mode !== 'shadow') return undefined
+  const parts: string[] = []
+  const chosen = row.shadow?.chosen ?? []
+  parts.push(chosen.length > 0 ? `用户勾选 ${chosen.join(' / ')}` : '用户未勾选机器（交给调度器）')
+  if (row.shadow?.agreed === true) parts.push('建议与勾选一致')
+  else if (row.shadow?.agreed === false) parts.push('建议与勾选不一致')
+  if (row.batchRef !== undefined) {
+    parts.push(`批次 ${row.batchRef.slice(0, 10)}…`)
+    if (Array.isArray(row.actualHosts) && row.actualHosts.length > 0) parts.push(`实际落在 ${row.actualHosts.join(' / ')}`)
+    if (row.adopted === true) parts.push('建议被采用，批次终态会回填到本行')
+    else if (row.adopted === false) parts.push('建议未被采用，批次成败不回填到本行（那是勾选机器的结果）')
+    else parts.push('是否采用判不了（无建议或未记实际机器）')
+  } else {
+    parts.push('尚未派发或未关联批次')
+  }
+  return parts.join(' · ')
 }

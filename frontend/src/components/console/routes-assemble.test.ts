@@ -33,6 +33,7 @@ import {
   RETIRED_DISPATCH_NOTES,
   ROLE_SET,
   sourceCopy,
+  shadowSourceCopy,
   RETIRED_BEFORE_TS,
   STATUS_HAS_RUN_COPY,
   STATUS_LEDGER_UNREAD_COPY,
@@ -102,6 +103,9 @@ test('parseAssemblePlan: 契约相符才解析，不发明角色，不搬运文�
   // source 只认两个值;id/pick 必须合形;label 镜像 labels.js 的 class 形状。
   assert.equal(parseAssemblePlan({ assemble: { ...GOOD_ASSEMBLE, source: 'garbage' } })?.source, undefined);
   assert.equal(sourceCopy(undefined), '来源未采集');
+  assert.equal(shadowSourceCopy('shadow', 'selector'), '影子建议（未驱动派发）');
+  assert.equal(shadowSourceCopy('shadow', 'fallback'), '影子：选择器未产出建议');
+  assert.equal(shadowSourceCopy(undefined, 'selector'), '选择器');
   assert.equal(parseAssemblePlan({ assemble: { ...GOOD_ASSEMBLE, id: 'asm-1 已接入本跳会话' } })?.id, undefined);
   assert.equal(parseAssemblePlan({ assemble: { ...GOOD_ASSEMBLE, pick: '已接入本跳会话并换了模型' } })?.pick, undefined);
   assert.equal(parseAssemblePlan({ assemble: { ...GOOD_ASSEMBLE, label: '已接入本跳会话并换了模型，已改仓库' } })?.label, undefined);
@@ -378,7 +382,8 @@ test('场景⑦本地刚组装的新提案压过台账提案；本地刚跑的�
 
 // ── 写端点锁 ②:本文件 AST —— fetch 只许作直接被调函数,且实参是白名单字面量 ──────
 
-const WRITE_PATHS = ['/api/agos/routes/outcome', '/api/agos/routes/assemble', '/api/agos/routes/assemble/dispatch'];
+// W17(2026-08-23 Leo 拍板):影子选择器两条写端点。名字里没有 decide——decide 仍是 UI 不碰的端点。
+const WRITE_PATHS = ['/api/agos/routes/outcome', '/api/agos/routes/assemble', '/api/agos/routes/assemble/dispatch', '/api/agos/routes/shadow', '/api/agos/routes/shadow/link'];
 const NETWORK_IDS = new Set(['fetch', 'XMLHttpRequest', 'sendBeacon', 'Request', 'WebSocket', 'EventSource', 'importScripts']);
 
 const sourceFile = (file: string): ts.SourceFile =>
@@ -544,7 +549,7 @@ test('RoutesView 只渲染 deriveAssembleView 的结果与冻结常量，不自�
   // 失败分支也刷新台账;试跑失败放掉本地提案(第三轮 [5][21])。
   assert.equal((view.match(/resource\.refresh\(\);/g) ?? []).length, 5);
   assert.match(view, /setDispatchNote\(\{ tone: 'error', text: posted\.error \}\);\s*setProposed\(null\);\s*setLocalRun\(null\);\s*resource\.refresh\(\);/);
-  assert.match(view, /sourceCopy\(row\.source\)/);
+  assert.match(view, /row\.mode === 'shadow' \? shadowSourceCopy\(row\.mode, row\.source\) : sourceCopy\(row\.source\)/);
   assert.match(view, /只报告/);
 });
 

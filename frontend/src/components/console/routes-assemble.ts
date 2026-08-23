@@ -378,6 +378,14 @@ export function sourceCopy(source: string | undefined): string {
   return '来源未采集';
 }
 
+/** W17:影子决策行在路由页的来源文案——它没驱动任何派发,只是「如果让选择器选」的记录。 */
+export function shadowSourceCopy(mode: string | undefined, source: string | undefined): string {
+  if (mode !== 'shadow') return sourceCopy(source);
+  if (source === 'selector') return '影子建议（未驱动派发）';
+  if (source === 'fallback') return '影子：选择器未产出建议';
+  return '影子：来源未采集';
+}
+
 /** 唯一的「这条试跑属于这条提案」谓词:两边的 id 都要在场且相等。 */
 export const isDispatchOfThis = (assemble: AssemblePlan | null, dispatch: DispatchRun | null): dispatch is DispatchRun =>
   assemble !== null && dispatch !== null && assemble.id !== undefined && dispatch.ref !== undefined && dispatch.ref === assemble.id;
@@ -582,4 +590,121 @@ export async function postAssembleDispatch(
     return { ok: false, error: '试跑响应缺少试跑记录' };
   }
   return { ok: true, dispatch };
+}
+
+
+// ── W17 影子选择器(017 第三档,Leo 2026-08-23 拍板)──────────────────────────────
+// 一次「检查派发」= 至多一次选择器调用(StepFun,消耗额度)。结果只写台账、只展示;用户勾选与派发行为一字不改。
+// 写端点只许在本文件(仓级锁);端点名里没有 decide——decide 仍是 UI 不碰的端点。
+
+export interface ShadowHostInput {
+  name: string;
+  kind: string;
+  model: string;
+  tags: string[];
+  maxConcurrency: number;
+  enabled: boolean;
+  ok: boolean;
+  inflight: number;
+}
+
+export interface ShadowRequest {
+  items: string[];
+  hosts: ShadowHostInput[];
+  chosen: string[];
+  tag: string;
+  label: string;
+}
+
+export type ShadowResult =
+  | { kind: 'skipped'; message: string }
+  | {
+      kind: 'decided';
+      id: string;
+      pick: string | null;
+      reason: string | undefined;
+      confidence: number | undefined;
+      source: 'selector' | 'fallback' | string;
+      fallbackReason: string | undefined;
+      agreed: boolean | null;
+      candidates: string[];
+    };
+
+const optStr = (v: unknown): string | undefined => (typeof v === 'string' && v !== '' ? v : undefined);
+
+export function parseShadowResponse(value: unknown): ShadowResult {
+  if (!isRecord(value)) throw new Error('影子响应不是对象');
+  if (value.skipped === true) return { kind: 'skipped', message: optStr(value.message) ?? '未调用选择器' };
+  if (typeof value.id !== 'string' || value.mode !== 'shadow' || typeof value.source !== 'string') throw new Error('影子响应缺少 id/mode/source');
+  const shadow = isRecord(value.shadow) ? value.shadow : {};
+  return {
+    kind: 'decided',
+    id: value.id,
+    pick: typeof value.pick === 'string' && value.pick !== '' ? value.pick : null,
+    reason: optStr(value.reason),
+    confidence: typeof value.confidence === 'number' && Number.isFinite(value.confidence) ? value.confidence : undefined,
+    source: value.source,
+    fallbackReason: optStr(value.fallbackReason),
+    agreed: shadow.agreed === true || shadow.agreed === false ? shadow.agreed : null,
+    candidates: Array.isArray(value.candidates) ? value.candidates.filter((c): c is string => typeof c === 'string') : [],
+  };
+}
+
+/**
+ * 影子文案,三态由数据算出:
+ *  - selector 成功 → 「选择器建议:X（理由）」;
+ *  - fallback → 「选择器未产出建议（回落:原因）」——绝不把回落写成建议;
+ *  - skipped → 后端给的原因。
+ * 第二句是与用户勾选的关系(agreed 三态:勾了且一致 / 勾了不一致 / 没勾)。
+ */
+export function shadowSuggestionCopy(r: ShadowResult, fallbackCopy: (reason: string | undefined) => string | undefined): { head: string; relation: string | undefined } {
+  if (r.kind === 'skipped') return { head: `未调用选择器：${r.message}`, relation: undefined };
+  if (r.source === 'selector' && r.pick !== null) {
+    const head = `选择器建议：${r.pick}${r.reason !== undefined ? `（${r.reason}）` : '（选择器未留理由）'}`;
+    const relation = r.agreed === true ? '与你勾选的机器一致'
+      : r.agreed === false ? '与你勾选的机器不一致；派发仍按你的勾选'
+      : '你没有勾选机器，派发由调度器分配；建议只记台账';
+    return { head, relation };
+  }
+  const why = fallbackCopy(r.fallbackReason) ?? (r.fallbackReason !== undefined ? `错误码 ${r.fallbackReason}` : '原因未记录');
+  return { head: `选择器未产出建议（回落：${why}）`, relation: '本次仍记一条台账行，pick 为空' };
+}
+
+export async function postShadowSelection(
+  input: ShadowRequest & { confirm: boolean },
+  signal?: AbortSignal,
+): Promise<{ ok: true; result: ShadowResult } | { ok: false; error: string }> {
+  if (input.confirm !== true) return { ok: false, error: '影子调用需要确认' };
+  if (input.items.length === 0) return { ok: false, error: '没有任务，不调用选择器' };
+  if (input.hosts.length === 0) return { ok: false, error: '没有候选机器，不调用选择器' };
+  const response = await fetch('/api/agos/routes/shadow', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ items: input.items, hosts: input.hosts, chosen: input.chosen, tag: input.tag, label: input.label }),
+    signal,
+  });
+  const payload = await readJson(response);
+  if (!response.ok) return { ok: false, error: errorOf(payload, response.status) };
+  try {
+    return { ok: true, result: parseShadowResponse(payload) };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** 派发真的发生后,把 batchId 与实际落的机器挂到影子决策上(只追加关联行)。 */
+export async function postShadowLink(
+  input: { ref: string; batchId: string; hosts: string[] },
+  signal?: AbortSignal,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (input.ref.trim() === '' || input.batchId.trim() === '') return { ok: false, error: '决策编号或批次编号未采集' };
+  const response = await fetch('/api/agos/routes/shadow/link', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ref: input.ref, batchId: input.batchId, hosts: input.hosts }),
+    signal,
+  });
+  const payload = await readJson(response);
+  if (!response.ok) return { ok: false, error: errorOf(payload, response.status) };
+  return { ok: true };
 }

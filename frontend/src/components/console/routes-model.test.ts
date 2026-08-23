@@ -90,9 +90,13 @@ test('RoutesView does not mount three-tier badges (TASK-019 W7 a)', () => {
   //   {row.rule?.outcome} 数据驱动 / JSX 折成多行 / helper 改名 tierBadge
   //   —— 三档全都能无声长回来而测试照绿(2026-08-22 验收 P1)。下面按形态锁,不按写法锁。
   // a. 三档的字面值，出现在视图里就红,不管在第几行、包在什么标签里。
+  // W17:DispatchModal 也展示决策(影子建议),同样不得出现三档字面值与 rule.*
+  const dispatchModal = stripComments(readFileSync(join(here, '..', 'fleet', 'DispatchModal.tsx'), 'utf8'))
   for (const tier of ['TRUST_SPOT_CHECK', 'TRUST', 'ESCALATE', '抽检', '升级']) {
     assert.doesNotMatch(view, new RegExp(tier), '三档字面值 ' + tier + ' 回到了 RoutesView')
+    assert.doesNotMatch(dispatchModal, new RegExp(tier), '三档字面值 ' + tier + ' 出现在 DispatchModal')
   }
+  assert.doesNotMatch(dispatchModal, /rule\s*\??\.\s*(outcome|reason|pick)/, 'DispatchModal 渲染了 rule.*')
   // b. 数据驱动接回:直接渲染台账里已有的 rule.outcome。
   assert.doesNotMatch(view, /rule\s*\??\.\s*outcome/, 'rule.outcome 被接回渲染')
   // c. helper 改名逃逸:model 里任何名字带 Badge 的导出都算三档 helper 复活。

@@ -50,9 +50,20 @@ const ledgerJs = await import(join(PLUGIN, 'ledger.js')) as {
 const DECISION = { id: 'dec-1-test', pick: 'qwen3.8-max', role: 'implementer', label: 'coding', source: 'fallback', confidence: 0, reason: 'x' };
 
 /** 走插件真源:POST /assemble 的信封、POST /assemble/dispatch 的信封、GET /routes 的信封。 */
-async function realEnvelopes(): Promise<{ assemblePost: Record<string, unknown>; dispatchPost: Record<string, unknown>; routesGet: Record<string, unknown> }> {
+const shadowJs = await import(join(PLUGIN, 'shadow.js')) as {
+  shadowDecide: (body: unknown, deps: { select?: (input: unknown) => Promise<unknown>; append: (r: unknown) => void }) => Promise<Record<string, unknown>>;
+  buildShadowLinkRecord: (input: unknown) => Record<string, unknown>;
+};
+
+async function realEnvelopes(): Promise<{ assemblePost: Record<string, unknown>; dispatchPost: Record<string, unknown>; routesGet: Record<string, unknown>; shadowPost: Record<string, unknown>; shadowLinkPost: Record<string, unknown> }> {
   const dir = mkdtempSync(join(tmpdir(), 'agos-envelope-'));
   const file = join(dir, 'route-outcome.jsonl');
+  // W17:影子响应也用插件真实生产者(select 是桩,零模型)
+  const shadowPost = await shadowJs.shadowDecide(
+    { items: ['写一份 README'], hosts: [{ name: 'leo-01', kind: 'remote', model: 'deepseek-v4-flash', tags: ['linux'], maxConcurrency: 6, enabled: true, ok: true, inflight: 0 }], chosen: ['leo-01'], tag: '', label: '' },
+    { select: async () => ({ pick: 'leo-01', role: 'implementer', confidence: 0.7, reason: '唯一候选', label: 'docs' }), append: (record: unknown) => ledgerJs.appendLine(file, record) },
+  );
+  const shadowLinkPost = shadowJs.buildShadowLinkRecord({ ref: shadowPost.id, batchId: 'b-f785f00d-8463-4369-9a02-4bf6dc7e3024', hosts: ['leo-01'] });
   const assemblePost = await assembleJs.assembleLive({ task: '', candidates: [] }, {
     decide: async () => DECISION,
     readRows: () => ledgerJs.readLedgerLines(file),
@@ -66,7 +77,7 @@ async function realEnvelopes(): Promise<{ assemblePost: Record<string, unknown>;
       : { text: `${input.role} 文本`, detail: { blockTypes: ['text'], finish: 'stop', usage: { inputTokens: 10, outputTokens: 5 } } }),
   });
   const routesGet = ledgerJs.listRoutes(file, 50);
-  return { assemblePost, dispatchPost, routesGet };
+  return { assemblePost, dispatchPost, routesGet, shadowPost, shadowLinkPost };
 }
 
 test('冻结常量与插件真源逐字相同(两边都钉了字面量,这里钉「相等」)', () => {
@@ -137,8 +148,8 @@ test('台账真实历史行(改名前的文案)经退役表仍零违约', () => 
 });
 
 test('运行时锁:三个写函数真实发出的 (method, url, body 键) 恰好等于白名单;未确认/ref 不合形时零请求', async () => {
-  const { assemblePost, dispatchPost } = await realEnvelopes();
-  reply = (url) => (url.endsWith('/assemble/dispatch') ? dispatchPost : url.endsWith('/assemble') ? assemblePost : {});
+  const { assemblePost, dispatchPost, shadowPost, shadowLinkPost } = await realEnvelopes();
+  reply = (url) => (url.endsWith('/assemble/dispatch') ? dispatchPost : url.endsWith('/assemble') ? assemblePost : url.endsWith('/shadow/link') ? shadowLinkPost : url.endsWith('/shadow') ? shadowPost : {});
   calls.length = 0;
   // 空 task 与非空 task 各跑一遍:只在某种实参下才走的分支也逃不掉(第三轮 [34])。
   for (const task of ['', '给这段 SQL 做一次规划、实现和独立评审']) {
@@ -147,6 +158,8 @@ test('运行时锁:三个写函数真实发出的 (method, url, body 键) 恰好
       fe.postRouteOutcome({ ref: 'dec-1', result: 'ok', confirm: true }),
       fe.postAssembleProposal({ task, confirm: true }),
       fe.postAssembleDispatch({ task, ref: (assemblePost.assemble as { id: string }).id, confirm: true }),
+      fe.postShadowSelection({ items: ['x'], hosts: [{ name: 'leo-01', kind: 'remote', model: 'm', tags: [], maxConcurrency: 1, enabled: true, ok: true, inflight: 0 }], chosen: [], tag: '', label: '', confirm: true }),
+      fe.postShadowLink({ ref: 'dec-1', batchId: 'b-1', hosts: ['leo-01'] }),
     ]);
     assert.ok(results.every((r) => r.ok), JSON.stringify(results));
     assert.deepEqual(
@@ -155,6 +168,8 @@ test('运行时锁:三个写函数真实发出的 (method, url, body 键) 恰好
         'POST /api/agos/routes/assemble {confirm,task}',
         'POST /api/agos/routes/assemble/dispatch {confirm,ref,task}',
         'POST /api/agos/routes/outcome {ref,result,source}',
+        'POST /api/agos/routes/shadow {chosen,hosts,items,label,tag}',
+        'POST /api/agos/routes/shadow/link {batchId,hosts,ref}',
       ],
       `task=${JSON.stringify(task)}`,
     );
@@ -168,6 +183,10 @@ test('运行时锁:三个写函数真实发出的 (method, url, body 键) 恰好
     fe.postAssembleDispatch({ task: '', ref: 'asm-1', confirm: false }),
     fe.postAssembleDispatch({ task: '', ref: '', confirm: true }),
     fe.postAssembleDispatch({ task: '', ref: 'asm-1 已接入本跳会话', confirm: true }),
+    fe.postShadowSelection({ items: ['x'], hosts: [], chosen: [], tag: '', label: '', confirm: true }),
+    fe.postShadowSelection({ items: [], hosts: [{ name: 'leo-01', kind: 'remote', model: 'm', tags: [], maxConcurrency: 1, enabled: true, ok: true, inflight: 0 }], chosen: [], tag: '', label: '', confirm: true }),
+    fe.postShadowSelection({ items: ['x'], hosts: [{ name: 'leo-01', kind: 'remote', model: 'm', tags: [], maxConcurrency: 1, enabled: true, ok: true, inflight: 0 }], chosen: [], tag: '', label: '', confirm: false }),
+    fe.postShadowLink({ ref: '', batchId: 'b-1', hosts: [] }),
   ]);
   assert.deepEqual(calls, []);
   assert.ok(silent.every((r) => !r.ok));
@@ -202,4 +221,33 @@ test('运行时锁:违约响应、200+{error}、非对象响应、非 2xx、JSON
   r = await fe.postAssembleDispatch({ task: '', ref, confirm: true });
   assert.deepEqual(r, { ok: false, error: 'HTTP 502' });
   globalThis.fetch = hooked;
+});
+
+test('W17 影子响应走真实生产者:选择器成功/回落/跳过 三态解析与文案;影子行在 GET /routes 里 mode=shadow 且不进 cells', async () => {
+  const { shadowPost, routesGet } = await realEnvelopes();
+  const decided = fe.parseShadowResponse(shadowPost);
+  assert.equal(decided.kind, 'decided');
+  if (decided.kind !== 'decided') return;
+  assert.equal(decided.pick, 'leo-01'); assert.equal(decided.agreed, true); assert.equal(decided.source, 'selector');
+  const copy = fe.shadowSuggestionCopy(decided, () => undefined);
+  assert.equal(copy.head, '选择器建议：leo-01（唯一候选）'); assert.equal(copy.relation, '与你勾选的机器一致');
+  const fallback = await shadowJs.shadowDecide(
+    { items: ['x'], hosts: [{ name: 'leo-01', kind: 'remote', enabled: true }], chosen: [] },
+    { select: async () => { const e = new Error('bad') as Error & { code: string }; e.code = 'UNPARSEABLE'; throw e; }, append: () => {} },
+  );
+  const fb = fe.parseShadowResponse(fallback);
+  assert.equal(fb.kind, 'decided');
+  if (fb.kind !== 'decided') return;
+  assert.equal(fb.pick, null);
+  const fbCopy = fe.shadowSuggestionCopy(fb, (r) => (r === 'UNPARSEABLE' ? '选择器输出不是约定的 JSON' : undefined));
+  assert.equal(fbCopy.head, '选择器未产出建议（回落：选择器输出不是约定的 JSON）');
+  assert.doesNotMatch(fbCopy.head, /选择器建议：/, '回落不得写成建议');
+  const skipped = fe.parseShadowResponse(await shadowJs.shadowDecide({ items: ['x'], hosts: [] }, { append: () => {} }));
+  assert.equal(skipped.kind, 'skipped');
+  assert.throws(() => fe.parseShadowResponse({ id: 'dec-1', source: 'selector' }), /mode/);
+  const decisions = routesGet.decisions as Record<string, unknown>[];
+  const shadowRow = decisions.find((d) => d.mode === 'shadow');
+  assert.ok(shadowRow); assert.equal(shadowRow.pick, 'leo-01');
+  const stats = routesGet.stats as { cells: number; shadow: { total: number; suggested: number; agreed: number } };
+  assert.deepEqual(stats.shadow, { total: 1, filled: 0, pending: 1, suggested: 1, agreed: 1 });
 });

@@ -11,6 +11,9 @@ import {
   type DispatchFormValue,
   type FleetDispatchRequest,
 } from './dispatch-form';
+import { postShadowLink, postShadowSelection, shadowSuggestionCopy } from '@/components/console/routes-assemble';
+import { fallbackReasonCopy } from '@/components/console/routes-model';
+import { shadowCostCopy, shadowSignature, type ShadowState } from './dispatch-shadow';
 import './DispatchModal.css';
 
 export interface DispatchModalProps {
@@ -41,12 +44,14 @@ export const DispatchModal: React.FC<DispatchModalProps> = ({
   const [pending, setPending] = useState<FleetDispatchRequest>();
   const [error, setError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
+  const [shadow, setShadow] = useState<ShadowState>({ status: 'idle' });
 
   useEffect(() => {
     if (!open) return;
     setPending(undefined);
     setError(undefined);
     setSubmitting(false);
+    setShadow({ status: 'idle' });
   }, [open]);
 
   const hostsState = useSyncExternalStore(fleetHostsStore.subscribe, fleetHostsStore.getSnapshot);
@@ -76,6 +81,24 @@ export const DispatchModal: React.FC<DispatchModalProps> = ({
   const close = () => {
     if (!submitting) onClose();
   };
+  /** W17:校验通过后做一次影子调用。同签名不重复;结果只进 shadow state。 */
+  const runShadow = (request: FleetDispatchRequest) => {
+    const signature = shadowSignature(request, remoteHosts.map((h) => h.name));
+    if ((shadow.status === 'done' || shadow.status === 'calling') && shadow.signature === signature) return;
+    setShadow({ status: 'calling', signature });
+    void postShadowSelection({
+      items: request.items,
+      hosts: remoteHosts.map((h) => ({ name: h.name, kind: h.kind, model: h.model, tags: h.tags, maxConcurrency: h.maxConcurrency, enabled: h.enabled, ok: h.ok, inflight: h.inflight })),
+      chosen: request.hosts ?? [],
+      tag: request.tag ?? '',
+      label: request.label ?? '',
+      confirm: true,
+    }).then((r) => {
+      setShadow(r.ok ? { status: 'done', signature, result: r.result } : { status: 'failed', signature, error: r.error });
+    }).catch((cause: unknown) => {
+      setShadow({ status: 'failed', signature, error: cause instanceof Error ? cause.message : String(cause) });
+    });
+  };
   const review = () => {
     const result = validateDispatchForm(form);
     if (!result.ok) {
@@ -84,6 +107,7 @@ export const DispatchModal: React.FC<DispatchModalProps> = ({
     }
     setError(undefined);
     setPending(result.request);
+    runShadow(result.request);
   };
   const confirm = async () => {
     if (pending === undefined || submitting) return;
@@ -91,6 +115,13 @@ export const DispatchModal: React.FC<DispatchModalProps> = ({
     setError(undefined);
     try {
       const result = await onDispatch(pending);
+      // W17:派发真的发生了 → 把 batchId 与实际落的机器挂到影子决策上(失败不影响派发,只在控制台留痕)
+      if (shadow.status === 'done' && shadow.result.kind === 'decided') {
+        const hostsHit = [...new Set(result.runs.map((run) => run.host))];
+        void postShadowLink({ ref: shadow.result.id, batchId: result.batchId, hosts: hostsHit }).then((r) => {
+          if (!r.ok) console.warn('影子决策关联批次失败', r.error);
+        });
+      }
       setForm(EMPTY_FORM);
       setPending(undefined);
       onDispatched?.(result.batchId);
@@ -100,12 +131,13 @@ export const DispatchModal: React.FC<DispatchModalProps> = ({
       setSubmitting(false);
     }
   };
+  const shadowCopy = shadow.status === 'done' ? shadowSuggestionCopy(shadow.result, fallbackReasonCopy) : undefined;
 
   const targetText = describeDispatchTargets(pending?.hosts ?? [], remoteHosts, pending?.tag ?? '');
   const footer = pending === undefined ? (
     <>
       <Button variant="ghost" onClick={close}>取消</Button>
-      <Button variant="primary" onClick={review}>检查派发</Button>
+      <Button variant="primary" onClick={review} title="校验通过后会做一次选择器影子调用（消耗模型额度），只记台账，不改你的勾选">检查派发</Button>
     </>
   ) : (
     <>
@@ -212,6 +244,7 @@ export const DispatchModal: React.FC<DispatchModalProps> = ({
               />
             </div>
           </div>
+          <p className="dispatch-modal__quiet">「检查派发」会做一次选择器影子调用（消耗模型额度）：它只把「选择器会选哪台」记进路由台账并显示出来，不改你的勾选，也不改派发。</p>
           <label className="dispatch-modal__wake">
             <input
               type="checkbox"
@@ -233,7 +266,13 @@ export const DispatchModal: React.FC<DispatchModalProps> = ({
               将在 <strong>{targetText}</strong> 上发起{' '}
               <strong className="u-num">{pending.items.length}</strong> 次完整 agent 循环 · 会消耗模型额度。
             </p>
-            <p className="dispatch-modal__quiet">确认前尚未调用派发接口，也不会唤醒机器。</p>
+            <p className="dispatch-modal__quiet">{shadowCostCopy(shadow)}</p>
+            <p className="dispatch-modal__quiet" data-shadow-status={shadow.status} aria-live="polite">
+              {shadow.status === 'calling' && '选择器影子调用中…'}
+              {shadow.status === 'failed' && `选择器影子调用失败：${shadow.error}`}
+              {shadowCopy !== undefined && shadowCopy.head}
+              {shadowCopy?.relation !== undefined && ` · ${shadowCopy.relation}`}
+            </p>
           </div>
         </div>
       )}

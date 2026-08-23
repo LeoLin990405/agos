@@ -24,8 +24,7 @@ import {
   TURN_TEXT_REDACTED_COPY,
   TURN_TRUNCATED_COPY,
   type AssemblePlan,
-  type DispatchRun,
-} from './routes-assemble';
+  type DispatchRun, shadowSourceCopy } from './routes-assemble';
 import {
   formatCoverage,
   outcomeLabel,
@@ -38,8 +37,7 @@ import {
   ROUTES_READY_COPY,
   ruleReasonCopy,
   type RouteDecision,
-  type RoutesPayload,
-} from './routes-model';
+  type RoutesPayload, shadowRowCopy } from './routes-model';
 
 // 路由面唯一的 GET;写端点全部在 routes-assemble.ts,本文件不发请求(见那边的锁法说明)。
 const fetchRoutes = async (url: string, signal: AbortSignal): Promise<RoutesPayload> =>
@@ -82,7 +80,7 @@ function DecisionRow({
       <div>
         <strong className="surface-strong">{row.pick || '未采集'}</strong>
         <div className="surface-cluster">
-          <Badge state={row.source === 'selector' ? 'done' : 'queued'}>{sourceCopy(row.source)}</Badge>
+          <Badge state={row.source === 'selector' && row.mode !== 'shadow' ? 'done' : 'queued'}>{row.mode === 'shadow' ? shadowSourceCopy(row.mode, row.source) : sourceCopy(row.source)}</Badge>
           <Badge state="queued">{row.role || '角色未采集'}</Badge>
         </div>
       </div>
@@ -94,6 +92,9 @@ function DecisionRow({
           {ruleReasonCopy(row.rule?.reason) ? ` · ${ruleReasonCopy(row.rule?.reason)}` : ''}
           {fallbackReasonCopy(row.fallbackReason) ? ` · 回落：${fallbackReasonCopy(row.fallbackReason)}` : row.fallbackReason ? ' · 回落：原因未识别' : ''}
         </p>
+        {shadowRowCopy(row) !== undefined && (
+          <p className="surface-quiet" data-shadow-row>{shadowRowCopy(row)}</p>
+        )}
         {Array.isArray(row.annotations) && row.annotations.length > 0 && (
           <p className="surface-quiet surface-status--amber">
             {row.annotations.join(' · ')}
