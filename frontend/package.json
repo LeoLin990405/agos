@@ -15,7 +15,8 @@
     "vendor:diff": "sh scripts/vendor-diff.sh",
     "upgrade:dsh": "sh scripts/upgrade-dsh.sh --upgrade",
     "upgrade:dsh:check": "sh scripts/upgrade-dsh.sh --check",
-    "replay": "tsx scripts/replay-check.ts"
+    "replay": "tsx scripts/replay-check.ts",
+    "mux-probe": "tsx scripts/mux-probe.ts"
   },
   "dependencies": {
     "clsx": "^2.1.1",
