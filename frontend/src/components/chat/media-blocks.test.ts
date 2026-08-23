@@ -4,7 +4,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  mediaFromResultBlocks, mediaFromTool, mediaKindFromPath, mediaRouteUrl,
+  mediaFromResultBlocks, mediaFromTool, mediaKindFromPath, mediaObjectUrl, mediaRouteUrl,
 } from './media-blocks.ts'
 import type { ResultBlock } from '@/fold/model'
 
@@ -78,4 +78,12 @@ test('mediaKindFromPath 只认白名单扩展名', () => {
 
 test('mediaRouteUrl 编码路径', () => {
   assert.equal(mediaRouteUrl('/tmp/a b.png'), '/api/cn/media?path=%2Ftmp%2Fa%20b.png')
+})
+
+test('W19 mediaObjectUrl:只认 sha256:<64 hex>;mediaType 作期望值带上;形状不对不造 URL', () => {
+  const hex = 'e384fc839166bbbd6b77c5c18e96db18d9a0eeaf88f941c24bcfaf2d8fe5efd3'
+  assert.equal(mediaObjectUrl(`sha256:${hex}`, 'image/png'), `/api/cn/media?attachmentId=sha256%3A${hex}&mediaType=image%2Fpng`)
+  assert.equal(mediaObjectUrl(`sha256:${hex}`), `/api/cn/media?attachmentId=sha256%3A${hex}`)
+  assert.equal(mediaObjectUrl('sha256:../../etc'), undefined)
+  assert.equal(mediaObjectUrl(`sha256:${hex.toUpperCase()}`), undefined)
 })

@@ -3,6 +3,7 @@
  *
  * 取件通道(全部真实,无编造):
  * - attachment 引用 → session.attachment RPC(契约方法,证明会话日志引用过该 id)
+ *   RPC 拿不到(归档会话不在宿主名册等)→ W19 回退 GET /api/cn/media?attachmentId=(服务端拼 object 路径 + 魔数嗅探),只对图片
  * - 宿主机路径 → GET /api/cn/media?path=(三道闸只读路由)
  * - 远程 URL → 原样使用
  * 加载失败显示错误条(保留名称),绝不静默吞。
@@ -10,7 +11,7 @@
 import React, { useEffect, useState } from 'react';
 import { Dot } from '@/components/ui/Dot';
 import { agos } from '@/stores/live';
-import { mediaRouteUrl, type MediaRef } from './media-blocks';
+import { mediaObjectUrl, mediaRouteUrl, type MediaRef } from './media-blocks';
 import '@/design-system/media-blocks.css';
 
 /** attachment → data URL(session.attachment 的 data 是未加前缀的 base64)。 */
@@ -18,27 +19,35 @@ function useAttachmentDataUrl(
   sessionId: string | undefined,
   attachmentId: string | undefined,
   mediaType: string | undefined,
-): { url: string | undefined; error: string | undefined; loading: boolean } {
-  const [state, setState] = useState<{ url: string | undefined; error: string | undefined; loading: boolean }>({ url: undefined, error: undefined, loading: attachmentId !== undefined });
+  kind: MediaRef['kind'],
+): { url: string | undefined; error: string | undefined; loading: boolean; via: 'rpc' | 'object-store' | undefined } {
+  type S = { url: string | undefined; error: string | undefined; loading: boolean; via: 'rpc' | 'object-store' | undefined };
+  const [state, setState] = useState<S>({ url: undefined, error: undefined, loading: attachmentId !== undefined, via: undefined });
   useEffect(() => {
-    if (attachmentId === undefined || sessionId === undefined) {
-      setState({ url: undefined, loading: false, error: attachmentId === undefined ? undefined : '无会话上下文' });
-      return undefined;
-    }
+    // W19 回退:RPC 失败(归档会话不在宿主名册 / 无会话上下文)时,图片改走 object store 路由;
+    // 音频不回退(object store 里没有音频,服务端也不嗅音频)。
+    const fallback = (reason: string): S => {
+      const objectUrl = kind === 'image' && attachmentId !== undefined ? mediaObjectUrl(attachmentId, mediaType) : undefined;
+      return objectUrl !== undefined
+        ? { url: objectUrl, loading: false, error: undefined, via: 'object-store' }
+        : { url: undefined, loading: false, error: reason, via: undefined };
+    };
+    if (attachmentId === undefined) { setState({ url: undefined, loading: false, error: undefined, via: undefined }); return undefined; }
+    if (sessionId === undefined) { setState(fallback('无会话上下文')); return undefined; }
     let alive = true;
-    setState({ url: undefined, error: undefined, loading: true });
+    setState({ url: undefined, error: undefined, loading: true, via: undefined });
     agos.call('session.attachment', { sessionId: sessionId as never, attachmentId: attachmentId as never })
       .then((res) => {
         if (!alive) return;
-        if (!res.result.ok) { setState({ url: undefined, loading: false, error: res.result.error.message }); return; }
+        if (!res.result.ok) { setState(fallback(res.result.error.message)); return; }
         const mime = res.result.value.attachment.mediaType ?? mediaType ?? 'application/octet-stream';
-        setState({ loading: false, error: undefined, url: `data:${mime};base64,${res.result.value.data}` });
+        setState({ loading: false, error: undefined, url: `data:${mime};base64,${res.result.value.data}`, via: 'rpc' });
       })
       .catch((error: unknown) => {
-        if (alive) setState({ url: undefined, loading: false, error: error instanceof Error ? error.message : String(error) });
+        if (alive) setState(fallback(error instanceof Error ? error.message : String(error)));
       });
     return () => { alive = false; };
-  }, [attachmentId, sessionId, mediaType]);
+  }, [attachmentId, sessionId, mediaType, kind]);
   return state;
 }
 
@@ -51,6 +60,7 @@ const MediaFigure: React.FC<{
     sessionId,
     media.attachmentId,
     media.mediaType,
+    media.kind,
   );
   const src = media.path !== undefined
     ? mediaRouteUrl(media.path)
@@ -101,6 +111,7 @@ const MediaFigure: React.FC<{
         />
       </button>
       {media.name !== undefined && <figcaption className="mb-caption u-num">{media.name}</figcaption>}
+      {attachment.via === 'object-store' && <figcaption className="mb-caption u-num" data-media-via="object-store">经 object store 取件（会话附件 RPC 不可用）</figcaption>}
     </figure>
   );
 };

@@ -115,3 +115,17 @@ export function mediaFromTool(tool: ToolMediaSource): MediaRef[] {
 export function mediaRouteUrl(path: string): string {
   return `/api/cn/media?path=${encodeURIComponent(path)}`
 }
+
+const ATTACHMENT_ID_RE = /^sha256:[0-9a-f]{64}$/
+
+/**
+ * W19:object store 取件 URL。attachmentId(`sha256:<hex>`)交给服务端拼路径,零用户路径;
+ * mediaType 只是**期望值**(服务端与魔数嗅探不符即 403),不是 content-type 来源。
+ * 形状不对 → undefined(不造一个必 400 的 URL)。
+ */
+export function mediaObjectUrl(attachmentId: string, mediaType?: string): string | undefined {
+  if (!ATTACHMENT_ID_RE.test(attachmentId)) return undefined
+  const q = new URLSearchParams({ attachmentId })
+  if (mediaType !== undefined && mediaType !== '') q.set('mediaType', mediaType)
+  return `/api/cn/media?${q.toString()}`
+}
