@@ -51,14 +51,14 @@ for (const f of files) {
       const t = (e.data.content || []).filter((p) => p && p.type === 'text').map((p) => p.text).join('\n')
       for (const s of splitCandidatesForCorpus(t)) {
         if (isSensitiveMemoryText(s)) continue
-        add(`u|${channel}|${s}`, { text: s, role: 'user', channel, depth, origin, sample: String(sessionId).slice(0, 8) })
+        add(`u|${channel}|${s}`, { text: s, role: 'user', channel, depth, origin, sample: String(sessionId).replace(/^session-/, '').slice(0, 8) })
       }
     } else if (e.type === 'assistant/message' && e.data?.message?.source?.kind === 'model') {
       if (depth !== 0) continue
       const t = (e.data.message.content || []).filter((p) => p && p.type === 'text').map((p) => p.text).join('\n')
       for (const s of splitCandidatesForCorpus(t)) {
         if (!REJECT_LEAD.test(s) || isSensitiveMemoryText(s)) continue
-        add(`a|${s}`, { text: s, role: 'assistant', channel: 'model', depth, origin, sample: String(sessionId).slice(0, 8) })
+        add(`a|${s}`, { text: s, role: 'assistant', channel: 'model', depth, origin, sample: String(sessionId).replace(/^session-/, '').slice(0, 8) })
       }
     }
   }

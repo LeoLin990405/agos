@@ -1,5 +1,12 @@
 // W20 的尺:标注语料 → extractSessionMemory → 与 label 比 → acceptEdit 门。零模型、零网络。
-// 口径见 test/fixtures/session-memory-corpus/README.md。
+// 口径与局限见 test/fixtures/session-memory-corpus/README.md。
+//
+// 对抗验证(2026-08-23)后重做的三点:
+//   1) 不再假装有 held-in/held-out:294 句 rpc 里 194 句来自同一个会话,按会话切分做不出独立估计;
+//      四个块各自报数(rpc / bare / known-misreports / assistant),bare 只证明来源门在。
+//   2) 基线存每条 id 的通过集合:任何一条原来通过的样本变失败就红,不允许用别处的提升抵消。
+//   3) 接受新基线的路径仍做语料 sha 校验(语料变了要另给 SESSION_MEMORY_ACCEPT_CORPUS=1),
+//      必须带 SESSION_MEMORY_RULES_NOTE,且相对现有基线有单条回归时拒绝接受。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
@@ -12,6 +19,7 @@ import { extractSessionMemory } from '../lib/session-memory.mjs'
 const here = dirname(fileURLToPath(import.meta.url))
 const CORPUS = join(here, 'fixtures', 'session-memory-corpus')
 const BASELINE = join(CORPUS, 'baseline.json')
+export const BLOCKS = ['rpc', 'bare', 'known-misreports', 'assistant']
 
 function readJsonl(name) {
   return readFileSync(join(CORPUS, name), 'utf8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l))
@@ -45,17 +53,16 @@ export function predictKind(row) {
 export function score(rows) {
   const kinds = ['constraint', 'fact', 'preference', 'rejected']
   const per = Object.fromEntries(kinds.map((k) => [k, { tp: 0, fp: 0, fn: 0 }]))
-  let pass = 0
+  const passIds = []
+  const failures = []
   let imp5 = 0
   let imp5Persistent = 0
-  const failures = []
   for (const row of rows) {
     const pred = predictKind(row)
     const persistent = row.label.scope === 'persistent'
     // 期望产出:persistent 才该被抽成该 kind;turn 与 null 的期望都是「不抽」。
     const want = persistent ? row.label.kind : null
-    const ok = pred.kind === want
-    if (ok) pass += 1
+    if (pred.kind === want) passIds.push(row.id)
     else failures.push({ id: row.id, text: row.text.slice(0, 60), want: row.label.kind ? `${row.label.kind}/${row.label.scope}` : 'null', got: pred.kind ?? 'null' })
     if (pred.importance === 5) { imp5 += 1; if (persistent && pred.kind === want) imp5Persistent += 1 }
     for (const k of kinds) {
@@ -73,54 +80,72 @@ export function score(rows) {
     const f1 = precision === null || recall === null || precision + recall === 0 ? null : (2 * precision * recall) / (precision + recall)
     return [k, { tp, fp, fn, precision, recall, f1 }]
   }))
-  return { total: rows.length, pass, prf, imp5, imp5Persistent, failures }
+  return { total: rows.length, pass: passIds.length, passIds, prf, imp5, imp5Persistent, failures }
+}
+
+export function scoreAll() {
+  return Object.fromEntries(BLOCKS.map((b) => [b, score(readJsonl(`${b}.jsonl`))]))
 }
 
 function corpusSha() {
   const h = createHash('sha256')
-  for (const name of ['held-in.jsonl', 'held-out.jsonl', 'assistant.jsonl']) h.update(readFileSync(join(CORPUS, name)))
+  for (const b of BLOCKS) h.update(readFileSync(join(CORPUS, `${b}.jsonl`)))
   return h.digest('hex')
 }
 
 const fmt = (s) => `${s.pass}/${s.total}`
+const pr = (v) => `P=${v.precision === null ? '-' : v.precision.toFixed(2)} R=${v.recall === null ? '-' : v.recall.toFixed(2)}`
 
-test('W20 尺:语料三块各自可评分,并把指标打印出来(只看不进门)', () => {
-  const held = { in: score(readJsonl('held-in.jsonl')), out: score(readJsonl('held-out.jsonl')), asst: score(readJsonl('assistant.jsonl')) }
-  for (const [name, s] of Object.entries(held)) {
-    const prf = Object.entries(s.prf).map(([k, v]) => `${k} P=${v.precision === null ? '-' : v.precision.toFixed(2)} R=${v.recall === null ? '-' : v.recall.toFixed(2)}`).join(' · ')
-    console.log(`[W20 ${name}] pass ${fmt(s)} · ${prf} · imp5 ${s.imp5}(persistent&正确 ${s.imp5Persistent})`)
+test('W20 尺:四个块各自可评分,并把指标打印出来(只看不进门)', () => {
+  const all = scoreAll()
+  for (const [name, s] of Object.entries(all)) {
+    const prf = Object.entries(s.prf).filter(([, v]) => v.tp + v.fp + v.fn > 0).map(([k, v]) => `${k} ${pr(v)}`).join(' · ')
+    console.log(`[W20 ${name}] pass ${fmt(s)}${prf ? ' · ' + prf : ''} · imp5 ${s.imp5}(persistent&正确 ${s.imp5Persistent})`)
   }
-  assert.ok(held.in.total > 0 && held.out.total > 0 && held.asst.total > 0)
+  for (const b of BLOCKS) assert.ok(all[b].total > 0, b)
 })
 
-test('W20 acceptEdit 门:语料没动;两侧 pass 不得下降;有提升须显式接受新基线', () => {
+test('W20 acceptEdit 门:语料没动;每条原来通过的样本不得变失败;有提升须显式接受新基线', () => {
   const sha = corpusSha()
-  const now = {
-    in: score(readJsonl('held-in.jsonl')), out: score(readJsonl('held-out.jsonl')), asst: score(readJsonl('assistant.jsonl')),
-  }
+  const now = scoreAll()
   const current = {
-    inTotal: now.in.total, outTotal: now.out.total, inPass: now.in.pass, outPass: now.out.pass,
-    assistant: { total: now.asst.total, pass: now.asst.pass },
     corpusSha256: sha,
+    blocks: Object.fromEntries(BLOCKS.map((b) => [b, { total: now[b].total, pass: now[b].pass, passIds: now[b].passIds }])),
   }
+  const base = existsSync(BASELINE) ? JSON.parse(readFileSync(BASELINE, 'utf8')) : null
+  const corpusChanged = base === null || base.corpusSha256 !== sha || BLOCKS.some((b) => !base.blocks?.[b] || base.blocks[b].total !== current.blocks[b].total)
+
+  // 相对基线:单条回归(原来过、现在不过)与新增通过
+  const regressions = []
+  const gains = []
+  if (base !== null && !corpusChanged) {
+    for (const b of BLOCKS) {
+      const before = new Set(base.blocks[b].passIds)
+      const after = new Set(current.blocks[b].passIds)
+      for (const id of before) if (!after.has(id)) regressions.push(`${b}:${id}`)
+      for (const id of after) if (!before.has(id)) gains.push(`${b}:${id}`)
+    }
+  }
+
   if (process.env.SESSION_MEMORY_ACCEPT_BASELINE === '1') {
-    writeFileSync(BASELINE, JSON.stringify({ ...current, rulesNote: process.env.SESSION_MEMORY_RULES_NOTE || '', acceptedAt: new Date().toISOString() }, null, 2) + '\n')
-    console.log(`[W20] 基线已重写:in ${fmt(now.in)} out ${fmt(now.out)} asst ${fmt(now.asst)}`)
+    const note = process.env.SESSION_MEMORY_RULES_NOTE || ''
+    assert.ok(note.trim() !== '', '接受新基线必须带 SESSION_MEMORY_RULES_NOTE(说明规则改了什么)')
+    if (corpusChanged && base !== null) {
+      assert.equal(process.env.SESSION_MEMORY_ACCEPT_CORPUS, '1', '语料变了(sha/total 与基线不符):要重算基线请同时给 SESSION_MEMORY_ACCEPT_CORPUS=1,不要让语料与规则同时动而不自知')
+    }
+    assert.deepEqual(regressions, [], `有单条回归,不接受为新基线:\n${regressions.map((r) => '  ' + r).join('\n')}`)
+    writeFileSync(BASELINE, JSON.stringify({ ...current, rulesNote: note, acceptedAt: new Date().toISOString() }, null, 2) + '\n')
+    console.log(`[W20] 基线已重写:${BLOCKS.map((b) => `${b} ${fmt(now[b])}`).join(' · ')}${gains.length ? ` · 新增通过 ${gains.length}` : ''}`)
     return
   }
-  assert.ok(existsSync(BASELINE), '没有基线:先 SESSION_MEMORY_ACCEPT_BASELINE=1 跑一次落盘')
-  const base = JSON.parse(readFileSync(BASELINE, 'utf8'))
-  if (base.corpusSha256 !== sha || base.inTotal !== current.inTotal || base.outTotal !== current.outTotal || base.assistant.total !== current.assistant.total) {
-    throw new Error('语料变了(sha/total 与基线不符):先重跑基线再改规则,不要让语料与规则同时动')
-  }
-  const drops = []
-  if (current.inPass < base.inPass) drops.push(`held-in ${base.inPass}→${current.inPass}`)
-  if (current.outPass < base.outPass) drops.push(`held-out ${base.outPass}→${current.outPass}`)
-  if (current.assistant.pass < base.assistant.pass) drops.push(`assistant ${base.assistant.pass}→${current.assistant.pass}`)
-  assert.deepEqual(drops, [], `规则改动让尺的读数下降:${drops.join('; ')}\n失败样本(held-in 前 10):\n${now.in.failures.slice(0, 10).map((f) => `  ${f.id} want=${f.want} got=${f.got} · ${f.text}`).join('\n')}`)
-  const gains = []
-  if (current.inPass > base.inPass) gains.push(`held-in ${base.inPass}→${current.inPass}`)
-  if (current.outPass > base.outPass) gains.push(`held-out ${base.outPass}→${current.outPass}`)
-  if (current.assistant.pass > base.assistant.pass) gains.push(`assistant ${base.assistant.pass}→${current.assistant.pass}`)
-  assert.deepEqual(gains, [], `尺的读数提升了(${gains.join('; ')}),但基线没更新:确认后用 SESSION_MEMORY_ACCEPT_BASELINE=1 SESSION_MEMORY_RULES_NOTE="…" node --test test/session-memory-rules.test.mjs 重写基线`)
+
+  assert.ok(base !== null, '没有基线:先 SESSION_MEMORY_ACCEPT_BASELINE=1 SESSION_MEMORY_RULES_NOTE="…" 跑一次落盘')
+  if (corpusChanged) throw new Error('语料变了(sha/total 与基线不符):先重跑基线(SESSION_MEMORY_ACCEPT_BASELINE=1 SESSION_MEMORY_ACCEPT_CORPUS=1)再改规则')
+  const detail = regressions.map((r) => {
+    const [b, id] = r.split(':')
+    const f = now[b].failures.find((x) => x.id === id)
+    return `  ${r} want=${f?.want} got=${f?.got} · ${f?.text}`
+  }).join('\n')
+  assert.deepEqual(regressions, [], `规则改动让原来通过的样本变失败(不允许用别处的提升抵消):\n${detail}`)
+  assert.deepEqual(gains, [], `尺的读数提升了(${gains.length} 条新通过:${gains.slice(0, 8).join(', ')}${gains.length > 8 ? '…' : ''}),但基线没更新:确认后用 SESSION_MEMORY_ACCEPT_BASELINE=1 SESSION_MEMORY_RULES_NOTE="…" node --test test/session-memory-rules.test.mjs 重写基线`)
 })
