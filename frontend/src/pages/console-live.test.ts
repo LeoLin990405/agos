@@ -162,21 +162,21 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { inboxFromCouncil, inboxFromRoutes, inboxFromSkillsDrift, sortInbox } from './console-live.tsx';
-import { AttentionInbox, inboxEmptyText, inboxSubtitle } from '@/components/console/AttentionInbox';
+import { COUNCIL_SERVER_WINDOW, inboxFromCouncil, inboxFromRoutes, inboxFromSkillsDrift, sortInbox } from './console-live.tsx';
+import { AttentionInbox, inboxBadgeState, inboxEmptyText, inboxSubtitle } from '@/components/console/AttentionInbox';
 import type { RoutesPayload } from '@/components/console/routes-model';
 import type { CouncilRecord } from '@/components/console/council-ledger-model';
 
 // 三源 fixture 照 2026-08-23 18:xx 实测形状(GET /api/agos/routes stats、/api/cn/council-records 记录、overview.skills 组)写字面量
 const routesLive: RoutesPayload = {
   at: 1787480000000,
-  decisions: [],
+  decisions: [{ ts: 1787329561900, taskType: 'sql', role: 'coder', pick: 'qwen3.8-max', candidates: [], outcome: null } as unknown as RoutesPayload['decisions'][number], { ts: 1787409999000, role: 'coder', pick: 'x', candidates: [], outcome: null } as unknown as RoutesPayload['decisions'][number]],
   stats: { total: 8, window: 8, limit: 50, filled: 1, pending: 7, cells: 5, posterior: { observations: 1, cells: 1 } },
 };
 const councilFlagged: CouncilRecord = {
   kind: undefined, time: '2026-08-18T06:52:21.966Z', question: 'Python 的 GIL 在 3.13 里发生了什么变化?', arbiter: 'stepfun',
   parsedOk: true, consensus: false, inconclusive: undefined, verdict: undefined, disagreements: undefined,
-  flagged: ['doubao 与 stepfun 结论相反'], imagePath: undefined, panelists: [],
+  flagged: ['minimax-cn', 'stepfun'], imagePath: undefined, panelists: [],
 };
 const councilClean: CouncilRecord = { ...councilFlagged, question: '干净记录', flagged: [] };
 const skillsOverview = {
@@ -189,7 +189,9 @@ test('W16 inboxFromRoutes: pending>0 才产出一条 warning,口径是 stats.pen
   assert.equal(item.type, 'warning');
   assert.equal(item.source, 'routes');
   assert.match(item.title, /^7 条路由决策待回填结果$/);
-  assert.match(item.description, /不是待审批/);
+  assert.match(item.description, /不是等人批准/);
+  assert.equal(item.timestamp, `最近决策 ${new Date(1787409999000).toLocaleString('zh-CN', { hour12: false })}`, '时间槽是台账里最近一条决策,不是 GET 响应时间');
+  assert.equal(inboxFromRoutes({ ...routesLive, decisions: [] })[0]?.timestamp, '决策时间未采集');
   assert.deepEqual(inboxFromRoutes({ ...routesLive, stats: { ...routesLive.stats, pending: 0 } }), []);
   assert.deepEqual(inboxFromRoutes(undefined), []);
 });
@@ -209,7 +211,7 @@ test('W16 inboxFromCouncil: flagged 非空每条一项;kind 缺席写「类型�
   const items = inboxFromCouncil([councilClean, councilFlagged, { ...councilFlagged, time: undefined }]);
   assert.equal(items.length, 2);
   assert.match(items[0]!.title, /^评审被标记:Python 的 GIL/);
-  assert.match(items[0]!.description, /^类型未采集 · doubao 与 stepfun 结论相反$/);
+  assert.match(items[0]!.description, /^类型未采集 · 疑似编造的评委:minimax-cn、stepfun$/);
   assert.equal(items[0]!.timestamp, new Date(Date.parse('2026-08-18T06:52:21.966Z')).toLocaleString('zh-CN', { hour12: false }));
   assert.equal(items[1]!.timestamp, '时间未采集');
   assert.notEqual(items[0]!.id, items[1]!.id);
@@ -233,6 +235,11 @@ test('W16 deriveConsole 真排序 + 来源状态:失败 > 警告 > 在跑,同档
   const partial = deriveConsole({ overview: {}, progress: undefined, at: 0 }, { rows: [] }, { routes: routesLive });
   assert.deepEqual(partial.inbox.map((it) => it.source), ['routes']);
   assert.deepEqual(partial.inboxSources, { progress: 'absent', routes: 'ready', skills: 'absent', council: 'absent' });
+  assert.deepEqual(partial.inboxNotes, []);
+  const stale = deriveConsole({ overview: {}, progress: undefined, at: 0 }, { rows: [] }, { routes: routesLive, routesStale: true, council: Array.from({ length: COUNCIL_SERVER_WINDOW }, () => councilClean), councilStale: true });
+  assert.equal(stale.inboxSources.routes, 'stale');
+  assert.equal(stale.inboxSources.council, 'stale');
+  assert.deepEqual(stale.inboxNotes, [`评审台账只回最近 ${COUNCIL_SERVER_WINDOW} 条,更早的被标记记录看不到`]);
 
   // 旧两参调用仍可用:三个新源一律 absent,不发明条目
   const legacy = deriveConsole({ overview: {}, progress: { calls: [] }, at: 0 }, { rows: [] });
@@ -256,6 +263,14 @@ test('W16 AttentionInbox 副标题与空态由来源状态算出;四源全 ready
   assert.equal(inboxEmptyText({ progress: 'absent', routes: 'absent', skills: 'absent', council: 'absent' }), '四个来源均未采集,待处理数未知');
   assert.match(inboxSubtitle(allReady), /^来源:谱系进度、路由台账、技能审计、评审台账 · 失败 > 警告 > 在跑$/);
   assert.match(inboxSubtitle(someAbsent), /未采集:路由台账、技能审计/);
+  const someStale = { progress: 'ready', routes: 'stale', skills: 'ready', council: 'ready' } as const;
+  assert.match(inboxSubtitle(someStale), /更新失败、沿用旧数据:路由台账/);
+  assert.equal(inboxEmptyText(someStale), '已采集的来源里无待处理;沿用旧数据:路由台账');
+  // 徽章:空 + 有来源缺席 → 不是绿色 done
+  assert.equal(inboxBadgeState([], allReady), 'done');
+  assert.equal(inboxBadgeState([], someAbsent), 'queued');
+  assert.equal(inboxBadgeState([], { progress: 'absent', routes: 'absent', skills: 'absent', council: 'absent' }), 'queued');
+  assert.equal(inboxBadgeState([{ type: 'error' }], allReady), 'failed');
 
   const emptyHtml = renderToStaticMarkup(React.createElement(AttentionInbox, { items: [], sources: allReady }));
   assert.match(emptyHtml, /无待处理/);
@@ -265,10 +280,17 @@ test('W16 AttentionInbox 副标题与空态由来源状态算出;四源全 ready
   const partialHtml = renderToStaticMarkup(React.createElement(AttentionInbox, { items: [], sources: someAbsent }));
   assert.doesNotMatch(partialHtml, />无待处理</, '有来源缺席时不能无条件说无待处理');
   assert.match(partialHtml, /未采集:路由台账、技能审计/);
+  assert.match(partialHtml, /badge--queued/, '空 + 缺席 → 徽章不是绿色');
+  const allAbsentHtml = renderToStaticMarkup(React.createElement(AttentionInbox, { items: [], sources: { progress: 'absent', routes: 'absent', skills: 'absent', council: 'absent' } }));
+  assert.match(allAbsentHtml, /待处理数未知/);
+  assert.doesNotMatch(allAbsentHtml, /badge--done/);
 
-  // 源锁:组件里不得再出现静态单源声明
+  // 源锁:组件与派生层都不得出现静态单源声明 / 「待审批」(含否定形式)
   const here = dirname(fileURLToPath(import.meta.url));
-  const src = readFileSync(join(here, '..', 'components', 'console', 'AttentionInbox.tsx'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ');
-  assert.doesNotMatch(src, /来自 \/api\/swarm\/progress/, 'AttentionInbox 又写死了单一来源');
-  assert.doesNotMatch(src, /待审批/, '「待审批」今天没有控制台级数据源,不得出现在收件箱文案里');
+  const strip = (f: string): string => readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ');
+  for (const f of [join(here, '..', 'components', 'console', 'AttentionInbox.tsx'), join(here, 'console-live.tsx')]) {
+    const src = strip(f);
+    assert.doesNotMatch(src, /来自 \/api\/swarm\/progress/, `${f} 又写死了单一来源`);
+    assert.doesNotMatch(src, /待审批|待批/, `「待审批」今天没有控制台级数据源,不得出现在收件箱文案里:${f}`);
+  }
 });

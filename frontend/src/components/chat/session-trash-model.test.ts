@@ -4,7 +4,7 @@ import { parseSessionTrashPayload, presentText, pruneText, sessionTrashSummary }
 
 // 照 2026-08-23 实测 GET /api/agos/session-trash 形状(项目段为 home 折叠形)
 const live = {
-  version: 1, file: 'delete.log', fileExists: true, count: 4, presentCount: 4,
+  version: 1, file: 'delete.log', fileExists: true, count: 4, presentCount: 3, probedCount: 3,
   items: [
     { at: '2026-08-21T01:49:14.964Z', sessionId: 'session-7bd84231-d7ec-4f45-a0fb-72fba77e6efb', trashRoot: 'sessions-trash-20260821', project: '~-Documents-kimi-workspace-agos-frontend', leaf: 'session-7bd84231-d7ec-4f45-a0fb-72fba77e6efb', kind: 'dir', present: true },
     { at: '2026-08-21T07:56:08.162Z', sessionId: 'session-38afb009', trashRoot: 'sessions-trash-20260821', project: '~-Documents-kimi-workspace-agos-frontend', leaf: 'session-38afb009', kind: 'dir', present: true, projcachePruned: false, projcacheReason: 'unavailable' },
@@ -24,14 +24,16 @@ test('W22 回收站:解析保留三态与「未记录」;摘要全部由载荷�
   assert.equal(p.items.length, 4)
   assert.equal(p.items[0]?.projcachePruned, undefined)
   assert.equal(p.items[3]?.present, null)
-  assert.equal(sessionTrashSummary(p), '删除日志 4 条,落点仍在 4/4;另有 3 个回收/备份根共 416 个会话不在日志里(更早的批量清理,日志没有它们)')
+  assert.equal(sessionTrashSummary(p), '删除日志 4 条,落点仍在 3/3(另 1 条落点在 ~/.dsh 之外或不可读,未探测);另有 3 个回收/备份根共 416 个会话不在日志里')
+  assert.equal(parseSessionTrashPayload({ ...live, probedCount: undefined }).probedCount, 3, '老载荷自算')
   assert.equal(presentText(p.items[0]!), '落点仍在')
-  assert.equal(presentText(p.items[3]!), '落点在 ~/.dsh 之外,未探测')
+  assert.equal(presentText(p.items[3]!), '落点在 ~/.dsh 之外或经软链,未探测')
+  assert.equal(presentText({ ...p.items[0]!, present: null, kind: 'unreadable' }), '落点探测失败(不可读)')
   assert.equal(presentText({ ...p.items[0]!, present: false, kind: 'missing' }), '落点已不在')
   assert.equal(pruneText(p.items[0]!), 'projcache 未记录')
   assert.equal(pruneText(p.items[1]!), 'projcache 未清(unavailable)')
   assert.equal(pruneText(p.items[2]!), 'projcache 已清')
-  assert.equal(sessionTrashSummary(parseSessionTrashPayload({ ...live, fileExists: false, count: 0, presentCount: 0, items: [], unloggedRoots: [] })), '删除日志 delete.log 不存在')
+  assert.equal(sessionTrashSummary(parseSessionTrashPayload({ ...live, fileExists: false, count: 0, presentCount: 0, probedCount: 0, items: [], unloggedRoots: [] })), '删除日志 delete.log 不存在')
   assert.throws(() => parseSessionTrashPayload({ items: [] }), /unloggedRoots/)
   assert.doesNotMatch(JSON.stringify(p), /\/Users\//)
 })

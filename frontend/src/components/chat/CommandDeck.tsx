@@ -84,9 +84,21 @@ export function remainingDraftAfterSend(current: string, submitted: string): str
   return current;
 }
 
-/** 只保留仍出现在提交文本里的 ASR 片段(用户可能删掉/改写了识别结果;改写过的就不算语音来源)。 */
+/** 太短的识别结果(单字 / 纯标点)几乎必然出现在任何手打文本里,不当来源证据。 */
+export const ASR_SEGMENT_MIN_CHARS = 2;
+const PUNCT_ONLY = /^[\s\p{P}\p{S}]*$/u;
+export function isAsrEvidence(text: string): boolean {
+  const t = text.trim();
+  return [...t].length >= ASR_SEGMENT_MIN_CHARS && !PUNCT_ONLY.test(t);
+}
+
+/**
+ * 只保留仍出现在提交文本里的 ASR 片段(用户可能删掉/改写了识别结果;改写过的就不算语音来源)。
+ * 调用方必须在每次发送后清空片段(见 CommandDeck 的 asrSegmentsRef):否则被删掉的片段会跨消息滞留,
+ * 在后面某条恰好含同串的手打消息上被当成语音来源(对抗验证 2026-08-23 P2)。
+ */
 export function selectAsrSegments(submittedText: string, segments: readonly AsrSegment[]): AsrSegment[] {
-  return segments.filter((s) => s.text.trim() !== '' && submittedText.includes(s.text.trim()));
+  return segments.filter((s) => isAsrEvidence(s.text) && submittedText.includes(s.text.trim()));
 }
 
 export function buildCommandDeckMessage(
@@ -259,8 +271,9 @@ export const CommandDeck: React.FC<CommandDeckProps> = ({
   const imageInputRef = useRef<ImageAttachmentsHandle>(null);
   const sendInFlightRef = useRef(false);
   const mountedRef = useRef(true);
-  /** W22(b):本轮输入里尚未随消息发出的 ASR 片段(最多 20 段)。 */
-  const asrSegmentsRef = useRef<AsrSegment[]>([]);
+  /** W22(b):本轮输入里尚未随消息发出的 ASR 片段(最多 20 段);每段带到达序号,发送后只保留发送开始之后到达的。 */
+  const asrSegmentsRef = useRef<(AsrSegment & { seq: number })[]>([]);
+  const asrSeqRef = useRef(0);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -282,6 +295,7 @@ export const CommandDeck: React.FC<CommandDeckProps> = ({
         parts: [],
         optimisticImages: [],
       };
+      const sendSeq = asrSeqRef.current;
       const message = buildCommandDeckMessage(text, snapshot, asrSegmentsRef.current);
       if (message === null) return;
       const submittedText = text;
@@ -294,8 +308,8 @@ export const CommandDeck: React.FC<CommandDeckProps> = ({
       // ASR may finish while session.prompt is in flight. Clear only the draft
       // that was actually submitted and retain any transcript appended meanwhile.
       setText((current) => remainingDraftAfterSend(current, submittedText));
-      // 已随本条发出的 ASR 片段清掉;在途识别追加的(不在 submittedText 里)留给下一条。
-      asrSegmentsRef.current = asrSegmentsRef.current.filter((s) => !submittedText.includes(s.text.trim()));
+      // 发送开始前到达的 ASR 片段无论有没有进文本都清掉(被删掉/改写的不能跨消息滞留);发送中才到的留给下一条。
+      asrSegmentsRef.current = asrSegmentsRef.current.filter((s) => s.seq >= sendSeq);
       imageInputRef.current?.clear();
     } catch (error) {
       if (mountedRef.current) setSendError(String((error as Error)?.message ?? error));
@@ -349,7 +363,8 @@ export const CommandDeck: React.FC<CommandDeckProps> = ({
             <VoiceInput
               disabled={sending}
               onTranscript={(transcript, meta) => {
-                asrSegmentsRef.current = [...asrSegmentsRef.current, { text: transcript, meta }].slice(-20);
+                asrSeqRef.current += 1;
+                asrSegmentsRef.current = [...asrSegmentsRef.current, { text: transcript, meta, seq: asrSeqRef.current }].slice(-20);
                 setText((previous) => previous.trim()
                   ? `${previous.trimEnd()} ${transcript}`
                   : transcript);

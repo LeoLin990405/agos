@@ -30,7 +30,7 @@ export const SessionTrashPanel: React.FC = () => {
       {expanded && (
         <div id="session-trash-list" data-session-trash>
           {p === undefined && res.status === 'error' && res.error !== undefined && (
-            <div className="session-action-error" role="alert">回收站清单未响应:{res.error.status !== undefined ? `HTTP ${res.error.status} · ` : ''}{res.error.message}</div>
+            <div className="session-action-error" role="alert">回收站清单未响应{res.error.status !== undefined ? `(HTTP ${res.error.status})` : ''}:{res.error.message}</div>
           )}
           {p === undefined && res.status !== 'error' && <div className="session-empty-note">正在读取删除日志…</div>}
           {p !== undefined && (<>

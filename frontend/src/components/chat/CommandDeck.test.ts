@@ -66,6 +66,9 @@ test('W22(b) provenance: 只保留仍在提交文本里的 ASR 片段;全被改�
   const rewritten = buildCommandDeckMessage('全部手打重写', createImageAttachmentSnapshot([]), segs);
   assert.equal(rewritten?.provenance, undefined);
   assert.equal('provenance' in (rewritten ?? {}), false);
-  assert.deepEqual(selectAsrSegments('x', [{ text: '  ', meta }]), []);
+  assert.deepEqual(selectAsrSegments('x', [{ text: '  ', meta }]), [])
+  // 单字 / 纯标点的识别结果不当证据:手打「好的，我自己来」不能被标成语音
+  assert.deepEqual(selectAsrSegments('好的，我自己来', [{ text: '好', meta }, { text: '。', meta }]), [])
+  assert.equal(buildCommandDeckMessage('好的，我自己来', createImageAttachmentSnapshot([]), [{ text: '好', meta }])?.provenance, undefined);
   assert.equal(buildCommandDeckMessage('无语音', createImageAttachmentSnapshot([]))?.provenance, undefined, '旧两参调用不变');
 });

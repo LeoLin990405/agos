@@ -20,28 +20,28 @@ function useAttachmentDataUrl(
   attachmentId: string | undefined,
   mediaType: string | undefined,
   kind: MediaRef['kind'],
-): { url: string | undefined; error: string | undefined; loading: boolean; via: 'rpc' | 'object-store' | undefined } {
-  type S = { url: string | undefined; error: string | undefined; loading: boolean; via: 'rpc' | 'object-store' | undefined };
-  const [state, setState] = useState<S>({ url: undefined, error: undefined, loading: attachmentId !== undefined, via: undefined });
+): { url: string | undefined; error: string | undefined; loading: boolean; via: 'rpc' | 'object-store' | undefined; rpcError: string | undefined } {
+  type S = { url: string | undefined; error: string | undefined; loading: boolean; via: 'rpc' | 'object-store' | undefined; rpcError: string | undefined };
+  const [state, setState] = useState<S>({ url: undefined, error: undefined, loading: attachmentId !== undefined, via: undefined, rpcError: undefined });
   useEffect(() => {
     // W19 回退:RPC 失败(归档会话不在宿主名册 / 无会话上下文)时,图片改走 object store 路由;
     // 音频不回退(object store 里没有音频,服务端也不嗅音频)。
     const fallback = (reason: string): S => {
       const objectUrl = kind === 'image' && attachmentId !== undefined ? mediaObjectUrl(attachmentId, mediaType) : undefined;
       return objectUrl !== undefined
-        ? { url: objectUrl, loading: false, error: undefined, via: 'object-store' }
-        : { url: undefined, loading: false, error: reason, via: undefined };
+        ? { url: objectUrl, loading: false, error: undefined, via: 'object-store', rpcError: reason }
+        : { url: undefined, loading: false, error: reason, via: undefined, rpcError: reason };
     };
-    if (attachmentId === undefined) { setState({ url: undefined, loading: false, error: undefined, via: undefined }); return undefined; }
+    if (attachmentId === undefined) { setState({ url: undefined, loading: false, error: undefined, via: undefined, rpcError: undefined }); return undefined; }
     if (sessionId === undefined) { setState(fallback('无会话上下文')); return undefined; }
     let alive = true;
-    setState({ url: undefined, error: undefined, loading: true, via: undefined });
+    setState({ url: undefined, error: undefined, loading: true, via: undefined, rpcError: undefined });
     agos.call('session.attachment', { sessionId: sessionId as never, attachmentId: attachmentId as never })
       .then((res) => {
         if (!alive) return;
         if (!res.result.ok) { setState(fallback(res.result.error.message)); return; }
         const mime = res.result.value.attachment.mediaType ?? mediaType ?? 'application/octet-stream';
-        setState({ loading: false, error: undefined, url: `data:${mime};base64,${res.result.value.data}`, via: 'rpc' });
+        setState({ loading: false, error: undefined, url: `data:${mime};base64,${res.result.value.data}`, via: 'rpc', rpcError: undefined });
       })
       .catch((error: unknown) => {
         if (alive) setState(fallback(error instanceof Error ? error.message : String(error)));
@@ -62,11 +62,18 @@ const MediaFigure: React.FC<{
     media.mediaType,
     media.kind,
   );
+  // W19 回退的 object store 取件也可能 403/404(对象不在 store、mediaType 不符):<img onError> 接住,
+  // 回到错误条并带上 RPC 原因——不能让屏上是破图 + 「经 object store 取件」的常量说明。
+  const [objectLoadFailed, setObjectLoadFailed] = useState(false);
+  useEffect(() => { setObjectLoadFailed(false); }, [attachment.url]);
   const src = media.path !== undefined
     ? mediaRouteUrl(media.path)
     : media.url !== undefined
       ? media.url
       : attachment.url;
+  const fallbackError = attachment.via === 'object-store' && objectLoadFailed
+    ? `会话附件 RPC 不可用${attachment.rpcError !== undefined ? `（${attachment.rpcError}）` : ''}，object store 取件也失败`
+    : undefined;
 
   if (media.attachmentId !== undefined && attachment.loading) {
     return (
@@ -76,11 +83,12 @@ const MediaFigure: React.FC<{
       </div>
     );
   }
-  if (src === undefined || attachment.error !== undefined) {
+  if (src === undefined || attachment.error !== undefined || fallbackError !== undefined) {
+    const reason = attachment.error ?? fallbackError;
     return (
       <div className="mb-item mb-error" role="alert">
         取不到{media.name ?? (media.kind === 'audio' ? '音频' : '图片')}
-        {attachment.error !== undefined ? `:${attachment.error}` : ''}
+        {reason !== undefined ? `:${reason}` : ''}
       </div>
     );
   }
@@ -108,10 +116,11 @@ const MediaFigure: React.FC<{
           loading="lazy"
           width={media.width}
           height={media.height}
+          onError={attachment.via === 'object-store' ? () => setObjectLoadFailed(true) : undefined}
         />
       </button>
       {media.name !== undefined && <figcaption className="mb-caption u-num">{media.name}</figcaption>}
-      {attachment.via === 'object-store' && <figcaption className="mb-caption u-num" data-media-via="object-store">经 object store 取件（会话附件 RPC 不可用）</figcaption>}
+      {attachment.via === 'object-store' && <figcaption className="mb-caption u-num" data-media-via="object-store">经 object store 取件（会话附件 RPC 不可用{attachment.rpcError !== undefined ? `：${attachment.rpcError}` : ''}）</figcaption>}
     </figure>
   );
 };

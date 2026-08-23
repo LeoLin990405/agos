@@ -44,6 +44,9 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
   const consoleLive = useConsoleLive({
     overviewEnabled: activeTab === 'overview' || activeTab === 'plans',
     progressEnabled: activeTab === 'overview',
+    // W16:收件箱只在概览页;plans 页拉 overview 是为了计划数,不该顺带拉路由/评审台账。
+    routesEnabled: activeTab === 'overview',
+    councilEnabled: activeTab === 'overview',
   });
   const overviewFresh = consoleLive.overviewStatus === 'ready';
 

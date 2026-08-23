@@ -26,6 +26,8 @@ export interface SessionTrashPayload {
   fileExists: boolean
   count: number
   presentCount: number
+  /** 已探测(present 非 null)的条目数;摘要分母用它,根外/不可读不算「不在」。老载荷没有时前端自算。 */
+  probedCount: number
   items: SessionTrashItem[]
   unloggedRoots: SessionTrashRoot[]
 }
@@ -63,6 +65,7 @@ export function parseSessionTrashPayload(value: unknown): SessionTrashPayload {
     fileExists: value.fileExists === true,
     count: typeof value.count === 'number' ? value.count : items.length,
     presentCount: typeof value.presentCount === 'number' ? value.presentCount : items.filter((it) => it.present === true).length,
+    probedCount: typeof value.probedCount === 'number' ? value.probedCount : items.filter((it) => it.present !== null).length,
     items,
     unloggedRoots,
   }
@@ -70,17 +73,23 @@ export function parseSessionTrashPayload(value: unknown): SessionTrashPayload {
 
 /** 摘要句:全部由载荷算出。 */
 export function sessionTrashSummary(p: SessionTrashPayload): string {
-  const head = p.fileExists ? `删除日志 ${p.count} 条,落点仍在 ${p.presentCount}/${p.count}` : `删除日志 ${p.file} 不存在`
+  const unprobed = p.count - p.probedCount
+  const head = p.fileExists
+    ? `删除日志 ${p.count} 条,落点仍在 ${p.presentCount}/${p.probedCount}${unprobed > 0 ? `(另 ${unprobed} 条落点在 ~/.dsh 之外或不可读,未探测)` : ''}`
+    : `删除日志 ${p.file} 不存在`
   const unlogged = p.unloggedRoots.reduce((acc, r) => acc + r.notInLog, 0)
   const roots = p.unloggedRoots.filter((r) => r.notInLog > 0).length
-  const tail = unlogged > 0 ? `;另有 ${roots} 个回收/备份根共 ${unlogged} 个会话不在日志里(更早的批量清理,日志没有它们)` : ''
+  // 「不在日志里」是按根实算的;为什么不在(更早的批量清理?手工拷贝?)载荷说不出来,这里也不说。
+  const tail = unlogged > 0 ? `;另有 ${roots} 个回收/备份根共 ${unlogged} 个会话不在日志里` : ''
   return head + tail
 }
 
 export function presentText(it: SessionTrashItem): string {
   if (it.present === true) return it.kind === 'symlink' ? '落点仍在(软链)' : '落点仍在'
   if (it.present === false) return '落点已不在'
-  return it.kind === 'outside' ? '落点在 ~/.dsh 之外,未探测' : '落点未探测'
+  if (it.kind === 'outside') return '落点在 ~/.dsh 之外或经软链,未探测'
+  if (it.kind === 'unreadable') return '落点探测失败(不可读)'
+  return '落点未探测'
 }
 
 export function pruneText(it: SessionTrashItem): string {

@@ -26,8 +26,10 @@ export interface ConsoleDerived {
   skillsConsistency: string | undefined;
   /** W16:多台账汇合;每条带 source,排序见 sortInbox。类型即 AttentionInbox 的 InboxItemData(去掉 onAction)。 */
   inbox: Omit<InboxItemData, 'onAction'>[];
-  /** W16:四个来源各自是否采集到。'absent' 的来源**不产出条目**,空态也不能说「无待处理」。 */
+  /** W16:四个来源各自是否采集到。'absent' 的来源**不产出条目**,空态也不能说「无待处理」;'stale' = 刷新失败沿用旧数据。 */
   inboxSources: InboxSourceState;
+  /** W16:由数据算出的附注(评审台账回了 30 条 = 服务端窗口满,可能有更早的被截掉)。 */
+  inboxNotes: string[];
   matrix: SessionSummaryRow[];
   progressLive: boolean;
   sessionsLive: boolean;
@@ -92,7 +94,13 @@ export interface ConsoleExtraSources {
   /** undefined = 未采集(没拉 / 没回);[] 或 stats 为 0 才是真实的空。 */
   routes?: RoutesPayload | undefined;
   council?: CouncilRecord[] | undefined;
+  /** 拿到过数据但本轮刷新失败(useResource degraded)。 */
+  routesStale?: boolean;
+  councilStale?: boolean;
 }
+
+/** /api/cn/council-records 服务端固定 slice(-30);回满 30 条就说明可能有更早的被截掉。 */
+export const COUNCIL_SERVER_WINDOW = 30;
 
 /** W16 分支 1:谱系进度(原有逻辑,只抽成函数)。失败行 error,在跑批次 running。 */
 export function inboxFromProgress(calls: readonly Record<string, unknown>[]): InboxRow[] {
@@ -125,11 +133,13 @@ export function inboxFromRoutes(routes: RoutesPayload | undefined): InboxRow[] {
   if (routes === undefined) return [];
   const pending = routes.stats.pending;
   if (!(pending > 0)) return [];
+  // 时间槽放最近一条决策的 ts(台账里的时间),不放 payload.at——那是本次 GET 的响应时间,30s 一刷就变。
+  const latestTs = routes.decisions.reduce((acc, d) => (typeof d.ts === 'number' && Number.isFinite(d.ts) && d.ts > acc ? d.ts : acc), 0);
   return [{
     id: 'routes:pending', type: 'warning', source: 'routes',
     title: `${pending} 条路由决策待回填结果`,
-    description: `台账 ${routes.stats.total} 条,已回填 ${routes.stats.filled} 条。待回填是 outcome 仍为空,不是待审批。`,
-    timestamp: routes.at !== undefined && routes.at > 0 ? new Date(routes.at).toLocaleString('zh-CN', { hour12: false }) : '',
+    description: `台账 ${routes.stats.total} 条,已回填 ${routes.stats.filled} 条。待回填是 outcome 仍为空,不是等人批准。`,
+    timestamp: latestTs > 0 ? `最近决策 ${new Date(latestTs).toLocaleString('zh-CN', { hour12: false })}` : '决策时间未采集',
     actionText: '去路由决策',
   }];
 }
@@ -155,7 +165,7 @@ export function inboxFromSkillsDrift(ov: Record<string, unknown> | undefined): I
   }];
 }
 
-/** W16 分支 4:评审台账里被标记(flagged 非空)的记录,每条一项。kind 缺席写「类型未采集」。 */
+/** W16 分支 4:评审台账里被标记(flagged 非空)的记录,每条一项。flagged 里是仲裁点名疑似编造的评委(provider id);kind 缺席写「类型未采集」。 */
 export function inboxFromCouncil(records: readonly CouncilRecord[] | undefined): InboxRow[] {
   if (records === undefined) return [];
   const out: InboxRow[] = [];
@@ -165,7 +175,7 @@ export function inboxFromCouncil(records: readonly CouncilRecord[] | undefined):
     out.push({
       id: `council:${r.time ?? i}:${i}`, type: 'warning', source: 'council',
       title: `评审被标记:${(r.question ?? '问题未采集').slice(0, 40)}`,
-      description: `${r.kind ?? '类型未采集'} · ${r.flagged.join(' · ')}`.slice(0, 120),
+      description: `${r.kind ?? '类型未采集'} · 疑似编造的评委:${r.flagged.join('、')}`.slice(0, 120),
       timestamp: Number.isFinite(t) ? new Date(t).toLocaleString('zh-CN', { hour12: false }) : '时间未采集',
       actionText: '去评审台账',
     });
@@ -195,10 +205,14 @@ export function deriveConsole(t: TelemetryState, s: { rows: SessionSummaryRow[];
   const skillsGroup = typeof ov?.['skills'] === 'object' && ov?.['skills'] !== null;
   const inboxSources: InboxSourceState = {
     progress: t.progress !== undefined ? 'ready' : 'absent',
-    routes: extra.routes !== undefined ? 'ready' : 'absent',
+    routes: extra.routes !== undefined ? (extra.routesStale ? 'stale' : 'ready') : 'absent',
     skills: skillsGroup ? 'ready' : 'absent',
-    council: extra.council !== undefined ? 'ready' : 'absent',
+    council: extra.council !== undefined ? (extra.councilStale ? 'stale' : 'ready') : 'absent',
   };
+  const inboxNotes: string[] = [];
+  if (extra.council !== undefined && extra.council.length >= COUNCIL_SERVER_WINDOW) {
+    inboxNotes.push(`评审台账只回最近 ${extra.council.length} 条,更早的被标记记录看不到`);
+  }
   const inbox = sortInbox([
     ...inboxFromProgress(calls),
     ...inboxFromCouncil(extra.council),
@@ -222,7 +236,7 @@ export function deriveConsole(t: TelemetryState, s: { rows: SessionSummaryRow[];
       const summary = (c as Record<string, unknown>)['summary'];
       return typeof summary === 'string' ? summary : undefined;
     })(),
-    inbox, inboxSources, matrix: s.rows.slice(0, 8),
+    inbox, inboxSources, inboxNotes, matrix: s.rows.slice(0, 8),
     progressLive: t.progress !== undefined,
     sessionsLive: typeof s.loadedAt === 'number' && s.loadedAt > 0,
     live: ov !== undefined,
@@ -271,7 +285,11 @@ export function useConsoleLive({
     overview: overviewData,
     progress: progressData,
     at: numAt(overviewData, 'at') ?? overview.at ?? 0,
-  }, sessions, { routes: routesData, council: councilData }), [overview.at, overviewData, progressData, sessions, routesData, councilData]);
+  }, sessions, {
+    routes: routesData, council: councilData,
+    routesStale: routesEnabled && routes.status === 'degraded' && routes.data !== undefined,
+    councilStale: councilEnabled && council.status === 'degraded' && council.data !== undefined,
+  }), [overview.at, overviewData, progressData, sessions, routesData, councilData, routesEnabled, routes.status, routes.data, councilEnabled, council.status, council.data]);
 
   return {
     ...derived,
@@ -452,6 +470,7 @@ export const RealOverview: React.FC<{
           : onNavigateCouncil,
       }))}
       sources={live.inboxSources}
+      notes={live.inboxNotes}
     />
 
     {live.sessionsLive ? <SessionMatrix
