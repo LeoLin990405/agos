@@ -11,7 +11,7 @@
  * 供 <ReplayScrubber> 回放;不传时行为与之前完全一致。
  * P1-8:会话完结时在流末给出「✓ 任务完成」+ 本轮真实产出的文件卡。
  */
-import React, { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Dot } from '@/components/ui/Dot';
 import { Chip } from '@/components/ui/Chip';
 import { ReasoningBlock } from '@/components/chat/ReasoningBlock';
@@ -27,6 +27,8 @@ import type { OptimisticImageAttachment } from '@/components/chat/ImageAttachmen
 import { extractMultimodalMessageId, stripImagePlaceholder, stripMultimodalMessageMarker } from '@/components/chat/CommandDeck';
 import { MediaBlocks } from '@/components/chat/MediaBlocks';
 import { mediaFromResultBlocks, mediaFromTool } from '@/components/chat/media-blocks';
+import { EMPTY_YOLO, describeYoloDecision, groupYoloByCallId, parseYoloDecisionsPayload, yoloDecisionsUrl, yoloVerdictText, type YoloDecision, type YoloDecisionsPayload } from '@/components/chat/yolo-decisions';
+import { fetchJsonResource, useResource } from '@/lib/useResource';
 import '@/design-system/tool-timeline.css';
 import '@/design-system/replay-scrubber.css';
 
@@ -265,7 +267,7 @@ function prettyArgs(argsRaw: string): string {
   }
 }
 
-const ToolTimelineRow: React.FC<{ tool: ToolItem, sessionId: string }> = ({ tool, sessionId }) => {
+const ToolTimelineRow: React.FC<{ tool: ToolItem, sessionId: string, yolo?: readonly YoloDecision[] }> = ({ tool, sessionId, yolo }) => {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [showAll, setShowAll] = useState(false);
@@ -311,6 +313,7 @@ const ToolTimelineRow: React.FC<{ tool: ToolItem, sessionId: string }> = ({ tool
       >
         <span className="tl-icon"><ToolIcon kind={toolIconKind(tool.name)} /></span>
         <span className="tl-title">{title}</span>
+        <YoloChip rows={yolo} />
         {duration !== undefined && <span className="tl-dur u-num">{duration}</span>}
         <ChevronIcon />
       </button>
@@ -351,10 +354,22 @@ const ToolTimelineRow: React.FC<{ tool: ToolItem, sessionId: string }> = ({ tool
   );
 };
 
-const ToolTimelineGroup: React.FC<{ tools: readonly ToolItem[], keyPrefix: string, sessionId: string }> = ({ tools, keyPrefix, sessionId }) => (
+/** W11:权限裁决注解。台账行按 callId 挂到工具卡;同 callId 多行取最新。不是新事件,只是注解。 */
+const YoloChip: React.FC<{ rows: readonly YoloDecision[] | undefined }> = ({ rows }) => {
+  const last = rows?.at(-1);
+  if (last === undefined) return null;
+  const d = describeYoloDecision(last);
+  return (
+    <Chip variant={d.kind === 'delegate' ? 'amber' : last.outcome === 'rejected' ? 'red' : 'default'} style={{ marginLeft: '6px' }} data-yolo={d.kind}>
+      {yoloVerdictText(last)}
+    </Chip>
+  );
+};
+
+const ToolTimelineGroup: React.FC<{ tools: readonly ToolItem[], keyPrefix: string, sessionId: string, yoloByCallId?: ReadonlyMap<string, YoloDecision[]> }> = ({ tools, keyPrefix, sessionId, yoloByCallId = EMPTY_YOLO }) => (
   <div className="tl-group">
     {tools.map((tool, i) => (
-      <ToolTimelineRow key={`${keyPrefix}:${i}:${tool.callId}`} tool={tool} sessionId={sessionId} />
+      <ToolTimelineRow key={`${keyPrefix}:${i}:${tool.callId}`} tool={tool} sessionId={sessionId} yolo={yoloByCallId.get(tool.callId)} />
     ))}
   </div>
 );
@@ -493,6 +508,7 @@ function renderItem(
   sessionId: string,
   optimisticImages: readonly OptimisticImageAttachment[] = [],
   readOnly = false,
+  yoloByCallId: ReadonlyMap<string, YoloDecision[]> = EMPTY_YOLO,
 ): React.ReactNode {
   if (item.kind === 'user') {
     if (item.sourceKind !== 'user') return null;
@@ -580,8 +596,12 @@ function renderItem(
       );
     }
     if (item.name === 'bash') {
+      const judged = yoloByCallId.get(item.callId);
       return (
         <div className="message-wrap tl-enter" key={key}>
+          {judged !== undefined && judged.length > 0 && (
+            <div style={{ marginBottom: '4px', fontSize: '12px' }}><YoloChip rows={judged} /></div>
+          )}
           <TerminalCard
             title="bash_exec"
             command={parseBashCommand(item.argsRaw)}
@@ -595,17 +615,22 @@ function renderItem(
     }
     return (
       <div className="message-wrap tl-enter" key={key}>
-        <ToolTimelineGroup tools={[item]} keyPrefix={key} sessionId={sessionId} />
+        <ToolTimelineGroup tools={[item]} keyPrefix={key} sessionId={sessionId} yoloByCallId={yoloByCallId} />
       </div>
     );
   }
   // approval
   if (item.outcome !== undefined) {
+    // W11:有裁决行就说清「谁拒的、为什么」;没有就维持事件流里的结果,不发明。
+    const judged = item.callId !== undefined ? yoloByCallId.get(item.callId)?.at(-1) : undefined;
+    const verdict = judged === undefined ? undefined : describeYoloDecision(judged);
     return (
       <div className="message-wrap tl-enter" key={key}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border-subtle)', fontSize: '12px', color: 'var(--text-secondary)' }}>
           <Dot state={item.outcome === 'rejected' ? 'failed' : 'done'} size={6} />
-          <span>审批 {item.toolName ?? ''}:{item.outcome === 'allowed-once' ? '已放行(一次)' : item.outcome}</span>
+          <span data-yolo={verdict?.kind}>
+            审批 {item.toolName ?? ''}:{judged !== undefined ? yoloVerdictText(judged) : item.outcome === 'allowed-once' ? '已放行(一次)' : item.outcome}
+          </span>
         </div>
       </div>
     );
@@ -665,6 +690,8 @@ interface TranscriptBodyProps extends LiveTranscriptProps {
   snapshot: FoldedConversation | undefined;
   phase: 'idle' | 'loading' | 'live' | 'error';
   error: string | undefined;
+  /** W11 权限裁决注解(按 callId)。远端/回放不传 → 空 Map,渲染逐字节不变。 */
+  yoloByCallId?: ReadonlyMap<string, YoloDecision[]>;
 }
 
 /** 纯渲染体：远端与本地共用，不订阅任何 store。 */
@@ -677,6 +704,7 @@ export const TranscriptBody: React.FC<TranscriptBodyProps> = ({
   phase,
   error,
   readOnly = false,
+  yoloByCallId = EMPTY_YOLO,
 }) => {
   const localMessages = optimisticImageMessages.filter((message) => message.sessionId === sessionId);
   const matchedLocalIds = new Set<string>();
@@ -713,14 +741,14 @@ export const TranscriptBody: React.FC<TranscriptBodyProps> = ({
       }
       renderedItems.push(
         <div className="message-wrap tl-enter" key={`${sessionId}:${index}:timeline`}>
-          <ToolTimelineGroup tools={run} keyPrefix={`${sessionId}:${index}`} sessionId={sessionId} />
+          <ToolTimelineGroup tools={run} keyPrefix={`${sessionId}:${index}`} sessionId={sessionId} yoloByCallId={yoloByCallId} />
         </div>,
       );
       index = end - 1;
       continue;
     }
     if (item === undefined) continue;
-    renderedItems.push(renderItem(item, `${sessionId}:${index}`, sessionId, imagesByItemIndex.get(index) ?? [], readOnly));
+    renderedItems.push(renderItem(item, `${sessionId}:${index}`, sessionId, imagesByItemIndex.get(index) ?? [], readOnly, yoloByCallId));
   }
   /* 回卷到历史某一步时,「发送中」的乐观气泡属于未来,不该出现在回放里。 */
   const pendingLocalMessages = isReplaying
@@ -767,18 +795,28 @@ export const TranscriptBody: React.FC<TranscriptBodyProps> = ({
 };
 
 /** 本机会话订阅壳。hook 始终在自己的组件里调用，override 切换不会改变 hook 顺序。 */
+const fetchYolo = async (url: string, signal: AbortSignal): Promise<YoloDecisionsPayload> =>
+  parseYoloDecisionsPayload(await fetchJsonResource<unknown>(url, signal));
+
 export const SubscribedTranscript: React.FC<LiveTranscriptProps> = (props) => {
   const { sessionId } = props;
   const convo = useSyncExternalStore(
     conversationStore.subscribe,
     useCallback(() => conversationStore.getSnapshot(sessionId), [sessionId]),
   );
+  // W11:裁决台账只读 GET;不轮询(裁决只在审批时刻产生),条目数变了刷一次。
+  const yolo = useResource<YoloDecisionsPayload>({ url: sessionId.trim() !== '' ? yoloDecisionsUrl(sessionId) : null, fetcher: fetchYolo, refreshOnFocus: true });
+  const itemCount = convo.snapshot?.items.length ?? 0;
+  const refresh = yolo.refresh;
+  useLayoutEffect(() => { if (itemCount > 0) refresh(); }, [itemCount, refresh]);
+  const yoloByCallId = useMemo(() => groupYoloByCallId(yolo.data?.items ?? []), [yolo.data]);
   return (
     <TranscriptBody
       {...props}
       snapshot={convo.snapshot}
       phase={convo.phase}
       error={convo.error}
+      yoloByCallId={yoloByCallId}
     />
   );
 };
