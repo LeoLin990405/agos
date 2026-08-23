@@ -105,6 +105,13 @@ sleep 6
 assert_text "路由面渲染" "路由档位"
 # W10:结果行覆盖视图挂在路由面下方;锚「带完整标签」只在载荷到达后出现(小标题是无条件的,不能当锚)。
 assert_text "结果行覆盖" "带完整标签"
+# W17:路由台账里真有一条影子决策行(2026-08-23 dec-1787493862865,Claude 验证 #1)时,路由页要把它标成「影子建议」;
+# 锚按台账当下有没有 mode=shadow 行选,没有就断「路由档位」已过即可。
+SHADOW_ROWS=$(curl -s --noproxy '*' 'http://127.0.0.1:3091/api/agos/routes?limit=50' | python3 -c 'import sys,json; print(sum(1 for d in json.load(sys.stdin)["decisions"] if d.get("mode")=="shadow"))' 2>/dev/null || echo 0)
+if [ "$SHADOW_ROWS" -gt 0 ] 2>/dev/null; then
+	assert_text "影子决策行渲染(shadow=$SHADOW_ROWS)" "影子建议"
+	assert_text "影子行补充句" "尚未派发或未关联批次"
+fi
 step "开读图台账" opencli browser $S click ".console-nav-item[aria-label=\"读图台账\"]"
 sleep 6
 assert_text "读图台账渲染" "读图台账已采集"
