@@ -2,7 +2,8 @@
 // ~/.dsh/logs/yolo-judge.jsonl,不改它、不写它。
 //
 // 行格式(yolo-mode-aligned README:119):{time, sessionId, origin, toolName, callId?, targetMode, currentMode,
-// justification, decision, outcome, reason?, error?, errorMessage?}。
+// justification, workspaceRoot?, resourcePath?, inWorkspace?, argumentsSummary?, decision, outcome, reason?, error?, errorMessage?}。
+// 2026-08-23 W18 起新行多 workspaceRoot/resourcePath/inWorkspace(已脱敏);argumentsSummary 不透传(给裁判看的实参摘要,前端不需要)。存量 5 行没有这些字段。
 // - decision 是策略层怎么走:allow / deny 静态直判,delegate 转人工,judge 进 LLM 裁判;outcome 是最终结果。
 // - reason 是**裁判**的理由,只在裁判真判了才有;2026-08-20 修复前的两条真实 rejected 行既无 reason 也无 error。
 //   justification 是**申请方**的理由,绝不能当裁决理由用。
@@ -12,7 +13,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 
-export const YOLO_FIELDS = Object.freeze(['time', 'origin', 'toolName', 'callId', 'targetMode', 'currentMode', 'justification', 'decision', 'outcome', 'reason', 'error', 'errorMessage'])
+export const YOLO_FIELDS = Object.freeze(['time', 'origin', 'toolName', 'callId', 'targetMode', 'currentMode', 'justification', 'workspaceRoot', 'resourcePath', 'inWorkspace', 'decision', 'outcome', 'reason', 'error', 'errorMessage'])
 const DEFAULT_LIMIT = 200
 const JUSTIFICATION_LIMIT = 300
 
