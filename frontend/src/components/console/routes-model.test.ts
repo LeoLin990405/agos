@@ -9,7 +9,9 @@ import {
   outcomeValueCopy,
   parseRoutesPayload,
   ROUTES_READY_COPY,
+  decisionReasonCopy,
   fallbackReasonCopy,
+  posteriorCopy,
   routesTierNote,
   ruleReasonCopy,
 } from './routes-model.ts'
@@ -109,4 +111,15 @@ test('fallbackReason 全集有中文，认不出的不渲染（与 ruleReasonCop
   }
   assert.equal(fallbackReasonCopy('brand-new'), undefined)
   assert.equal(fallbackReasonCopy(undefined), undefined)
+})
+
+test('posteriorCopy 与 decisionReasonCopy 由数据算出,不搬运原码', () => {
+  assert.equal(posteriorCopy({ total: 1, filled: 0, pending: 1, cells: 1 }), '后验分母未采集')
+  assert.equal(posteriorCopy({ total: 1, filled: 0, pending: 1, cells: 1, posterior: { observations: 0, cells: 0 } }), '后验暂无真实观测，三角色来自静态基准表')
+  assert.match(posteriorCopy({ total: 1, filled: 1, pending: 0, cells: 1, posterior: { observations: 1, cells: 1 } }), /后验真实观测 1 条，落在 1 个已有胜负的/)
+  assert.equal(decisionReasonCopy({ reason: 'static table', source: 'fallback' }), '静态表')
+  assert.match(decisionReasonCopy({ reason: 'selector unavailable or timed out; static table', source: 'fallback' }) ?? '', /旧文案/)
+  assert.equal(decisionReasonCopy({ reason: 'whatever', source: 'fallback' }), '静态表（回落理由未识别）')
+  assert.equal(decisionReasonCopy({ reason: '该候选明确标注为 SQL coder', source: 'selector' }), '选择器原话 · 该候选明确标注为 SQL coder')
+  assert.equal(decisionReasonCopy({ source: 'selector' }), undefined)
 })

@@ -629,7 +629,8 @@ function renderItem(
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border-subtle)', fontSize: '12px', color: 'var(--text-secondary)' }}>
           <Dot state={item.outcome === 'rejected' ? 'failed' : 'done'} size={6} />
           <span data-yolo={verdict?.kind}>
-            审批 {item.toolName ?? ''}:{judged !== undefined ? yoloVerdictText(judged) : item.outcome === 'allowed-once' ? '已放行(一次)' : item.outcome}
+            审批 {item.toolName ?? ''}:{item.outcome === 'allowed-once' ? '已放行(一次)' : item.outcome}
+            {judged !== undefined ? ` · ${yoloVerdictText(judged)}` : ''}
           </span>
         </div>
       </div>
@@ -806,9 +807,10 @@ export const SubscribedTranscript: React.FC<LiveTranscriptProps> = (props) => {
   );
   // W11:裁决台账只读 GET;不轮询(裁决只在审批时刻产生),条目数变了刷一次。
   const yolo = useResource<YoloDecisionsPayload>({ url: sessionId.trim() !== '' ? yoloDecisionsUrl(sessionId) : null, fetcher: fetchYolo, refreshOnFocus: true });
-  const itemCount = convo.snapshot?.items.length ?? 0;
+  // 裁决行写在 approval/decided 时刻,decided 不改条目数——用「已决审批数」当触发器。
+  const decidedCount = convo.snapshot?.items.filter((i) => i.kind === 'approval' && i.outcome !== undefined).length ?? 0;
   const refresh = yolo.refresh;
-  useLayoutEffect(() => { if (itemCount > 0) refresh(); }, [itemCount, refresh]);
+  useLayoutEffect(() => { if (decidedCount > 0) refresh(); }, [decidedCount, refresh]);
   const yoloByCallId = useMemo(() => groupYoloByCallId(yolo.data?.items ?? []), [yolo.data]);
   return (
     <TranscriptBody

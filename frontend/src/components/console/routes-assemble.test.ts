@@ -242,6 +242,11 @@ test('回合文案：note 只认表内那句，error 码译成中文，原型链
   ] } });
   assert.equal(tr?.turns[0]?.failure, '供应商报错（鉴权失败）');
   assert.equal(tr?.turns[1]?.ok, true);
+  assert.equal(tr?.turns[1]?.truncated, false);
+  const cut = parseDispatchRun({ dispatch: { ...GOOD_DISPATCH, turns: [TURNS[0], { role: 'implementer', model: 'qwen3.8-max', ok: true, text: '写到一半', finish: 'max-tokens', blockTypes: ['text'] }, TURNS[2]] } });
+  assert.equal(cut?.turns[1]?.truncated, true);
+  assert.equal(turnFailureCopy({ error: 'PROVIDER_ERROR', providerCode: 'UNKNOWN_MODEL' }), '供应商报错（宿主不认识该模型（配置错））');
+  assert.equal(turnFailureCopy({ error: 'PROVIDER_ERROR', providerCode: 'PI_AI_ERROR' }), '供应商报错（供应商错误（未细分））');
   const run = parseDispatchRun({ dispatch: { ...GOOD_DISPATCH, turns: [
     { role: 'planner', model: 'glm-5.2', ok: false, note: '已接入本跳会话并换了模型', error: '__proto__' },
     { role: 'implementer', model: 'qwen3.8-max', ok: true, text: 'Y'.repeat(5000), note: '随便' },
@@ -535,7 +540,7 @@ test('RoutesView 只渲染 deriveAssembleView 的结果与冻结常量，不自�
   for (const key of ['ASSEMBLE_EMPTY_COPY', 'ASSEMBLE_HOW_COPY', 'ASSEMBLE_CONFIRM_COPY', 'DISPATCH_NO_TOOLS_COPY', 'DISPATCH_CONFIRM_CHECK_COPY', 'DISPATCH_EMPTY_COPY', 'DISPATCH_BUTTON_COPY']) {
     assert.match(view, new RegExp(`\\{${key}\\}`), `${key} 没有渲染`);
   }
-  assert.match(view, /row\.ok \? \(row\.redacted \? TURN_TEXT_REDACTED_COPY : `\$\{TURN_TEXT_PREFIX\}\$\{row\.text \?\? ''\}`\) : row\.failure/);
+  assert.match(view, /row\.ok \? \(row\.redacted \? TURN_TEXT_REDACTED_COPY : `\$\{TURN_TEXT_PREFIX\}\$\{row\.text \?\? ''\}\$\{row\.truncated \? TURN_TRUNCATED_COPY : ''\}`\) : row\.failure/);
   // 失败分支也刷新台账;试跑失败放掉本地提案(第三轮 [5][21])。
   assert.equal((view.match(/resource\.refresh\(\);/g) ?? []).length, 5);
   assert.match(view, /setDispatchNote\(\{ tone: 'error', text: posted\.error \}\);\s*setProposed\(null\);\s*setLocalRun\(null\);\s*resource\.refresh\(\);/);

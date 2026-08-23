@@ -17,8 +17,6 @@ export interface FoldedHeader {
   parentSession: string | undefined
   delegationDepth: number
   agentPreset: string | undefined
-  /** 来自 subagent/descriptor.data.label(W14);one-shot 模式 label 可缺,缺就是 undefined,不回落成 mode/provider。 */
-  subagentLabel: string | undefined
 }
 
 export interface UserItem {
@@ -130,6 +128,12 @@ export interface FoldDiagnostics {
 
 export interface FoldedConversation {
   header: FoldedHeader | undefined
+  /**
+   * 来自 subagent/descriptor.data.label(W14)。挂在快照顶层而不是 header:live 路径的 session.history 只回
+   * events 不回 session 头行,header 恒为 undefined,挂在 header 上线上永远拿不到。
+   * 与宿主 dsh-subagent 投影同口径:last-wins 且缺 label 的后到 descriptor 会重置成 undefined。
+   */
+  subagentLabel: string | undefined
   title: string | undefined
   items: ConversationItem[]
   turnsStarted: number

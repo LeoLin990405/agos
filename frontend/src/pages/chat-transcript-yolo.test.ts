@@ -40,7 +40,8 @@ test('没有裁决台账时,审批行维持事件流结果;有裁决行时说清
     { time: 1787056815348, callId: CALL, toolName: 'bash', origin: 'main', targetMode: 'danger-full-access', currentMode: 'workspace-write', justification: '用户明确要求在工作区外创建', decision: 'judge', outcome: 'rejected' },
   ] }).items) as ReadonlyMap<string, never[]>;
   const html = render(judged);
-  assert.match(html, /审批 bash:LLM 裁判拒绝（裁判未留理由）/);
+  // 注解**追加**在人工/事件流结果之后,不替换它。
+  assert.match(html, /审批 bash:rejected · LLM 裁判拒绝（裁判未留理由）/);
   assert.match(html, /data-yolo="judge"/);
   // bash 卡上方也挂了同一裁决 chip(注解,不是第三条 item)。
   assert.equal((html.match(/LLM 裁判拒绝（裁判未留理由）/g) ?? []).length, 2);
@@ -52,7 +53,8 @@ test('有 reason 的裁决行把理由印出来;转人工与放行各有文案',
   const mk = (decision: string, outcome: string, reason?: string) => groupYoloByCallId(parseYoloDecisionsPayload({ version: 1, sessionId: S, count: 1, items: [
     { time: 1, callId: CALL, decision, outcome, ...(reason ? { reason } : {}) },
   ] }).items) as ReadonlyMap<string, never[]>;
-  assert.match(render(mk('deny', 'rejected', 'scope exceeds need')), /策略直接拒绝：scope exceeds need/);
-  assert.match(render(mk('judge', 'delegate')), /裁判转人工审批/);
+  assert.match(render(mk('deny', 'rejected', 'scope exceeds need')), /rejected · 策略直接拒绝：scope exceeds need/);
+  // 策略层 delegate:审批行里人最终的结果(rejected)保留,注解只说「策略转人工,裁判未跑」。
+  assert.match(render(mk('delegate', 'delegate')), /审批 bash:rejected · 策略转人工审批，裁判未跑/);
   assert.match(render(mk('judge', 'allowed-once', 'ok')), /LLM 裁判放行（一次）：ok/);
 });

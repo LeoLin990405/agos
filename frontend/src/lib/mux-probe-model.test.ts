@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createProbeState, MUX_FRAME_TYPES, recordFrame, recordReconnect, snapshot } from './mux-probe-model.ts'
+import { createProbeState, MUX_FRAME_TYPES, recordFrame, recordOpen, recordReconnect, REPLAY_WINDOW_MS, snapshot } from './mux-probe-model.ts'
 
 test('按 type 累加;同 rpcId 的 question/requested 重放只计 distinct 1;host/* 不进 mux 统计', () => {
   let s = createProbeState(1000)
@@ -38,4 +38,18 @@ test('没有 rpcId 的帧不会被误去重', () => {
   s = recordFrame(s, { type: 'approval/requested' }, 1)
   s = recordFrame(s, { type: 'approval/requested' }, 2)
   assert.equal(s.distinct['approval/requested'], 2)
+})
+
+test('开连 1s 内到达的帧算回放基线,不混进 byType;窗口之外的才是实推', () => {
+  let s = createProbeState(0)
+  s = recordOpen(s, 1000)
+  s = recordFrame(s, { type: 'session/subscribed', rpcId: 'r1' }, 1050)
+  s = recordFrame(s, { type: 'session/queue', rpcId: 'r2' }, 1090)
+  s = recordFrame(s, { type: 'session/event', rpcId: 'r3' }, 1000 + REPLAY_WINDOW_MS + 1)
+  assert.deepEqual(s.replayOnOpen, { 'session/subscribed': 1, 'session/queue': 1 })
+  assert.equal(s.byType['session/event'], 1)
+  assert.equal(s.byType['session/subscribed'], undefined)
+  const snap = snapshot(s, 5000)
+  assert.equal(snap.opens, 1)
+  assert.deepEqual(snap.replayOnOpen, { 'session/subscribed': 1, 'session/queue': 1 })
 })

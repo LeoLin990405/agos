@@ -286,7 +286,7 @@ export const RealOverview: React.FC<{
       </div>
     </section>
 
-    <UsageBand enabled={live.live} />
+    <UsageBand />
 
     <section className="surface-section" aria-label="产品入口">
       <h3 className="surface-h3">工作室与组装</h3>

@@ -153,5 +153,21 @@ export function posteriorCopy(stats: RoutesPayload['stats']): string {
   const p = stats.posterior
   if (!p || !Number.isFinite(p.observations) || !Number.isFinite(p.cells)) return '后验分母未采集'
   if (p.observations === 0) return '后验暂无真实观测，三角色来自静态基准表'
-  return `后验真实观测 ${p.observations} 条，覆盖 ${p.cells} 个角色×模型格`
+  return `后验真实观测 ${p.observations} 条，落在 ${p.cells} 个已有胜负的（角色，模型）格（与上面「覆盖 N 个格」不是一个口径：那个数所有决策都算，这个只算有胜负的）`
+}
+
+/**
+ * 决策行 reason:回落行是后端字面量(新「static table」;退役「selector unavailable or timed out; static table」——
+ * 那句把每种失败都说成超时,历史行仍带着),译成中文;选择器行是模型原话,带「选择器原话 ·」前缀上屏。
+ */
+const FALLBACK_REASON_LITERALS: Record<string, string> = {
+  'static table': '静态表',
+  'selector unavailable or timed out; static table': '静态表（旧文案，当时把所有失败写成超时；真因看「回落」）',
+}
+export function decisionReasonCopy(row: { reason?: string; source?: string }): string | undefined {
+  if (!row.reason) return undefined
+  const literal = FALLBACK_REASON_LITERALS[row.reason]
+  if (literal !== undefined) return literal
+  if (row.source === 'fallback') return '静态表（回落理由未识别）'
+  return `选择器原话 · ${row.reason}`
 }

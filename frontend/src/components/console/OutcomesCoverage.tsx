@@ -13,7 +13,7 @@ export const OutcomesCoverage: React.FC = () => {
     <section className="surface-section" aria-label="结果行覆盖">
       <h3 className="surface-h3">结果行覆盖（五家台账派生）</h3>
       <p className="surface-quiet">
-        route / council / plan / civ / fleet 各自的「某个模型跑了一次任务」归一成七字段，不做语义合并：各家 taskType 词表互不对齐，合并就是编造。
+        route / council / plan / civ / fleet 各自的「某个模型跑了一次任务」归一成七字段，不做语义合并：各家 taskType 词表互不对齐，格子按（源，任务类，模型）分开，跨源不相加。council 行的任务类未采集（记录里的 kind 是写入管线的判别符，不是任务类）。
         council 里被仲裁标「疑似编造」的记成失败；civ 没派任务的记成未采集；plan 的成功只表示子代理跑完，不表示目标达成。
       </p>
       {payload === undefined && resource.status !== 'error' && <p aria-live="polite" className="surface-quiet">正在读取结果行…</p>}
@@ -28,7 +28,8 @@ export const OutcomesCoverage: React.FC = () => {
           ) : (
             <ul className="surface-list">
               {payload.grid.cells.map((c) => (
-                <li key={`${c.taskType}:${c.agent}`} className="surface-row surface-row--inline">
+                <li key={`${c.kind}:${c.taskType}:${c.agent}`} className="surface-row surface-row--inline">
+                  <span className="surface-quiet">{c.kind}</span>
                   <strong className="surface-strong">{c.taskType}</strong>
                   <code className="surface-code">{c.agent}</code>
                   <span className="u-num surface-quiet">成功 {c.ok} · 失败 {c.fail}</span>

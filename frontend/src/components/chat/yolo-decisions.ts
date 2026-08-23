@@ -75,34 +75,43 @@ export interface YoloDescription {
   who: 'LLM 裁判' | '策略' | '人工' | '未识别'
   label: string
   reason: string | undefined
-  /** 裁判判了但没留理由(修复前格式或出错回退)。 */
+  /** LLM 裁判判了但没留理由(修复前格式)。只对 decision:'judge' 成立;策略直判本来就没有理由。 */
   unreasoned: boolean
   kind: 'judge' | 'deny' | 'delegate' | 'allow' | 'unknown'
 }
 
-/** 文案由 decision × outcome 算出;理由只认 reason;error 只报码不报原文。 */
+const ERROR_CODE_RE = /^[A-Z_]{2,40}$/
+
+/**
+ * 文案由 decision × outcome 算出;理由只认 reason;error 只报码不报原文,**任何 outcome 下都报**。
+ * 写端(yolo-mode-aligned/lib/index.js)的组合:
+ *   decision 'delegate'(策略直转 / 闸门出错回退)→ outcome 'delegate':裁判**没跑**,是策略把决定交给人。
+ *   decision 'deny' → 'rejected':静态策略,写端永远不带 reason。
+ *   decision 'allow' → 'allowed-once':静态策略放行。
+ *   decision 'judge' → 'rejected' | 'allowed-once' | 'delegate'(裁判失败回退也可能转人工):只有这条有 reason。
+ */
 export function describeYoloDecision(row: YoloDecision): YoloDescription {
   const reason = row.reason
-  if (row.outcome === 'delegate' || row.decision === 'delegate') {
-    return { who: '人工', label: '裁判转人工审批', reason, unreasoned: false, kind: 'delegate' }
+  const err = typeof row.error === 'string' && ERROR_CODE_RE.test(row.error) ? row.error : undefined
+  const errSuffix = err ? `（出错回退 ${err}）` : ''
+  if (row.decision === 'delegate') {
+    return { who: '策略', label: `策略转人工审批，裁判未跑${errSuffix}`, reason, unreasoned: false, kind: 'delegate' }
   }
   if (row.decision === 'deny') {
-    return { who: '策略', label: '策略直接拒绝', reason, unreasoned: reason === undefined && row.error === undefined, kind: 'deny' }
+    return { who: '策略', label: `策略直接拒绝${errSuffix}`, reason, unreasoned: false, kind: 'deny' }
   }
-  if (row.decision === 'judge' || row.decision === 'allow') {
-    const kind = row.decision === 'allow' ? 'allow' : 'judge'
-    if (row.outcome === 'rejected') {
-      const errored = row.error !== undefined
-      return { who: 'LLM 裁判', label: errored ? `裁判出错回退拒绝（${row.error}）` : 'LLM 裁判拒绝', reason, unreasoned: reason === undefined && !errored, kind }
-    }
-    if (row.outcome === 'allowed-once') {
-      return { who: row.decision === 'allow' ? '策略' : 'LLM 裁判', label: row.decision === 'allow' ? '策略放行（一次）' : 'LLM 裁判放行（一次）', reason, unreasoned: false, kind }
-    }
+  if (row.decision === 'allow') {
+    return { who: '策略', label: `策略放行（一次）${errSuffix}`, reason, unreasoned: false, kind: 'allow' }
   }
-  return { who: '未识别', label: '裁决结果未识别', reason, unreasoned: reason === undefined, kind: 'unknown' }
+  if (row.decision === 'judge') {
+    if (row.outcome === 'delegate') return { who: '人工', label: `裁判转人工审批${errSuffix}`, reason, unreasoned: false, kind: 'judge' }
+    if (row.outcome === 'rejected') return { who: 'LLM 裁判', label: `LLM 裁判拒绝${errSuffix}`, reason, unreasoned: reason === undefined && err === undefined, kind: 'judge' }
+    if (row.outcome === 'allowed-once') return { who: 'LLM 裁判', label: `LLM 裁判放行（一次）${errSuffix}`, reason, unreasoned: false, kind: 'judge' }
+  }
+  return { who: '未识别', label: `裁决结果未识别${errSuffix}`, reason, unreasoned: false, kind: 'unknown' }
 }
 
-/** 审批行的一句话:谁、怎么判、理由或「裁判未留理由」。 */
+/** 裁决注解的一句话:谁、怎么判、理由或「裁判未留理由」。它是**注解**,审批行自己的人工结果要保留在它前面。 */
 export function yoloVerdictText(row: YoloDecision): string {
   const d = describeYoloDecision(row)
   if (d.reason !== undefined) return `${d.label}：${d.reason}`

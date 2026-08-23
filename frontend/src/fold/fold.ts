@@ -10,8 +10,9 @@
  * - `agent/inbox/spliced` 是队列态不是 transcript:user 内容入队,
  *   `user/message` 才是正史(实测两者并存,inbox 先行)。
  * - 未注册类型进 diagnostics.unknown —— 回放校验要求恒空,词汇长了就显式登记。
- * - `subagent/descriptor`(W14):每会话 ≤1 条、恒在 session 行之后(语料 256/256),
- *   data.label 进 header.subagentLabel;one-shot 的 label 可缺(26/256),缺就保持 undefined。
+ * - `subagent/descriptor`(W14):语料里每会话 ≤1 条(256/256),data.label 进快照顶层 subagentLabel
+ *   (不挂 header:live 路径的 session.history 只回 events,header 恒为 undefined);last-wins 含缺席,
+ *   与宿主 dsh-subagent 投影同口径。one-shot 的 label 可缺(26/256),缺就是 undefined。
  *   原注释「谱系侧已有更好来源」不成立:/api/swarm/history 今天 records=[]。
  */
 import type {
@@ -106,6 +107,7 @@ export interface Fold {
 
 export function createFold(): Fold {
   let header: FoldedHeader | undefined
+  let subagentLabel: string | undefined
   let title: string | undefined
   const items: ConversationItem[] = []
   const toolByCallId = new Map<string, ToolItem>()
@@ -158,8 +160,6 @@ export function createFold(): Fold {
           parentSession: asStr(event['parentSession']),
           delegationDepth: asNum(event['delegationDepth']) ?? 0,
           agentPreset: asStr(event['agentPreset']),
-          // 必须是 undefined 而不是 null/'':JSON.stringify 会丢掉它,金标 G1 的折叠产物才能逐字不变。
-          subagentLabel: undefined,
         }
         return
       }
@@ -333,8 +333,8 @@ export function createFold(): Fold {
         return
       }
       case 'subagent/descriptor': {
-        const label = asStr(data['label'])
-        if (header !== undefined && label !== undefined) header.subagentLabel = label
+        // 不依赖 header(live 路径没有 session 头行);last-wins 含缺席,与宿主投影一致。
+        subagentLabel = asStr(data['label'])
         return
       }
       case 'plan/mode': { planMode = true; return }
@@ -354,7 +354,7 @@ export function createFold(): Fold {
     for (const tool of toolByCallId.values()) if (tool.status === 'running') dangling += 1
     diagnostics.danglingToolCalls = dangling
     return {
-      header, title,
+      header, subagentLabel, title,
       items: [...items],
       turnsStarted: startedTurns.size, turnsEnded: endedTurns.size, lastTurnEndReason,
       todos: [...todos], planMode, sandboxMode, approvalPolicy,

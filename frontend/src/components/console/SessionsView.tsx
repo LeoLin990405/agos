@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useReducer, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Dot } from '@/components/ui/Dot';
 import { Button } from '@/components/ui/Button';
 import { formatRelative } from '@/lib/time';
@@ -35,26 +35,46 @@ const QuietState: React.FC<{ title: string; detail: React.ReactNode }> = ({ titl
   </div>
 );
 
-/** preset 与 descriptor label 语义不同(112/112 共存会话里全不同),只能「缺席才回落」,不拼接不覆盖;label 可能是整段任务文,截到 24 字并放 title。 */
-const LABEL_CELL_LIMIT = 24;
-export function presetCell(agentPreset: string, subagentLabel: string | undefined): React.ReactNode {
+/**
+ * preset 与 descriptor label 语义不同(112/112 共存会话里全不同),只能「缺席才回落」,不拼接不覆盖。
+ * label 可能是整段任务文,同批子代理靠尾缀 `#k (role)` 区分 —— 截断保头保尾,不能只截头(135 个不同 label
+ * 从头截 24 字只剩 102 个)。三种「没有」要分得清:preset 与 label 都没有 / 这行没打开过(fold 快照不存在)。
+ */
+const LABEL_HEAD = 12;
+const LABEL_TAIL = 10;
+export type LabelState = { opened: false } | { opened: true; label: string | undefined };
+export function shortenLabel(label: string): string {
+  const chars = Array.from(label);
+  if (chars.length <= LABEL_HEAD + LABEL_TAIL + 1) return label;
+  return `${chars.slice(0, LABEL_HEAD).join('')}…${chars.slice(-LABEL_TAIL).join('')}`;
+}
+export function presetCell(agentPreset: string, state: LabelState): React.ReactNode {
   if (agentPreset !== '') return agentPreset;
-  if (subagentLabel === undefined || subagentLabel === '') return '未采集';
-  const short = subagentLabel.length > LABEL_CELL_LIMIT ? `${subagentLabel.slice(0, LABEL_CELL_LIMIT)}…` : subagentLabel;
-  return <span title={subagentLabel}>{short}<span className="surface-quiet"> · 子代理标签</span></span>;
+  if (!state.opened) return <span title="会话没打开过,fold 快照不存在,子代理标签无从读取">未采集（未打开）</span>;
+  if (state.label === undefined || state.label === '') return '未采集';
+  return (
+    <span title={state.label} style={{ whiteSpace: 'nowrap' }}>
+      {shortenLabel(state.label)}<span className="surface-quiet" style={{ fontSize: '11px' }}> · 子代理标签</span>
+    </span>
+  );
 }
 
 export const SessionsView: React.FC<SessionsViewProps> = ({ onSelectSession }) => {
   const [filterQuery, setFilterQuery] = useState('');
   const sessions = useSyncExternalStore(sessionsStore.subscribe, sessionsStore.getSnapshot);
   const connection = useSyncExternalStore(liveConnectionStore.subscribe, liveConnectionStore.getSnapshot);
-  // W14:Agent preset 缺席时回落到 fold header 的 subagentLabel。fold 只对打开过的会话存在,
-  // 没点开过的行仍是「未采集」——全量回落要读 session.list 行的 projections.values.subagent.label,
-  // 那在冻结的 src/stores/live.ts 里,本档不动(取舍写进 TASK-020 执行日志)。
-  const [, bump] = useReducer((n: number) => n + 1, 0);
-  useEffect(() => conversationStore.subscribe(bump), []);
-  const subagentLabelOf = (sessionId: string): string | undefined =>
-    conversationStore.getSnapshot(sessionId).snapshot?.header?.subagentLabel;
+  // W14:Agent preset 缺席时回落到 fold 快照顶层的 subagentLabel。fold 只对打开过的会话存在,没点开的行
+  // 显示「未采集（未打开）」——全量回落要读 session.list 行的 projections.values.subagent.label,那在冻结的
+  // src/stores/live.ts 里,本档不动。订阅快照只取各行 label 拼成一个串:label 没变就不重渲染整张表。
+  const labelKey = useSyncExternalStore(
+    conversationStore.subscribe,
+    () => sessions.rows.map((r) => { const st = conversationStore.getSnapshot(r.sessionId); return st.snapshot === undefined ? '\u0000' : (st.snapshot.subagentLabel ?? ''); }).join('\u0001'),
+  );
+  const labelStates = useMemo(() => {
+    const parts = labelKey.split('\u0001');
+    return new Map(sessions.rows.map((r, i) => [r.sessionId, (parts[i] === '\u0000' ? { opened: false } : { opened: true, label: parts[i] === '' ? undefined : parts[i] }) as LabelState]));
+  }, [labelKey, sessions.rows]);
+  const labelStateOf = (sessionId: string): LabelState => labelStates.get(sessionId) ?? { opened: false };
 
   useEffect(() => {
     ensureLiveConnection();
@@ -170,7 +190,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onSelectSession }) =
                           #{row.sessionId}{row.cwd !== '' ? ` · ${row.cwd}` : ''}
                         </div>
                       </td>
-                      <td>{presetCell(row.agentPreset, subagentLabelOf(row.sessionId))}</td>
+                      <td>{presetCell(row.agentPreset, labelStateOf(row.sessionId))}</td>
                       <td>{relative !== '' ? relative : '未采集'}</td>
                       <td className="table-cell-end">
                         <Button variant="ghost" size="sm" onClick={() => onSelectSession?.(row.sessionId)}>

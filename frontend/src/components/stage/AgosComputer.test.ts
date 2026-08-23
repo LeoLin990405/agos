@@ -22,6 +22,7 @@ const tool = (patch: Partial<ToolItem> & Pick<ToolItem, 'callId' | 'name'>): Too
 
 const snapshot = (items: ToolItem[]): FoldedConversation => ({
   header: undefined,
+  subagentLabel: undefined,
   title: undefined,
   items,
   turnsStarted: 0,

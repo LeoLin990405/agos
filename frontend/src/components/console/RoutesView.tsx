@@ -22,6 +22,7 @@ import {
   sourceCopy,
   TURN_TEXT_PREFIX,
   TURN_TEXT_REDACTED_COPY,
+  TURN_TRUNCATED_COPY,
   type AssemblePlan,
   type DispatchRun,
 } from './routes-assemble';
@@ -29,6 +30,7 @@ import {
   formatCoverage,
   outcomeLabel,
   outcomeValueCopy,
+  decisionReasonCopy,
   fallbackReasonCopy,
   parseRoutesPayload,
   posteriorCopy,
@@ -88,7 +90,7 @@ function DecisionRow({
         <p className="surface-body">{row.taskType || '任务类型未采集'}</p>
         <p className="surface-quiet">
           候选 {(row.candidates || []).join(' / ') || '未采集'}
-          {row.reason ? ` · ${row.reason}` : ''}
+          {decisionReasonCopy(row) ? ` · ${decisionReasonCopy(row)}` : ''}
           {ruleReasonCopy(row.rule?.reason) ? ` · ${ruleReasonCopy(row.rule?.reason)}` : ''}
           {fallbackReasonCopy(row.fallbackReason) ? ` · 回落：${fallbackReasonCopy(row.fallbackReason)}` : row.fallbackReason ? ' · 回落：原因未识别' : ''}
         </p>
@@ -312,7 +314,7 @@ export const RoutesView: React.FC = () => {
                   <strong className="surface-strong">{row.role}</strong>
                   <code className="surface-code">{row.model}</code>
                   <span className="surface-quiet">
-                    {row.ok ? (row.redacted ? TURN_TEXT_REDACTED_COPY : `${TURN_TEXT_PREFIX}${row.text ?? ''}`) : row.failure}
+                    {row.ok ? (row.redacted ? TURN_TEXT_REDACTED_COPY : `${TURN_TEXT_PREFIX}${row.text ?? ''}${row.truncated ? TURN_TRUNCATED_COPY : ''}`) : row.failure}
                   </span>
                 </li>
               ))}

@@ -54,6 +54,8 @@ export const LISTED_RUN_HEADER_COPY = '这条提案的试跑记录（只出文�
 export const TURN_TEXT_REDACTED_COPY = '产出文本被敏感信息闸扣下，未采集';
 /** 回合文本是模型原话,不是系统断言;上屏时带这个前缀(第三轮 [11])。 */
 export const TURN_TEXT_PREFIX = '原话 · ';
+/** 成功回合被 maxTokens 截断:文本不完整,后面的角色看的也是这份不完整稿。 */
+export const TURN_TRUNCATED_COPY = '（被 maxTokens 上限截断，文本不完整）';
 
 /**
  * 退役文案:台账里的历史行带的是改名前的常量,它们当时就是冻结值,不能因为改名
@@ -93,7 +95,10 @@ export const TURN_ERROR_COPY = new Map<string, string>([
   ['STREAM_ERROR', '流式调用出错'],
   ['OVERLOAD', '供应商过载'],
 ]);
-/** 供应商错误码(宿主 dsh-llm 的 failure.code 全集)→ 中文;认不出的不渲染。 */
+/**
+ * 供应商错误码 → 中文。来源:dsh-llm-pi-ai classifyPiAiError + dsh-llm-deepseek 的 wire finish_reason 大写 +
+ * dsh-llm adapter-failure 的 UNKNOWN 兜底。认不出的不渲染(只显「供应商报错」)。
+ */
 const PROVIDER_CODE_COPY = new Map<string, string>([
   ['AUTH', '鉴权失败'],
   ['QUOTA', '额度用尽'],
@@ -101,11 +106,19 @@ const PROVIDER_CODE_COPY = new Map<string, string>([
   ['INVALID_REQUEST', '请求不合法'],
   ['INVALID_CREDENTIAL', '凭据无效'],
   ['MISSING_CREDENTIAL', '缺少凭据'],
+  ['UNKNOWN_MODEL', '宿主不认识该模型（配置错）'],
   ['SERVER', '供应商服务端错误'],
   ['TIMEOUT', '供应商超时'],
+  ['LLM_STREAM_IDLE_TIMEOUT', '流空闲超时'],
   ['TRANSPORT', '网络传输错误'],
+  ['STREAM_CLOSED', '流被关闭'],
   ['CONTEXT_WINDOW_EXCEEDED', '超出上下文窗口'],
+  ['CONTENT_FILTER', '内容被供应商过滤'],
   ['EMPTY_RESPONSE', '供应商返回空响应'],
+  ['MALFORMED_RESPONSE', '供应商响应格式不对'],
+  ['UNSUPPORTED_CONTENT', '内容类型不受支持'],
+  ['PI_AI_ERROR', '供应商错误（未细分）'],
+  ['UNKNOWN', '原因未知'],
 ]);
 export const TURN_ERROR_UNKNOWN_COPY = '失败，错误码未识别';
 export const TURN_TEXT_LIMIT = 400;
@@ -149,6 +162,8 @@ export interface DispatchTurn {
   text?: string;
   /** ok 但没有文本:按契约只可能是后端敏感信息闸把产出清空了。 */
   redacted?: boolean;
+  /** ok 但 finish=max-tokens:文本被上限截断,后面的角色看的是截断稿。 */
+  truncated?: boolean;
 }
 
 export interface DispatchRun {
@@ -344,6 +359,7 @@ export function parseDispatchRun(value: unknown): DispatchRun | null {
       failure: ok ? undefined : turnFailureCopy(r),
       text: ok && typeof r.text === 'string' && r.text !== '' ? clip(r.text, TURN_TEXT_LIMIT) : undefined,
       redacted: ok && (typeof r.text !== 'string' || r.text === ''),
+      truncated: ok && r.finish === 'max-tokens',
     };
   });
   return {

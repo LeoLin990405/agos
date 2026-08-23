@@ -1,5 +1,5 @@
 import { fetchJsonResource, useResource } from '@/lib/useResource';
-import { ageLabel, parseUsagePayload, usageForRoute, type UsagePayload } from '@/lib/usage-providers';
+import { parseUsagePayload, usageForRoute, type UsagePayload } from '@/lib/usage-providers';
 import React, { useEffect, useState } from 'react';
 import { Chip } from '@/components/ui/Chip';
 import { fetchSessionModels, selectSessionModel, type SessionModels } from '@/stores/live';
@@ -12,14 +12,14 @@ export interface ModelSelectorProps {
 const fetchUsage = async (url: string, signal: AbortSignal): Promise<UsagePayload> =>
   parseUsagePayload(await fetchJsonResource<unknown>(url, signal));
 
-/** 分组标题右侧的额度 chip:载荷未到不渲染(零编造);CodexBar 没这家 → 「无额度源」;陈旧走 amber。 */
+/** 分组标题右侧的额度 chip:载荷未到不渲染(零编造);alias 表说 CodexBar 没对接这家 → 明说;整份缓存陈旧走 amber。 */
 const UsageChip: React.FC<{ routeId: string; payload: UsagePayload | undefined }> = ({ routeId, payload }) => {
   const usage = usageForRoute(routeId, payload);
   if (usage === undefined) return null;
-  if (usage === null) return <span style={{ textTransform: 'none', letterSpacing: 0 }}>无额度源</span>;
+  if (usage === null) return <span style={{ textTransform: 'none', letterSpacing: 0 }}>CodexBar 未对接</span>;
   return (
-    <Chip variant={usage.stale ? 'amber' : 'default'} style={{ textTransform: 'none', letterSpacing: 0 }}>
-      {usage.summary} · {ageLabel(usage.ageMs)}{usage.stale ? ' · 陈旧' : ''}
+    <Chip variant={usage.freshness === 'stale' ? 'amber' : 'default'} style={{ textTransform: 'none', letterSpacing: 0 }}>
+      {usage.summary}{usage.freshness === 'stale' ? ' · 缓存陈旧' : usage.freshness === 'unknown' ? ' · 新鲜度未采集' : ''}
     </Chip>
   );
 };

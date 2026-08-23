@@ -23,6 +23,9 @@ export interface ProbeState {
   startedAt: number
   lastFrameAt: number | null
   reconnects: number
+  /** 每次 mux 开连的时刻;开连后 REPLAY_WINDOW_MS 内到达的帧算「开连回放」,另计不混进 byType。 */
+  opens: number[]
+  replayOnOpen: Record<string, number>
   /** 原始计数(含重连回放)。 */
   byType: Record<string, number>
   /** 按 rpcId 去重后的 distinct 数,只对 DEDUP_BY_RPC 两类。 */
@@ -33,14 +36,29 @@ export interface ProbeState {
   seenRpc: Record<string, string[]>
 }
 
+/**
+ * 宿主 mux 开连时会回放:pending 的 question/requested、approval/requested(rpcId 原样复用),以及 attached 会话的
+ * session/subscribed、当前 session/queue、session/jobs 基线(fresh rpcId)。后三类靠 rpcId 去不了重,
+ * 只能按「开连后一小段时间内到达」另计。实测一次开连的基线帧在 100ms 内到齐;窗口取 1s。
+ */
+export const REPLAY_WINDOW_MS = 1000
+
 export function createProbeState(startedAt: number): ProbeState {
-  return { startedAt, lastFrameAt: null, reconnects: 0, byType: {}, distinct: {}, other: {}, seenRpc: {} }
+  return { startedAt, lastFrameAt: null, reconnects: 0, opens: [], replayOnOpen: {}, byType: {}, distinct: {}, other: {}, seenRpc: {} }
+}
+
+export function recordOpen(state: ProbeState, at: number): ProbeState {
+  return { ...state, opens: [...state.opens, at] }
 }
 
 export function recordFrame(state: ProbeState, frame: { type: string; rpcId?: string }, at: number): ProbeState {
   const type = frame.type
   if (!(MUX_FRAME_TYPES as readonly string[]).includes(type)) {
     return { ...state, lastFrameAt: at, other: { ...state.other, [type]: (state.other[type] ?? 0) + 1 } }
+  }
+  const lastOpen = state.opens.at(-1)
+  if (lastOpen !== undefined && at - lastOpen <= REPLAY_WINDOW_MS) {
+    return { ...state, lastFrameAt: at, replayOnOpen: { ...state.replayOnOpen, [type]: (state.replayOnOpen[type] ?? 0) + 1 } }
   }
   const next: ProbeState = { ...state, lastFrameAt: at, byType: { ...state.byType, [type]: (state.byType[type] ?? 0) + 1 } }
   if (DEDUP_BY_RPC.has(type)) {
@@ -68,8 +86,13 @@ export function snapshot(state: ProbeState, now: number): Record<string, unknown
     uptimeMs: now - state.startedAt,
     lastFrameAt: state.lastFrameAt === null ? null : new Date(state.lastFrameAt).toISOString(),
     reconnects: state.reconnects,
+    opens: state.opens.length,
+    /** 开连 1s 内到达的帧(宿主回放的基线):不算实推。 */
+    replayOnOpen: state.replayOnOpen,
+    /** 开连窗口之外到达的帧:这才是「宿主真的在推」。 */
     byType,
     distinct: { 'question/requested': state.distinct['question/requested'] ?? 0, 'approval/requested': state.distinct['approval/requested'] ?? 0 },
+    /** 非 10 类的帧;注意契约外的 type 在 api-client 的 schema 就被丢了,不会到这里。 */
     other: state.other,
   }
 }
