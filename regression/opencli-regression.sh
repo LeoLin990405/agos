@@ -107,11 +107,20 @@ assert_text "路由面渲染" "路由档位"
 assert_text "结果行覆盖" "带完整标签"
 # W17:路由台账里真有一条影子决策行(2026-08-23 dec-1787493862865,Claude 验证 #1)时,路由页要把它标成「影子建议」;
 # 锚按台账当下有没有 mode=shadow 行选,没有就断「路由档位」已过即可。
-SHADOW_ROWS=$(curl -s --noproxy '*' 'http://127.0.0.1:3091/api/agos/routes?limit=50' | python3 -c 'import sys,json; print(sum(1 for d in json.load(sys.stdin)["decisions"] if d.get("mode")=="shadow"))' 2>/dev/null || echo 0)
-if [ "$SHADOW_ROWS" -gt 0 ] 2>/dev/null; then
-	assert_text "影子决策行渲染(shadow=$SHADOW_ROWS)" "影子建议"
-	assert_text "影子行补充句" "尚未派发或未关联批次"
-fi
+# 锚按行的真实字段选:source=selector 的影子行渲染「影子建议（未驱动派发）」,回落行渲染「影子：选择器未产出建议」;
+# 未挂批次的行渲染「尚未派发或未关联批次」,挂了的渲染「批次 b-…」。台账什么形态就断什么,正确行为不会把回归打红。
+SHADOW_KIND=$(curl -s --noproxy '*' 'http://127.0.0.1:3091/api/agos/routes?limit=50' | python3 -c '
+import sys,json
+rows=[d for d in json.load(sys.stdin)["decisions"] if d.get("mode")=="shadow"]
+if not rows: print("none"); sys.exit()
+last=rows[-1]
+print(("selector" if last.get("source")=="selector" else "fallback")+":"+("linked" if last.get("batchRef") else "unlinked"))' 2>/dev/null || echo none)
+case "$SHADOW_KIND" in
+	selector:unlinked) assert_text "影子决策行(selector,未关联)" "影子建议（未驱动派发）"; assert_text "影子行补充句" "尚未派发或未关联批次" ;;
+	selector:linked)   assert_text "影子决策行(selector,已关联)" "影子建议（未驱动派发）"; assert_text "影子行补充句" "批次 b-" ;;
+	fallback:*)        assert_text "影子决策行(回落)" "影子：选择器未产出建议" ;;
+	*) ;;
+esac
 step "开读图台账" opencli browser $S click ".console-nav-item[aria-label=\"读图台账\"]"
 sleep 6
 assert_text "读图台账渲染" "读图台账已采集"
