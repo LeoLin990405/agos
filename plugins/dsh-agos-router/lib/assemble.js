@@ -7,7 +7,7 @@ import { STATIC_FALLBACK } from './fallback.js'
 import { foldLedger } from './ledger.js'
 import { normalizeRole } from './roles.js'
 
-// 冻结文案与 ~/Projects/agos-frontend/src/components/console/routes-assemble.ts 逐字镜像;
+// 冻结文案与同仓 frontend/src/components/console/routes-assemble.ts 逐字镜像;
 // 两边各自用单测钉住字面量。类别句(这东西是什么),不是时态句 —— 「尚未试跑」那种
 // 要由前端按同屏数据算(2026-08-23 第二轮对抗验证 [2][20][42])。
 export const ASSEMBLE_COPY = '组装提案，只定角色不执行'

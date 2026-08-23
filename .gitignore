@@ -1,0 +1,6 @@
+# 软链形式的 node_modules(plugins/node_modules、根 node_modules 指向 DSH profile 的依赖树)不带尾斜杠才匹配
+node_modules
+dist
+*.log
+*.bak-*
+.DS_Store

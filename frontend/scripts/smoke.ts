@@ -8,7 +8,7 @@ import { RpcId } from '../src/contract/api/rpc.ts'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 
 const BASE = process.env.AGOS_SMOKE_BASE ?? 'http://localhost:3091'
-const CWD = process.env.AGOS_SMOKE_CWD ?? '/Users/leo/Documents/kimi/workspace/agos-frontend'
+const CWD = process.env.AGOS_SMOKE_CWD ?? `${process.env.HOME ?? ''}/Projects/agos/frontend`
 const TURN_TIMEOUT_MS = 90_000
 
 const client = createAgosClient({ baseUrl: BASE })

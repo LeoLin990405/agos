@@ -1250,7 +1250,9 @@ export function createAgosSessionRouteHandlers(manager) {
 const SPA_DIST = process.env.DSH_AGOS_DIST
   // 2026-08-21 迁出 ~/Documents:那是 macOS TCC 保护目录,未授权的进程读它会
   // 静默失败(静态路由挂起而 /api/* 照常 200),本会话真实踩中两次。~/Projects 不受 TCC 管辖。
-  ?? join(homedir(), 'Projects', 'agos-frontend', 'dist')
+  // 2026-08-24 AgOS 合成产品仓 ~/Projects/agos:前端在 frontend/;旧路径 ~/Projects/agos-frontend 留软链,
+  // 这里直接指新路径,软链只为旧进程/脚本兜底。
+  ?? join(homedir(), 'Projects', 'agos', 'frontend', 'dist')
 const SPA_MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.map': 'application/json',

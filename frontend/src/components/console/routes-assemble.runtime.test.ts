@@ -13,7 +13,8 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 type Call = { method: string; url: string; bodyKeys: string[] };
@@ -32,7 +33,9 @@ assert.notEqual(globalThis.fetch, originalFetch);
 // 钩子已装,现在才 import 被测模块。
 const fe = await import('./routes-assemble.ts');
 
-const PLUGIN = join(homedir(), '.dsh', 'profiles', 'desktop', 'plugins', 'dsh-agos-router', 'lib');
+// 2026-08-24 起插件源码与前端同仓:夹具直接 import 仓内真源 plugins/dsh-agos-router/lib(不再读 profile 的部署副本,
+// 否则写端读端分离——测的是上次部署的版本)。here = frontend/src/components/console。
+const PLUGIN = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', 'plugins', 'dsh-agos-router', 'lib');
 const assembleJs = await import(join(PLUGIN, 'assemble.js')) as {
   assembleLive: (input: unknown, deps: unknown) => Promise<Record<string, unknown>>;
   ASSEMBLE_COPY: string; LIVE_DISPATCH_OFF_COPY: string; GENERATION_NEQ_REVIEW_COPY: string; POOL_TOO_SMALL_COPY: string; ASSEMBLE_EMPTY_COPY: string;

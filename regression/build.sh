@@ -59,7 +59,7 @@ else
 fi
 
 echo "▸ 打包 SPA(自带 dist:App 包内不受 TCC 管辖,与仓库位置解耦)"
-SPA_SRC="${AGOS_SPA_DIST:-$HOME/Projects/agos-frontend/dist}"
+SPA_SRC="${AGOS_SPA_DIST:-$HOME/Projects/agos/frontend/dist}"
 if [[ -f "$SPA_SRC/index.html" ]]; then
 	rm -rf "$RES/web"; mkdir -p "$RES/web"
 	cp -R "$SPA_SRC/" "$RES/web/"
