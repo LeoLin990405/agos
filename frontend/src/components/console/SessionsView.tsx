@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useMemo, useReducer, useState, useSyncExternalStore } from 'react';
 import { Dot } from '@/components/ui/Dot';
 import { Button } from '@/components/ui/Button';
 import { formatRelative } from '@/lib/time';
 import {
+  conversationStore,
   ensureLiveConnection,
   liveConnectionStore,
   refreshSessions,
@@ -34,10 +35,26 @@ const QuietState: React.FC<{ title: string; detail: React.ReactNode }> = ({ titl
   </div>
 );
 
+/** preset 与 descriptor label 语义不同(112/112 共存会话里全不同),只能「缺席才回落」,不拼接不覆盖;label 可能是整段任务文,截到 24 字并放 title。 */
+const LABEL_CELL_LIMIT = 24;
+export function presetCell(agentPreset: string, subagentLabel: string | undefined): React.ReactNode {
+  if (agentPreset !== '') return agentPreset;
+  if (subagentLabel === undefined || subagentLabel === '') return '未采集';
+  const short = subagentLabel.length > LABEL_CELL_LIMIT ? `${subagentLabel.slice(0, LABEL_CELL_LIMIT)}…` : subagentLabel;
+  return <span title={subagentLabel}>{short}<span className="surface-quiet"> · 子代理标签</span></span>;
+}
+
 export const SessionsView: React.FC<SessionsViewProps> = ({ onSelectSession }) => {
   const [filterQuery, setFilterQuery] = useState('');
   const sessions = useSyncExternalStore(sessionsStore.subscribe, sessionsStore.getSnapshot);
   const connection = useSyncExternalStore(liveConnectionStore.subscribe, liveConnectionStore.getSnapshot);
+  // W14:Agent preset 缺席时回落到 fold header 的 subagentLabel。fold 只对打开过的会话存在,
+  // 没点开过的行仍是「未采集」——全量回落要读 session.list 行的 projections.values.subagent.label,
+  // 那在冻结的 src/stores/live.ts 里,本档不动(取舍写进 TASK-020 执行日志)。
+  const [, bump] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => conversationStore.subscribe(bump), []);
+  const subagentLabelOf = (sessionId: string): string | undefined =>
+    conversationStore.getSnapshot(sessionId).snapshot?.header?.subagentLabel;
 
   useEffect(() => {
     ensureLiveConnection();
@@ -153,7 +170,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({ onSelectSession }) =
                           #{row.sessionId}{row.cwd !== '' ? ` · ${row.cwd}` : ''}
                         </div>
                       </td>
-                      <td>{row.agentPreset !== '' ? row.agentPreset : '未采集'}</td>
+                      <td>{presetCell(row.agentPreset, subagentLabelOf(row.sessionId))}</td>
                       <td>{relative !== '' ? relative : '未采集'}</td>
                       <td className="table-cell-end">
                         <Button variant="ghost" size="sm" onClick={() => onSelectSession?.(row.sessionId)}>

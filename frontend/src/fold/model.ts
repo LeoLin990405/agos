@@ -17,6 +17,8 @@ export interface FoldedHeader {
   parentSession: string | undefined
   delegationDepth: number
   agentPreset: string | undefined
+  /** 来自 subagent/descriptor.data.label(W14);one-shot 模式 label 可缺,缺就是 undefined,不回落成 mode/provider。 */
+  subagentLabel: string | undefined
 }
 
 export interface UserItem {

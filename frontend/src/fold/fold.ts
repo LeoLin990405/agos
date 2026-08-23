@@ -10,6 +10,9 @@
  * - `agent/inbox/spliced` 是队列态不是 transcript:user 内容入队,
  *   `user/message` 才是正史(实测两者并存,inbox 先行)。
  * - 未注册类型进 diagnostics.unknown —— 回放校验要求恒空,词汇长了就显式登记。
+ * - `subagent/descriptor`(W14):每会话 ≤1 条、恒在 session 行之后(语料 256/256),
+ *   data.label 进 header.subagentLabel;one-shot 的 label 可缺(26/256),缺就保持 undefined。
+ *   原注释「谱系侧已有更好来源」不成立:/api/swarm/history 今天 records=[]。
  */
 import type {
   ApprovalItem, AssistantItem, ConversationItem, FoldDiagnostics, FoldedConversation,
@@ -24,7 +27,6 @@ const IGNORED_TYPES = new Set([
   'session/title-llm-request',
   'web/deepseek-search-llm-request',
   'llm/retry', 'llm/retry-started',
-  'subagent/descriptor', // 子代理标签,谱系侧已有更好来源
   'tool-workflow/agent-start', 'tool-workflow/agent-end',
   'tool-workflow/run-start', 'tool-workflow/run-end',
   'command/run', 'command/done',
@@ -156,6 +158,8 @@ export function createFold(): Fold {
           parentSession: asStr(event['parentSession']),
           delegationDepth: asNum(event['delegationDepth']) ?? 0,
           agentPreset: asStr(event['agentPreset']),
+          // 必须是 undefined 而不是 null/'':JSON.stringify 会丢掉它,金标 G1 的折叠产物才能逐字不变。
+          subagentLabel: undefined,
         }
         return
       }
@@ -326,6 +330,11 @@ export function createFold(): Fold {
           const tool = toolByCallId.get(callId)
           if (tool !== undefined) tool.swarm = rows.map((r) => asObj(r) as unknown as SwarmProgressRow)
         }
+        return
+      }
+      case 'subagent/descriptor': {
+        const label = asStr(data['label'])
+        if (header !== undefined && label !== undefined) header.subagentLabel = label
         return
       }
       case 'plan/mode': { planMode = true; return }

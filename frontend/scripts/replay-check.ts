@@ -10,6 +10,9 @@
  *   I4 快照可 JSON 序列化
  *   I5 流式收敛:非截断会话不得残留 streaming=true 的 assistant 条目
  *      (截断=最后事件不是 turn/end;截断会话允许)
+ *   I6 工具结果的多模态块不丢(见下,W1)
+ *   I7 subagent/descriptor 的 label 进 header.subagentLabel,且不再计进 ignored(W14):
+ *      独立从原始 JSONL 扫 descriptor 行取 data.label(last-wins),与 fold 产物严格相等
  *   金标 G1:session-7a0959af(「只回答两个字:就绪」)若在语料中,
  *      折叠结果须为 1 user + 1 assistant(text=就绪,reasoning 非空)
  */
@@ -90,6 +93,28 @@ for (const file of sessionFiles(CORPUS)) {
       for (const callId of expectBlocks) {
         if (!withBlocks.has(callId)) failures.push(`${short}: I6 工具结果的多模态块丢失 callId=${callId}`)
       }
+    }
+  }
+
+  // I7(W14):descriptor 的 label 必须出现在 header.subagentLabel;独立重扫原始 JSONL,不复用 fold 逻辑。
+  {
+    let expectLabel: string | undefined
+    let sawDescriptor = false
+    for (const line of jsonl.split('\n')) {
+      const t = line.trim()
+      if (t === '' || !t.includes('"subagent/descriptor"')) continue
+      try {
+        const e = JSON.parse(t) as { type?: string; data?: { label?: unknown } }
+        if (e.type !== 'subagent/descriptor') continue
+        sawDescriptor = true
+        if (typeof e.data?.label === 'string') expectLabel = e.data.label
+      } catch { /* 坏行由 fold 侧计 parseErrors */ }
+    }
+    if (folded.header?.subagentLabel !== expectLabel) {
+      failures.push(`${short}: I7 subagentLabel 不符 期望=${JSON.stringify(expectLabel)} 实际=${JSON.stringify(folded.header?.subagentLabel)}`)
+    }
+    if (sawDescriptor && folded.diagnostics.ignored['subagent/descriptor'] !== undefined) {
+      failures.push(`${short}: I7 subagent/descriptor 仍被计进 ignored`)
     }
   }
 
