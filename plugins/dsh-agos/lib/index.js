@@ -29,6 +29,7 @@ import {
 } from './skills-console.js'
 import { createSessionMemoryStore } from './session-memory.mjs'
 import { createYoloDecisionsRoute, defaultYoloAuditFile } from './yolo-decisions.mjs'
+import { createSessionTrashRoute, defaultDeleteLogFile, defaultDshRoot } from './session-trash.mjs'
 import { createSkillDraft, patchSkillDescription, readStudioSkill } from './skills-studio.js'
 import {
   applyOptionalRerank,
@@ -48,6 +49,7 @@ export {
 } from './skills-console.js'
 export { createSessionMemoryStore, extractSessionMemory } from './session-memory.mjs'
 export { createYoloDecisionsRoute, selectYoloDecisions, readYoloRows, defaultYoloAuditFile } from './yolo-decisions.mjs'
+export { createSessionTrashRoute, buildSessionTrashPayload, describeTrashEntry, splitTrashedTo, summarizeUnloggedRoots, readDeleteLogRows } from './session-trash.mjs'
 export {
   applyOptionalRerank,
   bindCatalogTrim,
@@ -1452,6 +1454,8 @@ export function apply(ctx) {
       ...createAgosSessionRouteHandlers(sessionManager),
       // W11:权限裁决台账只读 GET(yolo-judge.jsonl 由 yolo-mode-aligned 写,这里不碰)。
       createYoloDecisionsRoute({ file: defaultYoloAuditFile(), validateSessionId, sendJson }),
+      // W22(a):删除审计的可恢复清单只读 GET(delete.log 由本插件 appendDeleteAudit 写,这里只读、逐行 lstat)。
+      createSessionTrashRoute({ file: defaultDeleteLogFile(), dshRoot: defaultDshRoot(), sendJson }),
     ]
     disposers.push(ws.register({ kind: 'prefix', path: '/agos', handler: async (req, res) => {
       try { await serveSpa(req, res) } catch (e) { sendRouteError(res, e) }

@@ -199,7 +199,7 @@ test('apply disposes every route and starts reconciliation only once across inje
 
   const dispose = apply(ctx)
   assert.equal(typeof dispose, 'function')
-  assert.equal(registrations.length, 13)
+  assert.equal(registrations.length, 14)
   assert.equal(persistenceLists, 0)
   // Simulate Cordis satisfying the nested dependency injection after the
   // web routes are already live, then replacing a dependency implementation.
@@ -221,15 +221,16 @@ test('apply disposes every route and starts reconciliation only once across inje
     '/api/agos/session-memory',
     '/api/agos/session/delete',
     '/api/agos/yolo-decisions',
+    '/api/agos/session-trash',
   ]
-  assert.equal(registrations.length, 13)
+  assert.equal(registrations.length, 14)
   assert.deepEqual(registrations.map((entry) => entry.path), routePaths)
   dispose()
   dispose()
   assert.equal(fiberDisposals, 1)
   assert.equal(readinessFiberDisposals, 1)
   assert.equal(agentFiberDisposals, 1)
-  assert.equal(routeDisposals, 13)
+  assert.equal(routeDisposals, 14)
 })
 
 test('delete normally moves the whole session directory and appends an audit row', async (t) => {
