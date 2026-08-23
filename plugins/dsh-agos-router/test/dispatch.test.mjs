@@ -167,11 +167,24 @@ test('streamRoleText:只有 reasoning 被 max-tokens 截断 → NO_TEXT;工具�
     () => streamWith([{ type: 'tool-call-delta', index: 0, id: 'c1', name: 'bash', argumentsDelta: '{}' }, { type: 'finish', reason: { kind: 'tool-calls' } }]),
     (err) => { assert.equal(err.code, 'TOOL_CALL'); assert.deepEqual(err.detail.blockTypes, ['tool-call']); return true },
   )
-  // 宿主 blocks() 在 max-tokens 下静默滤掉 tool-call;靠 finish.kind 仍能判出来。
+  // 宿主 blocks() 在 max-tokens 下静默滤掉 tool-call;blockTypes 来自 partials 仍看得见 → 必须是 TOOL_CALL,不许退成 NO_TEXT。
   await assert.rejects(
-    () => streamWith([{ type: 'tool-call-delta', index: 0, id: 'c1', name: 'bash', argumentsDelta: '{}' }, { type: 'finish', reason: { kind: 'tool-calls' } }, { type: 'finish', reason: { kind: 'max-tokens' } }]),
-    (err) => err.code === 'TOOL_CALL' || err.code === 'NO_TEXT',
+    () => streamWith([{ type: 'tool-call-delta', index: 0, id: 'c1', name: 'bash', argumentsDelta: '{"cmd":"ls' }, { type: 'usage', usage: { inputTokens: 1, outputTokens: 256 } }, { type: 'finish', reason: { kind: 'max-tokens' } }]),
+    (err) => { assert.equal(err.code, 'TOOL_CALL'); assert.deepEqual(err.detail.blockTypes, ['tool-call']); assert.equal(err.detail.finish, 'max-tokens'); return true },
   )
+  // 文本 + 被截断的工具调用:也是 TOOL_CALL(模型的意图是调工具),不是成功行。
+  await assert.rejects(
+    () => streamWith([{ type: 'text-delta', index: 0, text: '我来看一下' }, { type: 'tool-call-delta', index: 1, id: 'c1', name: 'bash', argumentsDelta: '{' }, { type: 'finish', reason: { kind: 'max-tokens' } }]),
+    (err) => err.code === 'TOOL_CALL' && err.detail.blockTypes.join() === 'text,tool-call',
+  )
+  // 适配器自身中止 → ABORTED(不是供应商报错)。
+  await assert.rejects(
+    () => streamWith([{ type: 'finish', reason: { kind: 'aborted', failure: { code: 'ABORTED', message: 'x' } } }]),
+    (err) => err.code === 'ABORTED' && err.detail.finish === 'aborted',
+  )
+  // usage 键名是宿主的 cacheReadTokens / cacheWriteTokens。
+  const cached = await streamWith([{ type: 'text-delta', index: 0, text: 'ok' }, { type: 'usage', usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 900, cacheWriteTokens: 30, reasoningTokens: 3 } }])
+  assert.deepEqual(cached.detail.usage, { inputTokens: 10, outputTokens: 5, cacheReadTokens: 900, cacheWriteTokens: 30, reasoningTokens: 3 })
   const ok = await streamWith([{ type: 'text-delta', index: 0, text: '三步' }, { type: 'usage', usage: { inputTokens: 10, outputTokens: 5 } }])
   assert.equal(ok.text, '三步')
   assert.deepEqual(ok.detail, { blockTypes: ['text'], finish: 'stop', usage: { inputTokens: 10, outputTokens: 5 } })

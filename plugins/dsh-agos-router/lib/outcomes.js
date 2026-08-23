@@ -9,10 +9,13 @@
 //   result   只三态 'ok' | 'fail' | null
 //
 // 各源的特殊规则(每条都是数据逼出来的,不是设计偏好):
-// - route:复用 foldLedger;前两行(selector 时代)没有 id,ref 退化成 String(ts)。
+// - route:决策行复用 foldLedger;前两行(selector 时代)没有 id,ref 退化成 String(ts)。
 //   试跑(kind:'dispatch')的 turns[] 也是模型级结果,并入 kind:'route',ref = dsp-id#role,taskType = role。
+//   ⚠️ foldLedger 只保留最近一次试跑(单例);这里直接扫原始行取**全部** dispatch,否则第二次试跑一落盘
+//   第一次的回合就从派生器消失(覆盖表不单调)。
 // - council:panelists[].ok 全是 true(20/20),唯一「答错了」的信号是 flagged —— 它装的是 **provider 名**
 //   (cn-capabilities/lib/index.js:1538 `ok[n-1].provider`),按 panelists[].provider join。
+//   记录里的 kind('review' / 'vision')是台账写入管线的判别符,**不是任务类**;council 行 taskType = null。
 //   ⚠️ 语义决定:被 flag = 仲裁判它「疑似编造」,这里记成 'fail'。七字段只有三态,第四态「答了但被疑」装不下;
 //   选 fail 而不是 ok,是因为 council 是全系统唯一带「答错」信号的源,丢了就等于没有。
 // - civ:offices_detail[].ok 为 null 表示「没派任务」(24 条里 8 条),result 必须是 null 而不是 fail,
@@ -51,7 +54,8 @@ const tri = (ok) => (ok === true ? 'ok' : ok === false ? 'fail' : null)
 const row = (ts, kind, ref, agent, taskType, result, ms) => ({ ts, kind, ref, agent, taskType, result, ms })
 
 export function deriveRouteRows(rawRows) {
-  const { decisions, dispatch } = foldLedger(Array.isArray(rawRows) ? rawRows : [])
+  const rows = Array.isArray(rawRows) ? rawRows : []
+  const { decisions } = foldLedger(rows)
   const out = decisions.map((d) => row(
     tsOf(d.ts),
     'route',
@@ -61,8 +65,8 @@ export function deriveRouteRows(rawRows) {
     d.outcome === 'ok' || d.outcome === 'fail' ? d.outcome : null,
     null,
   ))
-  // 台账只保留最近一次试跑(foldLedger 单例);它的三个回合是模型级结果。
-  if (dispatch && Array.isArray(dispatch.turns)) {
+  for (const dispatch of rows) {
+    if (!dispatch || dispatch.kind !== 'dispatch' || !Array.isArray(dispatch.turns)) continue
     for (const t of dispatch.turns) {
       if (!t || typeof t !== 'object') continue
       out.push(row(tsOf(dispatch.ts), 'route', `${dispatch.id ?? dispatch.ts}#${t.role ?? '?'}`, foldAgent(t.model), typeof t.role === 'string' ? t.role : null, tri(t.ok), null))
@@ -80,7 +84,7 @@ export function deriveCouncilRows(records) {
     rec.panelists.forEach((p, i) => {
       if (!p || typeof p !== 'object') return
       const result = p.ok !== true ? tri(p.ok) : flagged.has(p.provider) ? 'fail' : 'ok'
-      out.push(row(ts, 'council', `${rec.time ?? '?'}#${i}`, foldAgent(p.model), typeof rec.kind === 'string' ? rec.kind : null, result, num(p.ms)))
+      out.push(row(ts, 'council', `${rec.time ?? '?'}#${i}`, foldAgent(p.model), null, result, num(p.ms)))
     })
   }
   return out
@@ -139,8 +143,10 @@ export function deriveOutcomeRows({ route, council, civ, plans, fleet }) {
 }
 
 /**
- * (taskType, agent) 格子覆盖表 + 「还差多少条带标签数据」。
+ * (kind, taskType, agent) 格子覆盖表。格子键**带 kind**:五家 taskType 词表互不对齐(civ 的 review 与
+ * router 的 reviewer 不是一回事),不带 kind 就是在格子里做语义合并。
  * 带标签 = taskType && agent && result 三者都在;缺哪个就计到哪一栏,一行只计一次(按缺失优先级 taskType > agent > result)。
+ * unlabeled 是「缺标签的行数」,**不是** TASK-013 的「离压过先验还差多少条观测」——那个要按后验需要量算。
  */
 export function coverageGrid(rows) {
   const cells = new Map()
@@ -153,12 +159,12 @@ export function coverageGrid(rows) {
     if (!r.agent) { missing.noAgent += 1; continue }
     if (r.result !== 'ok' && r.result !== 'fail') { missing.noResult += 1; continue }
     labeled += 1
-    const key = `${r.taskType}\t${r.agent}`
-    const cell = cells.get(key) ?? { taskType: r.taskType, agent: r.agent, ok: 0, fail: 0 }
+    const key = `${r.kind}\t${r.taskType}\t${r.agent}`
+    const cell = cells.get(key) ?? { kind: r.kind, taskType: r.taskType, agent: r.agent, ok: 0, fail: 0 }
     cell[r.result] += 1
     cells.set(key, cell)
   }
-  const list = [...cells.values()].sort((a, b) => (a.taskType + a.agent).localeCompare(b.taskType + b.agent))
+  const list = [...cells.values()].sort((a, b) => (a.kind + a.taskType + a.agent).localeCompare(b.kind + b.taskType + b.agent))
   return {
     total: rows.length,
     byKind,
@@ -171,10 +177,10 @@ export function coverageGrid(rows) {
   }
 }
 
-/** 同一 taskType 下有 ≥2 个 agent 有观测,才谈得上比较。 */
+/** 同一 (kind, taskType) 下有 ≥2 个 agent 有观测,才谈得上比较(跨 kind 不比)。 */
 function countCounterfactualCells(cells) {
   const agentsByTask = new Map()
-  for (const c of cells) agentsByTask.set(c.taskType, (agentsByTask.get(c.taskType) ?? 0) + 1)
+  for (const c of cells) { const k = `${c.kind}\t${c.taskType}`; agentsByTask.set(k, (agentsByTask.get(k) ?? 0) + 1) }
   return [...agentsByTask.values()].filter((n) => n >= 2).length
 }
 

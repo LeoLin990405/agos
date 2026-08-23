@@ -47,6 +47,8 @@ test('normal cache parses history and provider responses without probing', async
   const result = await readCodexBarUsage({ ...f, now: NOW })
   assert.equal(result.source, 'codexbar-cache')
   assert.equal(result.stale, false)
+  // 缓存文件 mtime 是「最后一次有任何刷新」的唯一可信上界;raw.capturedAt 是条目创建时间,不是采集时间。
+  assert.match(String(result.cacheMtime), /^\d{4}-\d{2}-\d{2}T/)
   assert.equal(result.error, undefined)
   assert.deepEqual(result.providers.find((p) => p.id === 'codex'), {
     id: 'codex', label: 'Codex Pro', usedPct: 25, resetAt: '2026-08-22T00:00:00.000Z', raw: { capturedAt: '2026-08-21T00:09:00.000Z' },

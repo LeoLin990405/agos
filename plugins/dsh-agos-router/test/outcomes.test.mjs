@@ -77,14 +77,15 @@ test('route:复用 foldLedger;无 id 退化 ts;outcome 行折叠成 result;试�
   assert.ok(rows.every((r) => r.kind === 'route' && r.ms === null))
 })
 
-test('council:flagged 按 provider 名 join → fail;未 flag 且 ok → ok;ok:false → fail;(see.py) 不是 agent;无 kind → taskType null', () => {
+test('council:flagged 按 provider 名 join → fail;未 flag 且 ok → ok;ok:false → fail;(see.py) 不是 agent;taskType 恒 null(kind 不是任务类)', () => {
   const rows = deriveCouncilRows(COUNCIL)
   assert.equal(rows.length, 5)
   assert.deepEqual(rows.slice(0, 3).map((r) => [r.agent, r.result, r.taskType, r.ms]), [
     ['minimax-m3', 'fail', null, 9301], ['doubao-seed-evolving', 'ok', null, 254402], ['step-3.7-flash', 'fail', null, 435611],
   ])
-  assert.deepEqual([rows[3].agent, rows[3].taskType, rows[3].result], [null, 'vision', 'ok'])
-  assert.deepEqual([rows[4].agent, rows[4].taskType, rows[4].result], ['qwen3.8-max', 'review', 'fail'])
+  // rec.kind 是写入管线的判别符,不是任务类:council 行 taskType 恒 null(第二档对抗验证 P1)。
+  assert.deepEqual([rows[3].agent, rows[3].taskType, rows[3].result], [null, null, 'ok'])
+  assert.deepEqual([rows[4].agent, rows[4].taskType, rows[4].result], ['qwen3.8-max', null, 'fail'])
   assert.equal(rows[0].ref, '2026-08-18T06:16:58.193Z#0')
   assert.equal(rows[0].ts, Date.parse('2026-08-18T06:16:58.193Z'))
 })
@@ -127,10 +128,11 @@ test('coverageGrid:带标签 = taskType&&agent&&result 三者在场;缺失按 ta
   assert.equal(g.total, 18)
   assert.equal(g.labeled + g.unlabeled, 18)
   assert.equal(g.missing.noTaskType + g.missing.noAgent + g.missing.noResult, g.unlabeled)
-  // taskType 'review' 有 minimax-m3(civ fail)与 qwen3.8-max(council fail)两个 agent → 1 个可比较的 taskType。
-  assert.equal(g.cellsWithCounterfactual, 1)
-  const impl = g.cells.find((c) => c.taskType === 'implementer' && c.agent === 'qwen3.8-max')
-  assert.deepEqual(impl, { taskType: 'implementer', agent: 'qwen3.8-max', ok: 1, fail: 1 })
+  // 格子键带 kind:civ 的 review 与 council 行(taskType null)不会并成一格;夹具里没有任何 (kind,taskType) 有两个 agent。
+  assert.equal(g.cellsWithCounterfactual, 0)
+  const impl = g.cells.find((c) => c.kind === 'route' && c.taskType === 'implementer' && c.agent === 'qwen3.8-max')
+  assert.deepEqual(impl, { kind: 'route', taskType: 'implementer', agent: 'qwen3.8-max', ok: 1, fail: 1 })
+  assert.ok(g.cells.every((c) => typeof c.kind === 'string'))
   assert.deepEqual(g.byKind, { route: 5, council: 5, civ: 3, plan: 3, fleet: 2 })
 })
 
@@ -155,4 +157,10 @@ test('readOutcomeSources:缺任一源不抛、返回空数组;读完 fleet runs.
   assert.deepEqual(Object.fromEntries(Object.entries(src).map(([k, v]) => [k, v.length])), { route: 7, council: 3, civ: 1, plans: 1, fleet: 4 })
   assert.equal(await readFile(fleetFile, 'utf8'), fleetBytes)
   assert.equal(deriveOutcomeRows(src).length, 5 + 5 + 3 + 3 + 2)
+})
+
+test('route:所有 dispatch 行的回合都进派生器,不只最近一次(覆盖表单调)', () => {
+  const second = { kind: 'dispatch', id: 'dsp-10', ts: 1787419060000, ref: 'asm-2', turns: [{ role: 'planner', model: 'glm-5.2', ok: true, text: 'y' }] }
+  const rows = deriveRouteRows([...ROUTE, second])
+  assert.deepEqual(rows.filter((r) => r.ref.startsWith('dsp-')).map((r) => r.ref), ['dsp-9#planner', 'dsp-9#implementer', 'dsp-10#planner'])
 })

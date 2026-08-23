@@ -52,7 +52,10 @@ test('路由:GET only;sessionId 经 validateSessionId;200 形状 {version, sessi
   await handler(req('GET', `/api/agos/yolo-decisions?sessionId=${S}&limit=2`), {})
   const ok = sent.at(-1)
   assert.equal(ok.status, 200)
-  assert.deepEqual(Object.keys(ok.body), ['version', 'sessionId', 'file', 'count', 'items'])
+  assert.deepEqual(Object.keys(ok.body), ['version', 'sessionId', 'file', 'fileExists', 'count', 'items'])
   assert.equal(ok.body.count, 2)
-  assert.equal(ok.body.file, file)
+  // 不回绝对路径(3091 监听 *:3091)。
+  assert.equal(ok.body.file, 'yolo-judge.jsonl')
+  assert.equal(ok.body.fileExists, true)
+  assert.doesNotMatch(JSON.stringify(ok.body), /\/Users\/|\/tmp\//)
 })

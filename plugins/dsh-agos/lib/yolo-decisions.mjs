@@ -10,7 +10,7 @@
 // - 写端 fs.promises.appendFile 无锁,读端可能读到半行:逐行 try/parse,坏行丢弃不发明。
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
 export const YOLO_FIELDS = Object.freeze(['time', 'origin', 'toolName', 'callId', 'targetMode', 'currentMode', 'justification', 'decision', 'outcome', 'reason', 'error', 'errorMessage'])
 const DEFAULT_LIMIT = 200
@@ -59,6 +59,7 @@ export function createYoloDecisionsRoute({ file, validateSessionId, sendJson }) 
     validateSessionId(sessionId)
     const limit = Number(url.searchParams.get('limit') || DEFAULT_LIMIT)
     const items = selectYoloDecisions(readYoloRows(file), sessionId, Number.isFinite(limit) ? limit : DEFAULT_LIMIT)
-    sendJson(res, 200, { version: 1, sessionId, file, count: items.length, items })
+    // 不回绝对路径(3091 监听 *:3091);只说读的是哪个文件名、存不存在。
+    sendJson(res, 200, { version: 1, sessionId, file: basename(file), fileExists: existsSync(file), count: items.length, items })
   }]
 }

@@ -1,4 +1,4 @@
-import { access, readFile } from 'node:fs/promises'
+import { access, stat, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -229,7 +229,12 @@ async function readCodexBarUsage(options = {}) {
     const providers = extractProviders(rows, history)
     const newest = newestCapture(providers)
     const staleMs = finite(options.staleMs) ?? DEFAULT_STALE_MS
-    return { at, providers, stale: newest === 0 || now.getTime() - newest > staleMs, source: SOURCE }
+    // ⚠️ raw.capturedAt 是 CFURL 缓存条目的 time_stamp:request_key UNIQUE,刷新只换 body 不更新时间戳,
+    // 所以它是「条目首次创建时间」不是采集时间(claude 条目 07-30 而 resetAt 在一小时内)。
+    // 缓存文件的 mtime 是「最后一次有任何刷新」的可信上界,单独暴露给前端算陈旧度。
+    let cacheMtime
+    try { cacheMtime = (await stat(cacheDbPath)).mtime.toISOString() } catch {}
+    return { at, providers, stale: newest === 0 || now.getTime() - newest > staleMs, source: SOURCE, ...(cacheMtime ? { cacheMtime } : {}) }
   } catch (error) {
     return { at, providers: [], stale: true, source: SOURCE, error: 'CodexBar cache could not be read: ' + String(error?.message || error) }
   }
