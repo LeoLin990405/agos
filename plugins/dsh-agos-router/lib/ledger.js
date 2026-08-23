@@ -57,6 +57,10 @@ export function foldLedger(rows) {
       notesByRef.set(ref, list)
       continue
     }
+    // W17:影子决策 ↔ fleet 批次的关联行(shadow.js 折叠),不是决策
+    if (row && row.ev === 'shadow-link') continue
+    // 任何别的 ev 行也不是决策(以后再加事件类型时别又掉进 decisions)
+    if (row && typeof row.ev === 'string') continue
     if (row && typeof row === 'object') decisions.push(row)
   }
   const folded = decisions.map((d) => {
@@ -99,20 +103,35 @@ export function publicizeDecision(row) {
   return out
 }
 
+/**
+ * 台账汇总。W17 起影子行(mode:'shadow',pick 是机器名)**单列** shadow:{total, filled, pending, suggested, agreed}:
+ * 它们的 pick 不是模型,混进 cells 会把「(角色, 模型) 格」的口径搅坏;stats.total 仍含影子行(台账真有那么多行)。
+ */
 export function summarizeOutcomes(rows) {
   const cells = new Set()
   let filled = 0
+  const shadow = { total: 0, filled: 0, pending: 0, suggested: 0, agreed: 0 }
   for (const row of rows) {
-    if (row.outcome !== null && row.outcome !== undefined) filled += 1
+    const done = row.outcome !== null && row.outcome !== undefined
+    if (done) filled += 1
+    if (row.mode === 'shadow') {
+      shadow.total += 1
+      if (done) shadow.filled += 1
+      if (typeof row.pick === 'string' && row.pick) shadow.suggested += 1
+      if (row.shadow && row.shadow.agreed === true) shadow.agreed += 1
+      continue
+    }
     const role = row.role || ''
     const model = row.pick || ''
     if (role && model) cells.add(`${role}\t${model}`)
   }
+  shadow.pending = shadow.total - shadow.filled
   return {
     total: rows.length,
     filled,
     pending: rows.length - filled,
     cells: cells.size,
+    shadow,
   }
 }
 
@@ -134,6 +153,7 @@ export function listRoutes(file, limit = 50) {
       filled: all.filled,
       pending: all.pending,
       cells: all.cells,
+      shadow: all.shadow,
     },
   }
 }

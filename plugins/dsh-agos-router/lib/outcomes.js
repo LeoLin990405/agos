@@ -184,6 +184,11 @@ function countCounterfactualCells(cells) {
   return [...agentsByTask.values()].filter((n) => n >= 2).length
 }
 
+/** fleet runs.jsonl 裸读(禁 new FleetLedger:构造即 autoCompact 重写文件)。W17 回填也用它。 */
+export function readFleetRuns(home, env = process.env) {
+  return readJsonLines(join(env.DSH_FLEET_RUNS_FILE || join(home, '.dsh', 'logs', 'fleet', 'runs.jsonl')))
+}
+
 const readJsonLines = (file) => {
   if (!existsSync(file)) return []
   const out = []

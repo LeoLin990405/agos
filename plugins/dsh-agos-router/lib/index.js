@@ -6,14 +6,8 @@
  */
 import { composeSelectorSystemPrompt, createSelector, resolveCachedSelector } from './selector-llm.js'
 import { fallbackPick } from './fallback.js'
-import {
-  appendLine,
-  buildAnnotateRecord,
-  buildDecisionRecord,
-  buildOutcomeRecord,
-  listRoutes as listRoutesFromLedger,
-  readLedgerLines,
-} from './ledger.js'
+import { appendLine, buildAnnotateRecord, buildDecisionRecord, buildOutcomeRecord, listRoutes as listRoutesFromLedger, readLedgerLines, foldLedger } from './ledger.js'
+import { shadowDecide, buildShadowLinkRecord, shadowLinks, fleetBatchStates, backfillShadowOutcomes, attachShadowLinks } from './shadow.js'
 import { ASSEMBLE_COPY as ASM_COPY, ASSEMBLE_EMPTY_COPY, allocationStateFromLedger, assembleLive, defaultPoolCandidates, LIVE_DISPATCH_OFF_COPY as LIVE_OFF } from './assemble.js'
 import { DISPATCH_COPY, DISPATCH_EMPTY_COPY, dispatchTeam, streamRoleText } from './dispatch.js'
 import { candidatesForRoute, semanticLabel } from './labels.js'
@@ -22,7 +16,7 @@ import { normalizeRole } from './roles.js'
 import { REASON_LIMIT, sanitizePreview } from './sanitize.js'
 import { normalizeConfig } from './config.js'
 import { homedir } from 'node:os'
-import { coverageGrid, deriveOutcomeRows, readOutcomeSources } from './outcomes.js'
+import { coverageGrid, deriveOutcomeRows, readOutcomeSources, readFleetRuns } from './outcomes.js'
 
 export const name = '@dsh-local/agos-router'
 export const inject = ['llm', 'settings']
@@ -241,9 +235,46 @@ export function apply(ctx, rawConfig) {
     return decide(input, { select: await getSelector(), auditFile: cfg.auditFile })
   }
 
+  /** W17 影子:一次「检查派发」= 至多一次选择器调用;候选为空不调。 */
+  async function shadowLive(body) {
+    const cfg = effectiveConfig()
+    const select = await getSelector()
+    return shadowDecide(body ?? {}, {
+      select: select ?? undefined,
+      append: (record) => appendLine(cfg.auditFile, record),
+    })
+  }
+
+  function shadowLink(body) {
+    const rec = buildShadowLinkRecord(body ?? {})
+    appendLine(effectiveConfig().auditFile, rec)
+    return rec
+  }
+
+  /** W17:GET 时回填影子决策的批次终态(只对 已挂 batchId + outcome 空 + fleet 批次已终态 的行追加 outcome 行)。 */
+  function backfillShadow(cfg) {
+    try {
+      const rows = readLedgerLines(cfg.auditFile)
+      const links = shadowLinks(rows)
+      if (links.size === 0) return 0
+      const { decisions } = foldLedger(rows)
+      const runs = readFleetRuns(homedir())
+      const pending = backfillShadowOutcomes({ decisions, links, batchStates: fleetBatchStates(runs) })
+      for (const rec of pending) appendLine(cfg.auditFile, rec)
+      return pending.length
+    } catch (err) {
+      logger.warn('影子回填失败(不影响列表)', err && err.message ? err.message : err)
+      if (process.env.SHADOW_DEBUG) console.error(err)
+      return 0
+    }
+  }
+
   function listRoutes(limit) {
     const cfg = effectiveConfig()
+    backfillShadow(cfg)
     const listed = listRoutesFromLedger(cfg.auditFile, limit)
+    const links = shadowLinks(readLedgerLines(cfg.auditFile))
+    listed.decisions = attachShadowLinks(listed.decisions, links)
     // 后验的分母写进载荷:真实观测条数与格子数,由台账算出。前端不得自称「后验再填三角色」而不给数(审查 P2-5)。
     const state = allocationStateFromLedger(readLedgerLines(cfg.auditFile))
     listed.stats.posterior = {
@@ -370,6 +401,37 @@ export function apply(ctx, rawConfig) {
           const url = new URL(req.url, 'http://x')
           const kind = url.searchParams.get('kind') || ''
           sendJson(res, 200, listOutcomes(/^[a-z]+$/.test(kind) ? kind : ''))
+        },
+      }))
+      // W17:影子选择器。POST 一次 = 至多一次模型调用;响应是台账行(publicize 后),pick 为 null 表示未产出建议。
+      disposers.push(ws.register({
+        kind: 'exact',
+        path: '/api/agos/routes/shadow',
+        handler: async (req, res) => {
+          if (req.method !== 'POST') {
+            sendJson(res, 405, { error: 'POST only' }, { allow: 'POST' })
+            return
+          }
+          try {
+            sendJson(res, 200, await shadowLive(await readBody(req)))
+          } catch (err) {
+            sendJson(res, 400, { error: String(err && err.message ? err.message : err).slice(0, 200) })
+          }
+        },
+      }))
+      disposers.push(ws.register({
+        kind: 'exact',
+        path: '/api/agos/routes/shadow/link',
+        handler: async (req, res) => {
+          if (req.method !== 'POST') {
+            sendJson(res, 405, { error: 'POST only' }, { allow: 'POST' })
+            return
+          }
+          try {
+            sendJson(res, 200, shadowLink(await readBody(req)))
+          } catch (err) {
+            sendJson(res, 400, { error: String(err && err.message ? err.message : err).slice(0, 200) })
+          }
         },
       }))
       disposers.push(ws.register({

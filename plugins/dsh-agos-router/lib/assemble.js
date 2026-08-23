@@ -49,6 +49,8 @@ export function allocationStateFromLedger(rows) {
   let state = []
   for (const row of decisions) {
     if (row.outcome !== 'ok' && row.outcome !== 'fail') continue
+    // W17:影子行的 pick 是机器,不进模型的 Beta 后验
+    if (row.mode === 'shadow') continue
     const taskType = row.label || row.taskType || row.role
     // 小写折叠:bench 键全小写,MiniMax-M3 若从 candidates 原样进来会和 minimax-m3 裂成两格。
     const agent = typeof row.pick === 'string' ? row.pick.trim().toLowerCase() : ''
