@@ -50,7 +50,8 @@ export function allocationStateFromLedger(rows) {
   for (const row of decisions) {
     if (row.outcome !== 'ok' && row.outcome !== 'fail') continue
     const taskType = row.label || row.taskType || row.role
-    const agent = row.pick
+    // 小写折叠:bench 键全小写,MiniMax-M3 若从 candidates 原样进来会和 minimax-m3 裂成两格。
+    const agent = typeof row.pick === 'string' ? row.pick.trim().toLowerCase() : ''
     if (!taskType || !agent) continue
     state = applyOutcome(state, { taskType, agent, result: row.outcome })
   }
@@ -160,6 +161,8 @@ export function buildAssembleRecord(decision, team) {
     roles: team.roles,
     notes: team.notes,
     distinct: team.distinct,
+    // 审查 P2-5:后验证据原来算完就丢,台账里看不出「这三角色是后验排的还是静态表排的」。
+    allocation: Array.isArray(team.allocation) ? team.allocation : [],
   }
 }
 

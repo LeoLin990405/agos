@@ -14,13 +14,15 @@ import {
   listRoutes as listRoutesFromLedger,
   readLedgerLines,
 } from './ledger.js'
-import { ASSEMBLE_COPY as ASM_COPY, ASSEMBLE_EMPTY_COPY, assembleLive, defaultPoolCandidates, LIVE_DISPATCH_OFF_COPY as LIVE_OFF } from './assemble.js'
+import { ASSEMBLE_COPY as ASM_COPY, ASSEMBLE_EMPTY_COPY, allocationStateFromLedger, assembleLive, defaultPoolCandidates, LIVE_DISPATCH_OFF_COPY as LIVE_OFF } from './assemble.js'
 import { DISPATCH_COPY, DISPATCH_EMPTY_COPY, dispatchTeam, streamRoleText } from './dispatch.js'
 import { candidatesForRoute, semanticLabel } from './labels.js'
 import { route } from './selector.js'
 import { normalizeRole } from './roles.js'
 import { REASON_LIMIT, sanitizePreview } from './sanitize.js'
 import { normalizeConfig } from './config.js'
+import { homedir } from 'node:os'
+import { coverageGrid, deriveOutcomeRows, readOutcomeSources } from './outcomes.js'
 
 export const name = '@dsh-local/agos-router'
 export const inject = ['llm', 'settings']
@@ -38,6 +40,7 @@ export { rankAgentsExploring, applyOutcome } from './allocation-score.js'
 export { normalizeConfig } from './config.js'
 export { normalizeRole, CLOSED_ROLES } from './roles.js'
 export { buildAnnotateRecord } from './ledger.js'
+export { coverageGrid, deriveOutcomeRows, readOutcomeSources, foldAgent, OUTCOME_KINDS, OUTCOME_FIELDS } from './outcomes.js'
 export {
   ASSEMBLE_COPY,
   LIVE_DISPATCH_OFF_COPY,
@@ -239,7 +242,22 @@ export function apply(ctx, rawConfig) {
   }
 
   function listRoutes(limit) {
-    return listRoutesFromLedger(effectiveConfig().auditFile, limit)
+    const cfg = effectiveConfig()
+    const listed = listRoutesFromLedger(cfg.auditFile, limit)
+    // 后验的分母写进载荷:真实观测条数与格子数,由台账算出。前端不得自称「后验再填三角色」而不给数(审查 P2-5)。
+    const state = allocationStateFromLedger(readLedgerLines(cfg.auditFile))
+    listed.stats.posterior = {
+      observations: state.reduce((n, e) => n + e.s + e.f, 0),
+      cells: state.length,
+    }
+    return listed
+  }
+
+  /** W10:五家台账 → 七字段结果行 + 覆盖表。纯读。 */
+  function listOutcomes(kind) {
+    const rows = deriveOutcomeRows(readOutcomeSources({ auditFile: effectiveConfig().auditFile, home: homedir() }))
+    const filtered = kind ? rows.filter((r) => r.kind === kind) : rows
+    return { at: Date.now(), rows: filtered, grid: coverageGrid(filtered) }
   }
 
   function recordOutcome(body) {
@@ -339,6 +357,19 @@ export function apply(ctx, rawConfig) {
           } catch (err) {
             sendJson(res, 400, { error: String(err && err.message ? err.message : err).slice(0, 200) })
           }
+        },
+      }))
+      disposers.push(ws.register({
+        kind: 'exact',
+        path: '/api/agos/routes/outcomes',
+        handler: async (req, res) => {
+          if (req.method !== 'GET') {
+            sendJson(res, 405, { error: 'GET only' }, { allow: 'GET' })
+            return
+          }
+          const url = new URL(req.url, 'http://x')
+          const kind = url.searchParams.get('kind') || ''
+          sendJson(res, 200, listOutcomes(/^[a-z]+$/.test(kind) ? kind : ''))
         },
       }))
       disposers.push(ws.register({

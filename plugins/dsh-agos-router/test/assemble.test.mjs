@@ -96,6 +96,9 @@ test('assembleLive writes a proposal and never marks it dispatched', async () =>
   const listed = listRoutes(file, 50)
   assert.equal(listed.stats.total, 1)
   assert.equal(listed.assemble.note, ASSEMBLE_COPY)
+  // 审查 P2-5:后验证据落盘,台账里能看出三角色是怎么排的。
+  assert.ok(Array.isArray(listed.assemble.allocation) && listed.assemble.allocation.length > 0)
+  assert.ok(listed.assemble.allocation.every((a) => typeof a.model === 'string' && typeof a.score === 'number'))
   assert.equal(listed.decisions[0].task, undefined)
 })
 
@@ -106,4 +109,14 @@ test('冻结文案字面量钉死：与 agos-frontend routes-assemble.ts 逐字�
   assert.equal(ASSEMBLE_EMPTY_COPY, '还没有组装提案')
   assert.equal(GENERATION_NEQ_REVIEW_COPY, 'generation≠review：评审模型必须和实现模型不同')
   assert.equal(POOL_TOO_SMALL_COPY, '候选池不够，未能做到 generation≠review')
+})
+
+test('allocationStateFromLedger:pick 小写折叠,MiniMax-M3 与 minimax-m3 进同一格', () => {
+  const rows = [
+    { id: 'dec-1', ts: 1, label: 'reviewer', pick: 'MiniMax-M3', outcome: null },
+    { kind: 'outcome', ref: 'dec-1', result: 'ok', at: 2 },
+    { id: 'dec-2', ts: 3, label: 'reviewer', pick: 'minimax-m3', outcome: null },
+    { kind: 'outcome', ref: 'dec-2', result: 'fail', at: 4 },
+  ]
+  assert.deepEqual(allocationStateFromLedger(rows), [{ taskType: 'reviewer', agent: 'minimax-m3', s: 1, f: 1 }])
 })
