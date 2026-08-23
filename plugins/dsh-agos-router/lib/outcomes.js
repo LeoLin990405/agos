@@ -56,7 +56,8 @@ const row = (ts, kind, ref, agent, taskType, result, ms) => ({ ts, kind, ref, ag
 export function deriveRouteRows(rawRows) {
   const rows = Array.isArray(rawRows) ? rawRows : []
   const { decisions } = foldLedger(rows)
-  const out = decisions.map((d) => row(
+  // W17:影子行的 pick 是机器不是模型,不进 (kind, taskType, agent) 格——它有自己的 stats.shadow
+  const out = decisions.filter((d) => d.mode !== 'shadow').map((d) => row(
     tsOf(d.ts),
     'route',
     String(d.id ?? d.ts ?? ''),
@@ -186,7 +187,8 @@ function countCounterfactualCells(cells) {
 
 /** fleet runs.jsonl 裸读(禁 new FleetLedger:构造即 autoCompact 重写文件)。W17 回填也用它。 */
 export function readFleetRuns(home, env = process.env) {
-  return readJsonLines(join(env.DSH_FLEET_RUNS_FILE || join(home, '.dsh', 'logs', 'fleet', 'runs.jsonl')))
+  // 与 dsh-fleet 同一环境变量(index.js:885 DSH_FLEET_LEDGER_PATH);DSH_FLEET_RUNS_FILE 只是本包测试夹具用
+  return readJsonLines(join(env.DSH_FLEET_RUNS_FILE || env.DSH_FLEET_LEDGER_PATH || join(home, '.dsh', 'logs', 'fleet', 'runs.jsonl')))
 }
 
 const readJsonLines = (file) => {

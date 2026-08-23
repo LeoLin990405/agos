@@ -7,7 +7,7 @@ import { join } from 'node:path'
 
 import {
   buildShadowCandidates, summarizeShadowTask, buildShadowInput, buildShadowRecord, shadowDecide,
-  buildShadowLinkRecord, shadowLinks, fleetBatchStates, backfillShadowOutcomes, attachShadowLinks,
+  buildShadowLinkRecord, shadowLinks, fleetBatchStates, fleetBatchRuns, hostOutcomeInBatch, shadowAdopted, backfillShadowOutcomes, attachShadowLinks, isShadowDecisionRef,
   SHADOW_MODE, SHADOW_LINK_EV, SHADOW_OUTCOME_SOURCE,
 } from '../lib/shadow.js'
 import { foldLedger, summarizeOutcomes, readLedgerLines } from '../lib/ledger.js'
@@ -83,61 +83,78 @@ test('shadowDecide:未配置/抛错/成功 三态各写一行;候选空不写不
   assert.ok(appended.every((r) => r.mode === SHADOW_MODE))
 })
 
-test('关联行与回填:fold 不把 shadow-link 当决策;批次全部 end 才算终态;ok 全真才 ok;已回填不重复', () => {
+test('关联行与回填:fold 不把 shadow-link 当决策;只看建议那台机器上的 run;reroute 以最终机器为准;cancel/reattach 也是终态;已回填不重复', () => {
   const link = buildShadowLinkRecord({ ref: 'dec-1787000000000-abcdef12', batchId: 'b-f785f00d-8463-4369-9a02-4bf6dc7e3024', hosts: ['knowledge-m4', 'leo-01', 'leo-01', '../x'] })
   assert.equal(link.ev, SHADOW_LINK_EV); assert.deepEqual(link.hosts, ['knowledge-m4', 'leo-01'])
   assert.throws(() => buildShadowLinkRecord({ ref: 'x', batchId: 'b-1' }), /dec-/)
   assert.throws(() => buildShadowLinkRecord({ ref: 'dec-1-a', batchId: 'r-1' }), /b-/)
+  const B1 = 'b-f785f00d-8463-4369-9a02-4bf6dc7e3024'
+  const B2 = 'b-22222222-0000-4000-8000-000000000000'
   const rows = [
     { id: 'dec-1787000000000-abcdef12', ts: 1, mode: 'shadow', role: 'implementer', pick: 'leo-01', taskType: 'fleet-dispatch', source: 'selector', outcome: null, shadow: { chosen: [], agreed: null } },
     { id: 'dec-1787000000000-abcdef13', ts: 2, mode: 'shadow', role: 'implementer', pick: null, taskType: 'fleet-dispatch', source: 'fallback', outcome: null, shadow: { chosen: [], agreed: null } },
+    { id: 'dec-1787000000000-abcdef14', ts: 2, mode: 'shadow', role: 'implementer', pick: 'knowledge-m4', taskType: 'fleet-dispatch', source: 'selector', outcome: null, shadow: { chosen: [], agreed: null } },
     { id: 'dec-9', ts: 3, role: 'coder', pick: 'qwen3.8-max', taskType: 'coder', source: 'selector', outcome: null },
     link,
-    { ev: 'shadow-link', ref: 'dec-1787000000000-abcdef13', batchId: 'b-22222222-0000-4000-8000-000000000000', hosts: ['leo-01'], at: 3 },
+    { ev: 'shadow-link', ref: 'dec-1787000000000-abcdef13', batchId: B2, hosts: ['leo-01'], at: 3 },
+    { ev: 'shadow-link', ref: 'dec-1787000000000-abcdef14', batchId: B2, hosts: ['leo-01'], at: 3 },
     { ev: 'annotate', ref: 'dec-9', note: 'n', at: 4 },
   ]
   const { decisions } = foldLedger(rows)
-  assert.deepEqual(decisions.map((d) => d.id), ['dec-1787000000000-abcdef12', 'dec-1787000000000-abcdef13', 'dec-9'], 'ev 行不是决策')
+  assert.deepEqual(decisions.map((d) => d.id), ['dec-1787000000000-abcdef12', 'dec-1787000000000-abcdef13', 'dec-1787000000000-abcdef14', 'dec-9'], 'ev 行不是决策')
   const links = shadowLinks(rows)
-  assert.deepEqual(links.get('dec-1787000000000-abcdef12'), { batchId: 'b-f785f00d-8463-4369-9a02-4bf6dc7e3024', hosts: ['knowledge-m4', 'leo-01'] })
-  // 照 runs.jsonl 实测形状:dispatch 行带 host,end 行带 ok/exit
+  assert.deepEqual(links.get('dec-1787000000000-abcdef12'), { batchId: B1, hosts: ['knowledge-m4', 'leo-01'] })
+  // 照 runs.jsonl 实测形状:dispatch 行带 host,end 行带 ok/exit;reroute 改机器;cancel 也是终态
   const runs = [
-    { ev: 'dispatch', batchId: 'b-f785f00d-8463-4369-9a02-4bf6dc7e3024', runId: 'r-1', host: 'knowledge-m4', at: 1 },
-    { ev: 'dispatch', batchId: 'b-f785f00d-8463-4369-9a02-4bf6dc7e3024', runId: 'r-2', host: 'leo-01', at: 1 },
-    { ev: 'end', batchId: 'b-f785f00d-8463-4369-9a02-4bf6dc7e3024', runId: 'r-1', ok: true, exit: 0, at: 2 },
-    { ev: 'dispatch', batchId: 'b-22222222-0000-4000-8000-000000000000', runId: 'r-3', host: 'leo-01', at: 1 },
-    { ev: 'end', batchId: 'b-22222222-0000-4000-8000-000000000000', runId: 'r-3', ok: false, exit: 1, at: 2 },
+    { ev: 'dispatch', batchId: B1, runId: 'r-1', host: 'knowledge-m4', at: 1 },
+    { ev: 'dispatch', batchId: B1, runId: 'r-2', host: 'leo-01', at: 1 },
+    { ev: 'end', batchId: B1, runId: 'r-1', ok: false, exit: 1, at: 2 },
+    { ev: 'end', batchId: B1, runId: 'r-2', ok: true, exit: 0, at: 2 },
+    // B2:派发响应说 leo-01,唤醒失败改派 knowledge-m4,随后取消
+    { ev: 'dispatch', batchId: B2, runId: 'r-3', host: 'leo-01', at: 1 },
+    { ev: 'reroute', batchId: B2, runId: 'r-3', host: 'knowledge-m4', at: 2 },
+    { ev: 'cancel', batchId: B2, runId: 'r-3', reason: 'user', at: 3 },
   ]
-  const states = fleetBatchStates(runs)
-  assert.deepEqual(states.get('b-f785f00d-8463-4369-9a02-4bf6dc7e3024'), { ended: false, ok: false, runs: 2, endedRuns: 1 }, 'r-2 还没 end → 未终态')
-  assert.deepEqual(states.get('b-22222222-0000-4000-8000-000000000000'), { ended: true, ok: false, runs: 1, endedRuns: 1 })
-  // abcdef13 的 pick 是 null(回落行)→ 判不了采用 → 不回填;abcdef12 批次未终态 → 不回填
-  assert.deepEqual(backfillShadowOutcomes({ decisions, links, batchStates: states }), [])
-  // 把 abcdef13 改成有 pick 且被采用(leo-01 ∈ hosts)→ 回填 fail
-  const adoptedRows = rows.map((r) => (r.id === 'dec-1787000000000-abcdef13' ? { ...r, pick: 'leo-01', source: 'selector' } : r))
-  const fills = backfillShadowOutcomes({ decisions: foldLedger(adoptedRows).decisions, links, batchStates: states })
-  assert.equal(fills.length, 1)
-  assert.equal(fills[0].ref, 'dec-1787000000000-abcdef13'); assert.equal(fills[0].result, 'fail'); assert.equal(fills[0].source, SHADOW_OUTCOME_SOURCE)
-  // 建议没被采用(pick 不在实际机器里)→ 终态也不回填:批次成败不是建议的对错
-  const notAdopted = rows.map((r) => (r.id === 'dec-1787000000000-abcdef13' ? { ...r, pick: 'knowledge-m4', source: 'selector' } : r))
-  assert.deepEqual(backfillShadowOutcomes({ decisions: foldLedger(notAdopted).decisions, links, batchStates: states }), [])
-  rows.splice(0, rows.length, ...adoptedRows)
-  // 回填后再算:该行 outcome 已填 → 不再产出
+  const batchRuns = fleetBatchRuns(runs)
+  assert.deepEqual(fleetBatchStates(runs).get(B1), { ended: true, ok: false, runs: 2, endedRuns: 2, hosts: ['knowledge-m4', 'leo-01'] })
+  assert.deepEqual(hostOutcomeInBatch(batchRuns.get(B1), 'leo-01'), { present: true, ended: true, ok: true }, '同批 knowledge-m4 失败不归到 leo-01 头上')
+  assert.deepEqual(hostOutcomeInBatch(batchRuns.get(B1), 'agent-m4'), { present: false, ended: false, ok: false })
+  assert.deepEqual(hostOutcomeInBatch(batchRuns.get(B2), 'leo-01'), { present: false, ended: false, ok: false }, 'reroute 后 leo-01 上没有 run')
+  assert.deepEqual(hostOutcomeInBatch(batchRuns.get(B2), 'knowledge-m4'), { present: true, ended: true, ok: false }, 'cancel 是终态,算 fail')
+  const fills = backfillShadowOutcomes({ decisions, links, batchRuns })
+  assert.deepEqual(fills.map((f) => [f.ref, f.result, f.source]), [
+    ['dec-1787000000000-abcdef12', 'ok', SHADOW_OUTCOME_SOURCE],   // 建议 leo-01,leo-01 上的 run ok
+    ['dec-1787000000000-abcdef14', 'fail', SHADOW_OUTCOME_SOURCE], // 建议 knowledge-m4,reroute 后真跑在它上面并被取消
+  ], 'abcdef13 无 pick 不回填')
   const folded2 = foldLedger([...rows, ...fills])
-  assert.equal(folded2.decisions[1].outcome, 'fail')
-  assert.deepEqual(backfillShadowOutcomes({ decisions: folded2.decisions, links, batchStates: states }), [])
-  // 非 shadow 决策即便挂了 link 也不回填
-  assert.deepEqual(backfillShadowOutcomes({ decisions, links: new Map([['dec-9', 'b-22222222-0000-4000-8000-000000000000']]), batchStates: states }), [])
-  const attached = attachShadowLinks(folded2.decisions, links)
-  assert.equal(attached[0].batchRef, 'b-f785f00d-8463-4369-9a02-4bf6dc7e3024'); assert.equal(attached[0].adopted, true); assert.deepEqual(attached[0].actualHosts, ['knowledge-m4', 'leo-01'])
-  assert.equal(attached[1].adopted, true); assert.equal(attached[2].batchRef, undefined)
-  // 汇总:影子行单列,不进 (角色,模型) 格;后验也不吃机器
+  assert.equal(folded2.decisions[0].outcome, 'ok'); assert.equal(folded2.decisions[2].outcome, 'fail')
+  assert.deepEqual(backfillShadowOutcomes({ decisions: folded2.decisions, links, batchRuns }), [], '已回填不重复')
+  assert.deepEqual(backfillShadowOutcomes({ decisions, links: new Map([['dec-9', { batchId: B1, hosts: ['leo-01'] }]]), batchRuns }), [], '非 shadow 决策不回填')
+  const attached = attachShadowLinks(folded2.decisions, links, batchRuns)
+  assert.equal(attached[0].batchRef, B1); assert.equal(attached[0].adopted, true); assert.deepEqual(attached[0].actualHosts, ['knowledge-m4', 'leo-01'])
+  assert.equal(attached[1].adopted, null, '无 pick 判不了')
+  assert.deepEqual(attached[2].actualHosts, ['knowledge-m4'], 'actualHosts 以 runs.jsonl 最终机器为准,不信派发快照 leo-01')
+  assert.equal(attached[2].adopted, true)
+  assert.equal(attached[3].batchRef, undefined)
+  // runs 里还没这个批次 → 退回快照
+  assert.equal(shadowAdopted('leo-01', { batchId: 'b-x', hosts: ['leo-01'] }, undefined), true)
+  assert.equal(shadowAdopted('leo-02', { batchId: 'b-x', hosts: ['leo-01'] }, undefined), false)
+  // 汇总:影子行单列,不进 (角色,模型) 格;后验也不吃机器;pending 只算模型路由行
   const stats = summarizeOutcomes(folded2.decisions)
   assert.equal(stats.cells, 1, '只有 dec-9 的 coder/qwen 格')
-  assert.equal(stats.pending, 1, 'pending 只算模型路由行(dec-9),影子行不进')
-  assert.equal(stats.total, 3)
-  assert.deepEqual(stats.shadow, { total: 2, filled: 1, pending: 1, suggested: 2, agreed: 0 }, 'abcdef13 已改成有 pick')
-  assert.deepEqual(allocationStateFromLedger([...rows, ...fills]), [], 'fail 的影子行不进 Beta 后验')
+  assert.equal(stats.pending, 1); assert.equal(stats.total, 4)
+  assert.deepEqual(stats.shadow, { total: 3, filled: 2, pending: 1, suggested: 2, agreed: 0 })
+  assert.deepEqual(allocationStateFromLedger([...rows, ...fills]), [], '影子行不进 Beta 后验')
+  assert.equal(isShadowDecisionRef(rows, 'dec-1787000000000-abcdef12'), true); assert.equal(isShadowDecisionRef(rows, 'dec-9'), false)
+})
+
+test('W10 派生器不把影子行当 route 行(机器名不进 (kind,taskType,agent) 格)', async () => {
+  const { deriveRouteRows } = await import('../lib/outcomes.js')
+  const rows = deriveRouteRows([
+    { id: 'dec-1', ts: 1, mode: 'shadow', role: 'implementer', pick: 'knowledge-m4', taskType: 'fleet-dispatch', source: 'selector', outcome: null },
+    { id: 'dec-2', ts: 2, role: 'coder', pick: 'qwen3.8-max', taskType: 'coder', source: 'selector', outcome: null },
+  ])
+  assert.deepEqual(rows.map((r) => r.ref), ['dec-2'])
 })
 
 // ── apply() 真跑:路由注册、影子 POST 零模型(provider 空 → 未配置)、link、GET 回填 ──
@@ -179,8 +196,10 @@ test('apply():POST /routes/shadow 未配置选择器时写 fallback 行(零模�
 
   assert.equal((await call(routes.get('/api/agos/routes/shadow'), 'GET', '/api/agos/routes/shadow')).status, 405)
   const skipped = await call(routes.get('/api/agos/routes/shadow'), 'POST', '/api/agos/routes/shadow', { items: ['a'], hosts: [] })
-  assert.equal(skipped.status, 200); assert.equal(skipped.body.skipped, true)
-  assert.equal((await readFile(audit, 'utf8')).trim(), '', '候选空不写台账')
+  assert.equal(skipped.status, 200); assert.equal(skipped.body.skipped, true); assert.equal(skipped.body.reason, 'NO_CANDIDATES')
+  const noItems = await call(routes.get('/api/agos/routes/shadow'), 'POST', '/api/agos/routes/shadow', { items: ['  '], hosts: HOSTS })
+  assert.equal(noItems.body.skipped, true); assert.equal(noItems.body.reason, 'NO_ITEMS')
+  assert.equal((await readFile(audit, 'utf8')).trim(), '', '候选空/任务空都不写台账')
 
   const made = await call(routes.get('/api/agos/routes/shadow'), 'POST', '/api/agos/routes/shadow', { items: ['写 README'], hosts: HOSTS, chosen: ['leo-01'] })
   assert.equal(made.status, 200)
@@ -215,6 +234,9 @@ test('apply():POST /routes/shadow 未配置选择器时写 fallback 行(零模�
   const filled = listed.body.decisions.find((d) => d.id === okId)
   assert.equal(filled.outcome, 'ok'); assert.equal(filled.outcomeSource, 'fleet-end'); assert.equal(filled.adopted, true)
   assert.equal(listed.body.decisions.find((d) => d.id === id).outcome, null, '回落行不回填')
+  // 手工胜负写到影子行 → 400
+  const manual = await call(routes.get('/api/agos/routes/outcome'), 'POST', '/api/agos/routes/outcome', { ref: id, result: 'ok', source: 'manual' })
+  assert.equal(manual.status, 400); assert.match(manual.body.error, /影子决策行只接受 fleet 终态回填/)
   assert.deepEqual(listed.body.stats.shadow, { total: 2, filled: 1, pending: 1, suggested: 1, agreed: 1 })
   const lines = readLedgerLines(audit)
   assert.equal(lines.filter((r) => r.kind === 'outcome').length, 1)

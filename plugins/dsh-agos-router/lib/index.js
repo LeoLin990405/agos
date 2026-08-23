@@ -7,7 +7,7 @@
 import { composeSelectorSystemPrompt, createSelector, resolveCachedSelector } from './selector-llm.js'
 import { fallbackPick } from './fallback.js'
 import { appendLine, buildAnnotateRecord, buildDecisionRecord, buildOutcomeRecord, listRoutes as listRoutesFromLedger, readLedgerLines, foldLedger } from './ledger.js'
-import { shadowDecide, buildShadowLinkRecord, shadowLinks, fleetBatchStates, backfillShadowOutcomes, attachShadowLinks } from './shadow.js'
+import { shadowDecide, buildShadowLinkRecord, shadowLinks, fleetBatchRuns, backfillShadowOutcomes, attachShadowLinks, isShadowDecisionRef } from './shadow.js'
 import { ASSEMBLE_COPY as ASM_COPY, ASSEMBLE_EMPTY_COPY, allocationStateFromLedger, assembleLive, defaultPoolCandidates, LIVE_DISPATCH_OFF_COPY as LIVE_OFF } from './assemble.js'
 import { DISPATCH_COPY, DISPATCH_EMPTY_COPY, dispatchTeam, streamRoleText } from './dispatch.js'
 import { candidatesForRoute, semanticLabel } from './labels.js'
@@ -259,7 +259,7 @@ export function apply(ctx, rawConfig) {
       if (links.size === 0) return 0
       const { decisions } = foldLedger(rows)
       const runs = readFleetRuns(homedir())
-      const pending = backfillShadowOutcomes({ decisions, links, batchStates: fleetBatchStates(runs) })
+      const pending = backfillShadowOutcomes({ decisions, links, batchRuns: fleetBatchRuns(runs) })
       for (const rec of pending) appendLine(cfg.auditFile, rec)
       return pending.length
     } catch (err) {
@@ -274,7 +274,7 @@ export function apply(ctx, rawConfig) {
     backfillShadow(cfg)
     const listed = listRoutesFromLedger(cfg.auditFile, limit)
     const links = shadowLinks(readLedgerLines(cfg.auditFile))
-    listed.decisions = attachShadowLinks(listed.decisions, links)
+    listed.decisions = attachShadowLinks(listed.decisions, links, links.size > 0 ? fleetBatchRuns(readFleetRuns(homedir())) : new Map())
     // 后验的分母写进载荷:真实观测条数与格子数,由台账算出。前端不得自称「后验再填三角色」而不给数(审查 P2-5)。
     const state = allocationStateFromLedger(readLedgerLines(cfg.auditFile))
     listed.stats.posterior = {
@@ -293,7 +293,14 @@ export function apply(ctx, rawConfig) {
 
   function recordOutcome(body) {
     const rec = buildOutcomeRecord(body)
-    appendLine(effectiveConfig().auditFile, rec)
+    const file = effectiveConfig().auditFile
+    // W17:影子行的 outcome 只来自 fleet-end 回填;手工写入会把人工胜负记到建议头上
+    if (isShadowDecisionRef(readLedgerLines(file), rec.ref)) {
+      const error = new Error('影子决策行只接受 fleet 终态回填,不接受手工胜负')
+      error.code = 'SHADOW_MANUAL_OUTCOME'
+      throw error
+    }
+    appendLine(file, rec)
     return rec
   }
 
