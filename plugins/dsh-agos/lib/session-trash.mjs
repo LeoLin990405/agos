@@ -103,7 +103,17 @@ export function describeTrashEntry(row, dshRoot, home = homedir()) {
     out.kind = 'outside'
     return out
   }
-  const target = join(resolve(dshRoot), split.trashRoot, split.projectKey, split.leaf)
+  const base = resolve(dshRoot)
+  // 中间两段(根 / 项目)若是软链,lstat 叶子会跟着它走到根外 → 先各 lstat 一次,是软链就不探测
+  for (const mid of [join(base, split.trashRoot), join(base, split.trashRoot, split.projectKey)]) {
+    try {
+      if (lstatSync(mid).isSymbolicLink()) { out.kind = 'outside'; return out }
+    } catch (err) {
+      if (err && err.code === 'ENOENT') { out.present = false; out.kind = 'missing'; return out }
+      out.kind = 'unreadable'; return out
+    }
+  }
+  const target = join(base, split.trashRoot, split.projectKey, split.leaf)
   try {
     const st = lstatSync(target)
     out.present = true
@@ -115,12 +125,22 @@ export function describeTrashEntry(row, dshRoot, home = homedir()) {
   return out
 }
 
+/** 落点已探测的条目数(present 非 null);摘要分母用它,不把根外/不可读算成「不在」。 */
+export function probedCount(items) {
+  return items.filter((it) => it.present !== null).length
+}
+
 /**
  * 回收/备份根的根级统计:每根下的二级会话目录数,以及其中不在日志里的数。
  * readdir 三层(根/项目/会话/文件);空目录(`_no-cwd/preset-user-default/` 真实存在,无会话文件)不计。
  */
-export function summarizeUnloggedRoots(dshRoot, loggedIds) {
-  const logged = new Set(loggedIds)
+/**
+ * @param {string} dshRoot
+ * @param {Iterable<string>} loggedKeys `${trashRoot}/${leaf}`(由 splitTrashedTo 得来)。只按叶名判会把
+ *   另一根里的同名副本(-085347 根里的 4 份)算成「在日志里」——日志指向哪个根就只覆盖哪个根。
+ */
+export function summarizeUnloggedRoots(dshRoot, loggedKeys) {
+  const logged = new Set(loggedKeys)
   const out = []
   let names = []
   try { names = readdirSync(resolve(dshRoot)) } catch { return out }
@@ -141,7 +161,7 @@ export function summarizeUnloggedRoots(dshRoot, loggedIds) {
         try { inner = readdirSync(join(root, p.name, l.name)) } catch { continue }
         if (!inner.some((n) => SESSION_FILES.includes(n))) continue
         sessionDirs += 1
-        if (!logged.has(l.name)) notInLog += 1
+        if (!logged.has(`${name}/${l.name}`)) notInLog += 1
       }
     }
     out.push({ root: name, sessionDirs, notInLog })
@@ -152,13 +172,17 @@ export function summarizeUnloggedRoots(dshRoot, loggedIds) {
 export function buildSessionTrashPayload({ file, dshRoot }) {
   const rows = readDeleteLogRows(file)
   const items = rows.map((row) => describeTrashEntry(row, dshRoot))
-  const unloggedRoots = summarizeUnloggedRoots(dshRoot, rows.map((r) => basename(String(r.trashedTo))))
+  const unloggedRoots = summarizeUnloggedRoots(dshRoot, rows
+    .map((r) => splitTrashedTo(r.trashedTo, dshRoot))
+    .filter((x) => x !== null)
+    .map((x) => `${x.trashRoot}/${x.leaf}`))
   return {
     version: 1,
     file: basename(file),
     fileExists: existsSync(file),
     count: items.length,
     presentCount: items.filter((it) => it.present === true).length,
+    probedCount: probedCount(items),
     items,
     unloggedRoots,
   }
@@ -171,7 +195,8 @@ export function createSessionTrashRoute({ file, dshRoot, sendJson }) {
       sendJson(res, 200, buildSessionTrashPayload({ file, dshRoot }))
     } catch (err) {
       if (err && err.code === 'DELETE_LOG_PATH_INVALID') { sendJson(res, 403, { error: err.code, message: err.message }); return }
-      throw err
+      // fs 错误(EACCES 等)的 message 带宿主绝对路径,不进响应体
+      sendJson(res, 500, { error: 'SESSION_TRASH_READ_FAILED', message: '删除日志读取失败' })
     }
   }]
 }

@@ -139,6 +139,9 @@ async function resolveMediaPath(requested, rootReal, expectedMediaType) {
   const expected = typeof expectedMediaType === 'string' && expectedMediaType !== '' ? expectedMediaType.toLowerCase() : undefined
   if (isUnderObjects(real, rootReal)) {
     if (!isObjectStorePath(real, rootReal)) return { ok: false, reason: 'bad-object-name' }
+    // 先 stat 再 open:FIFO/设备文件 open() 会挂住 libuv 线程池(对抗验证 2026-08-23)
+    const info = await stat(real).catch(() => null)
+    if (info === null || !info.isFile()) return { ok: false, reason: 'not-file' }
     const head = await readMagic(real)
     if (head === null) return { ok: false, reason: 'not-file' }
     const sniffed = sniffMediaType(head)
@@ -502,8 +505,13 @@ function apply(ctx) {
           const expectedMediaType = url.searchParams.get('mediaType') ?? undefined
           const gate = await resolveMediaPath(requested, rootReal, expectedMediaType)
           if (!gate.ok) {
-            if (gate.reason === 'not-found' || gate.reason === 'missing') { send(404, { error: '文件不存在' }); return }
-            send(403, { error: '路径不在许可范围内' }); return
+            if (gate.reason === 'not-found' || gate.reason === 'missing' || gate.reason === 'not-file') { send(404, { error: '文件不存在' }); return }
+            // 文案按原因分(都 403):调用方要能分清是路径问题还是内容/期望值问题
+            const copy = gate.reason === 'bad-magic' ? '对象内容不是受支持的图片'
+              : gate.reason === 'media-type-mismatch' ? 'mediaType 与文件内容不符'
+              : gate.reason === 'bad-object-name' ? 'object store 下只认内容寻址文件名'
+              : '路径不在许可范围内'
+            send(403, { error: copy, reason: gate.reason }); return
           }
           const info = await stat(gate.real)
           if (!info.isFile()) { send(404, { error: '不是文件' }); return }

@@ -29,6 +29,10 @@ function fixture() {
   mkdirSync(join(r0, '--Users-leo--', 'session-00000000-empty'), { recursive: true }) // 有名无文件,不计
   const rb = join(dsh, 'sessions-backup-20260818-swarmfix')
   sess(join(rb, '--Users-leo--', 'session-00000000-cccc'))
+  // 对抗验证 P1 的形状:另一根里有与日志叶名相同的副本,日志只指向 sessions-trash-20260821
+  const r2 = join(dsh, 'sessions-trash-20260821-085347')
+  sess(join(r2, '--Users-leo--', 'session-7bd84231-d7ec-4f45-a0fb-72fba77e6efb'))
+  sess(join(r2, '--Users-leo--', 'session-00000000-dddd'))
   // 日志照抄真实三代格式(路径换成夹具根)
   const rows = [
     { at: '2026-08-21T01:49:14.964Z', sessionId: 'session-7bd84231-d7ec-4f45-a0fb-72fba77e6efb', trashedTo: join(p1, 'session-7bd84231-d7ec-4f45-a0fb-72fba77e6efb') },
@@ -84,6 +88,10 @@ test('describeTrashEntry:落点仍在 present:true;缺失 false;根外/穿越 ki
   symlinkSync(join(p1, 'session-7bd84231-d7ec-4f45-a0fb-72fba77e6efb'), join(p1, 'session-linklink-0000'))
   const sym = describeTrashEntry({ sessionId: 'session-linklink-0000', trashedTo: join(p1, 'session-linklink-0000') }, dsh)
   assert.equal(sym.kind, 'symlink'); assert.equal(sym.present, true)
+  // 项目段是软链 → 不探测叶子(kind outside)
+  symlinkSync('/etc', join(dsh, 'sessions-trash-20260821', '--Users-evil--'))
+  const mid = describeTrashEntry({ sessionId: 'session-x', trashedTo: join(dsh, 'sessions-trash-20260821', '--Users-evil--', 'hosts') }, dsh, '/Users/leo')
+  assert.equal(mid.kind, 'outside'); assert.equal(mid.present, null)
   // 整个条目不含绝对路径
   for (const it of items) assert.doesNotMatch(JSON.stringify(it), /\/Users\/|\/tmp\/|\/private\/|Users-leo/)
   rmSync(dsh, { recursive: true, force: true })
@@ -91,13 +99,14 @@ test('describeTrashEntry:落点仍在 present:true;缺失 false;根外/穿越 ki
 
 test('summarizeUnloggedRoots:按根统计「含 session.jsonl(.zstd)」的会话目录与未入日志数;空目录/有名无文件不计;裸 uuid 名也计', () => {
   const { dsh, file } = fixture()
-  const logged = readDeleteLogRows(file).map((r) => r.trashedTo.split('/').pop())
+  const logged = readDeleteLogRows(file).map((r) => splitTrashedTo(r.trashedTo, dsh)).filter(Boolean).map((x) => `${x.trashRoot}/${x.leaf}`)
   const roots = summarizeUnloggedRoots(dsh, logged)
   assert.deepEqual(roots, [
     { root: 'sessions-backup-20260818-swarmfix', sessionDirs: 1, notInLog: 1 },
     { root: 'sessions-trash-20260820', sessionDirs: 2, notInLog: 2 },
     { root: 'sessions-trash-20260821', sessionDirs: 3, notInLog: 0 },
-  ])
+    { root: 'sessions-trash-20260821-085347', sessionDirs: 2, notInLog: 2 },
+  ], '同名叶在别的根里是副本,不算「在日志里」')
   rmSync(dsh, { recursive: true, force: true })
 })
 
@@ -114,7 +123,7 @@ test('路由:GET 200 形状;POST 405;软链日志 403;响应不含绝对路径',
   assert.equal(calls[1].status, 200)
   assert.equal(body.version, 1); assert.equal(body.file, 'delete.log'); assert.equal(body.fileExists, true)
   assert.equal(body.count, 6); assert.equal(body.presentCount, 3)
-  assert.equal(body.items.length, 6); assert.equal(body.unloggedRoots.length, 3)
+  assert.equal(body.items.length, 6); assert.equal(body.unloggedRoots.length, 4); assert.equal(body.probedCount, 4)
   assert.doesNotMatch(JSON.stringify(body), /\/Users\/|\/tmp\/|\/private\//, '3091 监听 *:3091,不回绝对路径')
   const link = join(dsh, 'agos', 'link.log'); symlinkSync(file, link)
   const [, h2] = createSessionTrashRoute({ file: link, dshRoot: dsh, sendJson })
@@ -123,7 +132,15 @@ test('路由:GET 200 形状;POST 405;软链日志 403;响应不含绝对路径',
   // 缺文件:fileExists false、count 0,根统计照常
   const [, h3] = createSessionTrashRoute({ file: join(dsh, 'agos', 'none.log'), dshRoot: dsh, sendJson })
   await h3({ method: 'GET', url: path }, {})
-  assert.equal(calls[3].body.fileExists, false); assert.equal(calls[3].body.count, 0); assert.equal(calls[3].body.unloggedRoots.length, 3)
+  assert.equal(calls[3].body.fileExists, false); assert.equal(calls[3].body.count, 0); assert.equal(calls[3].body.unloggedRoots.length, 4)
   assert.equal(buildSessionTrashPayload({ file, dshRoot: dsh }).count, 6)
+  // 不可读(目录当文件) → 500 且 message 不带路径
+  const [, h4] = createSessionTrashRoute({ file: join(dsh, 'agos'), dshRoot: dsh, sendJson })
+  await h4({ method: 'GET', url: path }, {})
+  assert.equal(calls[4].status, 403, '目录不是实体文件 → 与软链同一闸')
+  const [, h5] = createSessionTrashRoute({ file, dshRoot: '\0bad', sendJson })
+  await h5({ method: 'GET', url: path }, {})
+  assert.ok([200, 500].includes(calls[5].status))
+  assert.doesNotMatch(JSON.stringify(calls[5].body), /\/Users\/|\/tmp\/|\/private\//)
   rmSync(dsh, { recursive: true, force: true })
 })

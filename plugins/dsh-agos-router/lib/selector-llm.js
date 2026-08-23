@@ -103,6 +103,7 @@ function extractFirstBalancedObject(text) {
 function extractJsonObject(text) {
   // 2026-08-23(TASK-017 W21)已以 patch 形式搬进 yolo-mode-aligned/lib/policy.js extractJsonObject(text, requiredField),
   // 那边目标字段是 decision、这边是 pick;两边各自留副本不抽公共包(yolo 有独立上游)。改一边记得看另一边。
+  // 差异:yolo 侧取**最后一个**合法对象(裁判会回显输入/契约模板,都在真裁决之前);这边取第一个,pick 还要 ∈ allowedIds。
   // 剥掉**全部**围栏标记(不是只取第一个围栏的内容),再逐个候选试配平对象。
   const stripped = String(text).replace(/```(?:json)?/gi, '')
   let rest = stripped
