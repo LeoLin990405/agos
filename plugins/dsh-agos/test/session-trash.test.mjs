@@ -17,16 +17,18 @@ function fixture() {
   const r1 = join(dsh, 'sessions-trash-20260821')
   const p1 = join(r1, '--Users-leo-Documents-kimi-workspace-agos-frontend--')
   const p2 = join(r1, '--Users-leo--')
-  mkdirSync(join(p1, 'session-7bd84231-d7ec-4f45-a0fb-72fba77e6efb'), { recursive: true })
-  mkdirSync(join(p1, 'session-ae769c4c-75a9-4e20-b229-38fe67dd4ae2'), { recursive: true })
+  const sess = (dir) => { mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, 'session.jsonl.zstd'), '') }
+  sess(join(p1, 'session-7bd84231-d7ec-4f45-a0fb-72fba77e6efb'))
+  sess(join(p1, 'session-ae769c4c-75a9-4e20-b229-38fe67dd4ae2'))
   // 第三条的落点已不在(模拟被手动清掉)
-  mkdirSync(join(p2, 'session-beb5a334-bf2a-4709-bc05-4f8356e39de3'), { recursive: true })
+  sess(join(p2, 'session-beb5a334-bf2a-4709-bc05-4f8356e39de3'))
   const r0 = join(dsh, 'sessions-trash-20260820')
-  mkdirSync(join(r0, '--Users-leo--', 'session-00000000-aaaa'), { recursive: true })
-  mkdirSync(join(r0, '--Users-leo--', 'session-00000000-bbbb'), { recursive: true })
+  sess(join(r0, '--Users-leo--', 'session-00000000-aaaa'))
+  sess(join(r0, '--Users-leo--', '0c1d2e3f-0000-4000-8000-000000000000')) // 子代理会话:裸 uuid 名,也是会话
   mkdirSync(join(r0, '_no-cwd', 'preset-user-default'), { recursive: true }) // 真实存在的空目录,不是会话
+  mkdirSync(join(r0, '--Users-leo--', 'session-00000000-empty'), { recursive: true }) // 有名无文件,不计
   const rb = join(dsh, 'sessions-backup-20260818-swarmfix')
-  mkdirSync(join(rb, '--Users-leo--', 'session-00000000-cccc'), { recursive: true })
+  sess(join(rb, '--Users-leo--', 'session-00000000-cccc'))
   // 日志照抄真实三代格式(路径换成夹具根)
   const rows = [
     { at: '2026-08-21T01:49:14.964Z', sessionId: 'session-7bd84231-d7ec-4f45-a0fb-72fba77e6efb', trashedTo: join(p1, 'session-7bd84231-d7ec-4f45-a0fb-72fba77e6efb') },
@@ -87,7 +89,7 @@ test('describeTrashEntry:落点仍在 present:true;缺失 false;根外/穿越 ki
   rmSync(dsh, { recursive: true, force: true })
 })
 
-test('summarizeUnloggedRoots:按根统计二级会话目录与未入日志数;空目录与非 session- 目录不计', () => {
+test('summarizeUnloggedRoots:按根统计「含 session.jsonl(.zstd)」的会话目录与未入日志数;空目录/有名无文件不计;裸 uuid 名也计', () => {
   const { dsh, file } = fixture()
   const logged = readDeleteLogRows(file).map((r) => r.trashedTo.split('/').pop())
   const roots = summarizeUnloggedRoots(dsh, logged)

@@ -14,14 +14,15 @@
 //   标 kind:'outside' 且不探测(不把日志内容当路径探针)。lstat 不跟软链;落点是软链也标出来。
 // - delete.log 自身若是软链 → 拒读(与写端对称)。
 //
-// 诚实:sessions-trash-20260820(393 个二级目录)等更早的批量清理**不在日志里**;unloggedRoots 按根级统计
+// 诚实:sessions-trash-20260820(393 个二级目录,392 个带 session.jsonl.zstd)等更早的批量清理**不在日志里**;unloggedRoots 按根级统计
 // 「该根下有多少会话目录、其中多少不在日志里」,数字由接口实算,界面不写死 394。
 import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 export const TRASH_FIELDS = Object.freeze(['at', 'sessionId', 'trashedTo', 'projcachePruned', 'projcacheReason', 'sessionMemoryPruned'])
-const SESSION_DIR_RE = /^session-[0-9a-f-]{8,}$/i
+/** 会话目录的判据是「里面有 session.jsonl(.zstd)」:回收站里 session-<uuid> 与裸 <uuid>(子代理)两种名字并存,按名字会漏掉 256/393。 */
+const SESSION_FILES = ['session.jsonl.zstd', 'session.jsonl']
 const ROOT_RE = /^sessions-(trash|backup)-/
 
 export function defaultDeleteLogFile(env = process.env) {
@@ -116,7 +117,7 @@ export function describeTrashEntry(row, dshRoot, home = homedir()) {
 
 /**
  * 回收/备份根的根级统计:每根下的二级会话目录数,以及其中不在日志里的数。
- * 只 readdir 两层;空目录(`_no-cwd/preset-user-default/` 真实存在)算 0 不算错。
+ * readdir 三层(根/项目/会话/文件);空目录(`_no-cwd/preset-user-default/` 真实存在,无会话文件)不计。
  */
 export function summarizeUnloggedRoots(dshRoot, loggedIds) {
   const logged = new Set(loggedIds)
@@ -135,7 +136,10 @@ export function summarizeUnloggedRoots(dshRoot, loggedIds) {
       let leaves = []
       try { leaves = readdirSync(join(root, p.name), { withFileTypes: true }) } catch { continue }
       for (const l of leaves) {
-        if (!l.isDirectory() || !SESSION_DIR_RE.test(l.name)) continue
+        if (!l.isDirectory()) continue
+        let inner = []
+        try { inner = readdirSync(join(root, p.name, l.name)) } catch { continue }
+        if (!inner.some((n) => SESSION_FILES.includes(n))) continue
         sessionDirs += 1
         if (!logged.has(l.name)) notInLog += 1
       }
