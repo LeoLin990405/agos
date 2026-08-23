@@ -72,6 +72,10 @@ done
 step "回概览" opencli browser $S click ".console-nav-item[aria-label=\"概览遥测\"]"
 sleep 3
 assert_text "额度台账渲染" "后端全局 stale="
+# W16:收件箱副标题由来源状态算出;「来源:」后面跟的是已采集来源名,载荷没到时是「未采集:」。
+# 锚「条路由决策待回填结果」只在 /api/agos/routes 到达且 pending>0 时出现(今天 7)。
+assert_text "收件箱路由分支渲染" "条路由决策待回填结果"
+assert_text "收件箱来源行渲染" "来源:谱系进度"
 
 print "\n▸ 4 记忆星图"
 step "进星图" opencli browser $S click ".app-rail button[aria-label=\"记忆\"]"
