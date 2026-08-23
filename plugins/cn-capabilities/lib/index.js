@@ -4,7 +4,7 @@ import z from '@deepseek-ai/schemastery'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createReadStream } from 'node:fs'
-import { appendFile, mkdir, readdir, readFile, realpath, stat, unlink, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, open as openFile, readdir, readFile, realpath, stat, unlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { tmpdir } from 'node:os'
 import { basename, dirname, extname, join, sep } from 'node:path'
@@ -69,13 +69,86 @@ const MEDIA_EXT_MIME = {
   '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4',
   '.ogg': 'audio/ogg', '.flac': 'audio/flac',
 }
-async function resolveMediaPath(requested, rootReal) {
+// 图片魔数表(模块级:saveImageAttachment 与 media 闸共用一张,别复制)。
+// 只覆盖 store 实际会落盘的光栅格式;音频不嗅(object store 里没有音频)。
+const IMAGE_MAGIC = [
+  [[0x89, 0x50, 0x4e, 0x47], 'image/png'],
+  [[0xff, 0xd8, 0xff], 'image/jpeg'],
+  [[0x47, 0x49, 0x46, 0x38], 'image/gif'],
+]
+const MAGIC_BYTES = 12 // WEBP 判定要看到第 12 字节
+const sniffMediaType = (buf) => {
+  for (const [magic, type] of IMAGE_MAGIC) {
+    if (magic.every((b, i) => buf[i] === b)) return type
+  }
+  // WEBP = "RIFF" .... "WEBP"
+  if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
+      buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return 'image/webp'
+  return null
+}
+
+// W19(TASK-017 第三档):v1 object store 的内容寻址文件(~/.dsh/attachments/v1/objects/<hex[0:2]>/<sha256 hex>)
+// 没有扩展名 → 旧闸一律 bad-ext → 归档会话里的图片块回放不了。
+// 规则:只有「在 objects 子树下、文件名是裸 64 位 hex、父目录名 == hex[0:2]」才走魔数嗅探;
+// objects 子树下任何**带点的**名字(<hex>.png、<hex>.txt.png、<hex>.png.txt)都不是 store 写的 → 拒,
+// 不再落回扩展名白名单(否则「双扩展」只是复述白名单)。
+const OBJECTS_SUBDIR = join('v1', 'objects')
+const OBJECT_HEX_RE = /^[0-9a-f]{64}$/
+const ATTACHMENT_ID_RE = /^sha256:([0-9a-f]{64})$/
+function isObjectStorePath(real, rootReal) {
+  const objectsReal = join(rootReal, OBJECTS_SUBDIR)
+  if (!real.startsWith(objectsReal + sep)) return false
+  const name = basename(real)
+  return OBJECT_HEX_RE.test(name) && basename(dirname(real)) === name.slice(0, 2)
+}
+function isUnderObjects(real, rootReal) {
+  return real.startsWith(join(rootReal, OBJECTS_SUBDIR) + sep)
+}
+/** attachmentId(`sha256:<hex>`)→ 根内 object 路径;用户输入永远不进文件系统路径的拼接。形状不对 → null。 */
+function objectPathForAttachmentId(attachmentId, root) {
+  const m = typeof attachmentId === 'string' ? ATTACHMENT_ID_RE.exec(attachmentId) : null
+  if (m === null) return null
+  return join(root, OBJECTS_SUBDIR, m[1].slice(0, 2), m[1])
+}
+/** 读头 MAGIC_BYTES 字节;目录(open 成功、read EISDIR)/无权限一律回 null。 */
+async function readMagic(real) {
+  let fh = null
+  try {
+    fh = await openFile(real, 'r')
+    const buf = Buffer.alloc(MAGIC_BYTES)
+    const { bytesRead } = await fh.read(buf, 0, MAGIC_BYTES, 0)
+    return buf.subarray(0, bytesRead)
+  } catch {
+    return null
+  } finally {
+    if (fh !== null) await fh.close().catch(() => {})
+  }
+}
+
+/**
+ * @param {string} requested 宿主机路径(或由 attachmentId 拼出的 object 路径)
+ * @param {string} rootReal 附件根 realpath
+ * @param {string|undefined} expectedMediaType 调用方声称的 mediaType:**只当期望值校验**,与嗅探/扩展名不等 → 拒;
+ *   绝不替代嗅探成为 content-type 来源。
+ */
+async function resolveMediaPath(requested, rootReal, expectedMediaType) {
   if (typeof requested !== 'string' || requested.trim() === '') return { ok: false, reason: 'missing' }
   const real = await realpath(requested).catch(() => null)
   if (real === null) return { ok: false, reason: 'not-found' }
   if (real !== rootReal && !real.startsWith(rootReal + sep)) return { ok: false, reason: 'outside-root' }
+  const expected = typeof expectedMediaType === 'string' && expectedMediaType !== '' ? expectedMediaType.toLowerCase() : undefined
+  if (isUnderObjects(real, rootReal)) {
+    if (!isObjectStorePath(real, rootReal)) return { ok: false, reason: 'bad-object-name' }
+    const head = await readMagic(real)
+    if (head === null) return { ok: false, reason: 'not-file' }
+    const sniffed = sniffMediaType(head)
+    if (sniffed === null) return { ok: false, reason: 'bad-magic' }
+    if (expected !== undefined && expected !== sniffed) return { ok: false, reason: 'media-type-mismatch' }
+    return { ok: true, real, mime: sniffed }
+  }
   const mime = MEDIA_EXT_MIME[extname(real).toLowerCase()]
   if (mime === undefined) return { ok: false, reason: 'bad-ext' }
+  if (expected !== undefined && expected !== mime) return { ok: false, reason: 'media-type-mismatch' }
   return { ok: true, real, mime }
 }
 
@@ -203,20 +276,7 @@ function apply(ctx) {
   // 把本地图片存进 DSH 的 attachment 服务,拿到可放进 ImageBlock 的持久引用。
   // 用 ctx.get() 而不是写进 inject:attachments 缺失时只降级成纯文字,不会拖垮插件加载。
   // 任何一步失败都返回 null —— 调用方据此回退到"只给文字描述"的老行为。
-  const IMAGE_MAGIC = [
-    [[0x89, 0x50, 0x4e, 0x47], 'image/png'],
-    [[0xff, 0xd8, 0xff], 'image/jpeg'],
-    [[0x47, 0x49, 0x46, 0x38], 'image/gif'],
-  ]
-  const sniffMediaType = (buf) => {
-    for (const [magic, type] of IMAGE_MAGIC) {
-      if (magic.every((b, i) => buf[i] === b)) return type
-    }
-    // WEBP = "RIFF" .... "WEBP"
-    if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
-        buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return 'image/webp'
-    return null
-  }
+  // IMAGE_MAGIC / sniffMediaType 已上提到模块作用域(W19 与 media 闸共用一张表)。
   const saveImageAttachment = async (imagePath) => {
     try {
       if (/^https?:\/\//i.test(imagePath)) return null   // 远端 URL 不落盘,交给视觉后端自己取
@@ -412,7 +472,8 @@ function apply(ctx) {
   // ── /api/cn/media:speak/generate_image 产物的只读 HTTP 面(W2)──────────
   // 前端拿到的是宿主机文件路径字符串 —— 既播不了也下载不了。这条路由把它变成
   // 可流式播放的 URL。三道闸:① realpath 后必须在 ~/.dsh/attachments 之下
-  // ② 扩展名白名单 ③ Range 支持(音频拖进度条)。纯读,零模型成本。
+  // ② 扩展名白名单;v1/objects 子树改为「裸 sha256 名 + 魔数嗅探」(W19),&mediaType= 只当期望值校验
+  // ③ Range 支持(音频拖进度条)。纯读,零模型成本。
   const mediaRoute = () => {
     const ws = ctx.get('webServer')
     if (ws === undefined || typeof ws.register !== 'function') return
@@ -427,10 +488,19 @@ function apply(ctx) {
         if (req.method !== 'GET' && req.method !== 'HEAD') { send(405, { error: 'GET only' }); return }
         try {
           const url = new URL(req.url || '', 'http://localhost')
-          const requested = url.searchParams.get('path') ?? ''
           const rootReal = await realpath(MEDIA_ROOT).catch(() => null)
           if (rootReal === null) { send(404, { error: '附件根不存在' }); return }
-          const gate = await resolveMediaPath(requested, rootReal)
+          // W19:&attachmentId=sha256:<hex> 由服务端拼 object 路径(零用户路径);否则走 &path=。
+          const attachmentId = url.searchParams.get('attachmentId')
+          let requested
+          if (attachmentId !== null) {
+            requested = objectPathForAttachmentId(attachmentId, MEDIA_ROOT)
+            if (requested === null) { send(400, { error: 'attachmentId 形状不对' }); return }
+          } else {
+            requested = url.searchParams.get('path') ?? ''
+          }
+          const expectedMediaType = url.searchParams.get('mediaType') ?? undefined
+          const gate = await resolveMediaPath(requested, rootReal, expectedMediaType)
           if (!gate.ok) {
             if (gate.reason === 'not-found' || gate.reason === 'missing') { send(404, { error: '文件不存在' }); return }
             send(403, { error: '路径不在许可范围内' }); return
@@ -2569,4 +2639,4 @@ const PROVIDER_DEFAULT_MODEL = {
   return () => { disposers.forEach((d) => d()) }
 }
 
-export { Config, apply, inject, name, resolveMediaPath, MEDIA_ROOT }
+export { Config, apply, inject, name, resolveMediaPath, MEDIA_ROOT, objectPathForAttachmentId, isObjectStorePath, sniffMediaType }
