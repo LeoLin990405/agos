@@ -2,6 +2,7 @@
  * console-live —— 控制台概览的真值层。
  * 字段缺席与真实的 0 是两种状态；前者必须诚实显示为「未采集」。
  */
+import { UsageBand } from '@/components/console/UsageBand';
 import React, { useMemo, useSyncExternalStore } from 'react';
 import { Dot } from '@/components/ui/Dot';
 import { Button } from '@/components/ui/Button';
@@ -284,6 +285,8 @@ export const RealOverview: React.FC<{
         </div>
       </div>
     </section>
+
+    <UsageBand enabled={live.live} />
 
     <section className="surface-section" aria-label="产品入口">
       <h3 className="surface-h3">工作室与组装</h3>

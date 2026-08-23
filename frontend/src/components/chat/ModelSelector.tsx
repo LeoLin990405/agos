@@ -1,3 +1,5 @@
+import { fetchJsonResource, useResource } from '@/lib/useResource';
+import { ageLabel, parseUsagePayload, usageForRoute, type UsagePayload } from '@/lib/usage-providers';
 import React, { useEffect, useState } from 'react';
 import { Chip } from '@/components/ui/Chip';
 import { fetchSessionModels, selectSessionModel, type SessionModels } from '@/stores/live';
@@ -7,10 +9,27 @@ export interface ModelSelectorProps {
   sessionId: string | undefined;
 }
 
+const fetchUsage = async (url: string, signal: AbortSignal): Promise<UsagePayload> =>
+  parseUsagePayload(await fetchJsonResource<unknown>(url, signal));
+
+/** 分组标题右侧的额度 chip:载荷未到不渲染(零编造);CodexBar 没这家 → 「无额度源」;陈旧走 amber。 */
+const UsageChip: React.FC<{ routeId: string; payload: UsagePayload | undefined }> = ({ routeId, payload }) => {
+  const usage = usageForRoute(routeId, payload);
+  if (usage === undefined) return null;
+  if (usage === null) return <span style={{ textTransform: 'none', letterSpacing: 0 }}>无额度源</span>;
+  return (
+    <Chip variant={usage.stale ? 'amber' : 'default'} style={{ textTransform: 'none', letterSpacing: 0 }}>
+      {usage.summary} · {ageLabel(usage.ageMs)}{usage.stale ? ' · 陈旧' : ''}
+    </Chip>
+  );
+};
+
 export const ModelSelector: React.FC<ModelSelectorProps> = ({ sessionId }) => {
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<SessionModels>({ current: undefined, groups: [] });
   const [busy, setBusy] = useState(false);
+  // W13:额度独立于 session.models 的 effect;只在面板打开时轮询。
+  const usage = useResource<UsagePayload>({ url: '/api/usage/providers', enabled: open, intervalMs: 60_000, fetcher: fetchUsage });
 
   useEffect(() => {
     if (sessionId === undefined) { setData({ current: undefined, groups: [] }); return; }
@@ -79,8 +98,9 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({ sessionId }) => {
           )}
           {data.groups.map((g) => (
             <div key={g.provider}>
-              <div style={{ padding: '8px 10px 4px', fontSize: '10.5px', letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--text-dimmed)' }}>
-                {g.provider} · {g.models.length}
+              <div style={{ padding: '8px 10px 4px', fontSize: '10.5px', letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--text-dimmed)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                <span>{g.provider} · {g.models.length}</span>
+                <UsageChip routeId={g.provider} payload={usage.data} />
               </div>
               {g.models.map((m) => {
                 const isCurrent = data.current?.provider === g.provider && data.current?.model === m.id;
