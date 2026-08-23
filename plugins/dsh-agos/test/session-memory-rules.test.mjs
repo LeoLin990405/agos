@@ -51,15 +51,16 @@ export function score(rows) {
   const failures = []
   for (const row of rows) {
     const pred = predictKind(row)
-    const want = row.label.kind
     const persistent = row.label.scope === 'persistent'
-    const ok = pred.kind === want && (pred.kind === null || persistent)
+    // 期望产出:persistent 才该被抽成该 kind;turn 与 null 的期望都是「不抽」。
+    const want = persistent ? row.label.kind : null
+    const ok = pred.kind === want
     if (ok) pass += 1
-    else failures.push({ id: row.id, text: row.text.slice(0, 60), want: want ? `${want}/${row.label.scope}` : 'null', got: pred.kind ?? 'null' })
+    else failures.push({ id: row.id, text: row.text.slice(0, 60), want: row.label.kind ? `${row.label.kind}/${row.label.scope}` : 'null', got: pred.kind ?? 'null' })
     if (pred.importance === 5) { imp5 += 1; if (persistent && pred.kind === want) imp5Persistent += 1 }
     for (const k of kinds) {
       const p = pred.kind === k
-      const w = want === k && persistent
+      const w = want === k
       if (p && w) per[k].tp += 1
       else if (p && !w) per[k].fp += 1
       else if (!p && w) per[k].fn += 1

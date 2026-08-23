@@ -21,7 +21,7 @@
 
 ## 通过判定
 一行 = 一个事件喂 `extractSessionMemory(events, {now, header})`,预测 kind 取产出 item 的 kind(无则 null)。
-**pass = 预测 kind === label.kind 且(预测非空时)label.scope === 'persistent'**。
+**期望 = scope 为 persistent 时取 label.kind,否则 null(turn 指令与 null 的期望都是「不抽」);pass = 预测 kind === 期望**。
 另报每 kind 的 P/R/F1 与「imp=5 条目里 persistent 占比」,只看不进门。
 
 ## 门(`acceptEdit`,逐字移植 fugue self-harness-accept 的思路)
