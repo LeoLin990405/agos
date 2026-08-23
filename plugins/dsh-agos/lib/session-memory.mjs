@@ -98,6 +98,8 @@ function splitCandidates(text) {
     .map((part) => part.trim())
     .filter(Boolean)
 }
+/** W20 尺专用:把切分器原样暴露给语料挖矿器,保证语料里的「句」与规则看到的「句」同一口径。不改行为。 */
+export const splitCandidatesForCorpus = splitCandidates
 
 function classifyUserText(text) {
   if (/^(?:已排除|排除|放弃)\s*[:：]?/u.test(text)

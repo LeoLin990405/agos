@@ -1,0 +1,13 @@
+{
+  "inTotal": 198,
+  "outTotal": 198,
+  "inPass": 144,
+  "outPass": 138,
+  "assistant": {
+    "total": 43,
+    "pass": 41
+  },
+  "corpusSha256": "bafa1933a956ecb88453c9ce0890f6351a81eeb3b91bcc918b34c7a14f8987d0",
+  "rulesNote": "现规则(W20 改动前):只看文本不看来源;祈使句即 constraint imp5",
+  "acceptedAt": "2026-08-23T10:38:17.445Z"
+}
