@@ -209,6 +209,8 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
                 setActiveTab('skills');
               }}
               onNavigateAssemble={() => setActiveTab('routes')}
+              onNavigateSkills={() => setActiveTab('skills')}
+              onNavigateCouncil={() => setActiveTab('ledger')}
             />
           )}
         </div>

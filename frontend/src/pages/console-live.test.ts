@@ -155,3 +155,120 @@ test('overview lamp and collected time distinguish ready, pending, and unavailab
   assert.equal(formatCollectedAt(Number.NaN), '时间未采集');
   assert.notEqual(formatCollectedAt(1_755_700_000_000), '时间未采集');
 });
+
+// ---------------------------------------------------------------- W16 收件箱多台账汇合
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { inboxFromCouncil, inboxFromRoutes, inboxFromSkillsDrift, sortInbox } from './console-live.tsx';
+import { AttentionInbox, inboxEmptyText, inboxSubtitle } from '@/components/console/AttentionInbox';
+import type { RoutesPayload } from '@/components/console/routes-model';
+import type { CouncilRecord } from '@/components/console/council-ledger-model';
+
+// 三源 fixture 照 2026-08-23 18:xx 实测形状(GET /api/agos/routes stats、/api/cn/council-records 记录、overview.skills 组)写字面量
+const routesLive: RoutesPayload = {
+  at: 1787480000000,
+  decisions: [],
+  stats: { total: 8, window: 8, limit: 50, filled: 1, pending: 7, cells: 5, posterior: { observations: 1, cells: 1 } },
+};
+const councilFlagged: CouncilRecord = {
+  kind: undefined, time: '2026-08-18T06:52:21.966Z', question: 'Python 的 GIL 在 3.13 里发生了什么变化?', arbiter: 'stepfun',
+  parsedOk: true, consensus: false, inconclusive: undefined, verdict: undefined, disagreements: undefined,
+  flagged: ['doubao 与 stepfun 结论相反'], imagePath: undefined, panelists: [],
+};
+const councilClean: CouncilRecord = { ...councilFlagged, question: '干净记录', flagged: [] };
+const skillsOverview = {
+  skills: { skills: 746, warn: 172, error: 0, at: 1787479651013, consistency: { duplicateNames: 359, drifted: 59, summary: '359 个 skill 在多根重复，其中 59 个内容不一致' } },
+};
+
+test('W16 inboxFromRoutes: pending>0 才产出一条 warning,口径是 stats.pending 不是窗口长度;未采集不产出', () => {
+  const [item] = inboxFromRoutes(routesLive);
+  assert.ok(item);
+  assert.equal(item.type, 'warning');
+  assert.equal(item.source, 'routes');
+  assert.match(item.title, /^7 条路由决策待回填结果$/);
+  assert.match(item.description, /不是待审批/);
+  assert.deepEqual(inboxFromRoutes({ ...routesLive, stats: { ...routesLive.stats, pending: 0 } }), []);
+  assert.deepEqual(inboxFromRoutes(undefined), []);
+});
+
+test('W16 inboxFromSkillsDrift: drifted>0 产出一条;skills 组缺席或 drifted 为 0 不产出', () => {
+  const [item] = inboxFromSkillsDrift(skillsOverview);
+  assert.ok(item);
+  assert.equal(item.source, 'skills');
+  assert.equal(item.title, '59 个 skill 多根内容不一致');
+  assert.equal(item.description, '359 个 skill 在多根重复，其中 59 个内容不一致');
+  assert.deepEqual(inboxFromSkillsDrift(undefined), []);
+  assert.deepEqual(inboxFromSkillsDrift({ skills: { skills: 1, consistency: { drifted: 0 } } }), []);
+  assert.deepEqual(inboxFromSkillsDrift({ skills: { skills: 1 } }), [], 'consistency 缺席 = 未采集,不是 0');
+});
+
+test('W16 inboxFromCouncil: flagged 非空每条一项;kind 缺席写「类型未采集」;time 转绝对时间;干净记录不产出', () => {
+  const items = inboxFromCouncil([councilClean, councilFlagged, { ...councilFlagged, time: undefined }]);
+  assert.equal(items.length, 2);
+  assert.match(items[0]!.title, /^评审被标记:Python 的 GIL/);
+  assert.match(items[0]!.description, /^类型未采集 · doubao 与 stepfun 结论相反$/);
+  assert.equal(items[0]!.timestamp, new Date(Date.parse('2026-08-18T06:52:21.966Z')).toLocaleString('zh-CN', { hour12: false }));
+  assert.equal(items[1]!.timestamp, '时间未采集');
+  assert.notEqual(items[0]!.id, items[1]!.id);
+  assert.deepEqual(inboxFromCouncil(undefined), []);
+  assert.deepEqual(inboxFromCouncil([]), []);
+});
+
+test('W16 deriveConsole 真排序 + 来源状态:失败 > 警告 > 在跑,同档谱系 > 评审 > 路由 > 技能;缺席源不产出且标 absent', () => {
+  const telemetry: TelemetryState = {
+    overview: skillsOverview,
+    progress: { calls: [
+      { callId: 'c1', description: '批次一', rows: [{ index: 0, status: 'running' }, { index: 1, status: 'completed' }] },
+      { callId: 'c2', description: '批次二', rows: [{ index: 0, status: 'failed', item: 'x', error: 'boom' }] },
+    ] },
+    at: 1,
+  };
+  const full = deriveConsole(telemetry, { rows: [] }, { routes: routesLive, council: [councilFlagged] });
+  assert.deepEqual(full.inbox.map((it) => `${it.type}:${it.source}`), ['error:progress', 'warning:council', 'warning:routes', 'warning:skills', 'running:progress']);
+  assert.deepEqual(full.inboxSources, { progress: 'ready', routes: 'ready', skills: 'ready', council: 'ready' });
+
+  const partial = deriveConsole({ overview: {}, progress: undefined, at: 0 }, { rows: [] }, { routes: routesLive });
+  assert.deepEqual(partial.inbox.map((it) => it.source), ['routes']);
+  assert.deepEqual(partial.inboxSources, { progress: 'absent', routes: 'ready', skills: 'absent', council: 'absent' });
+
+  // 旧两参调用仍可用:三个新源一律 absent,不发明条目
+  const legacy = deriveConsole({ overview: {}, progress: { calls: [] }, at: 0 }, { rows: [] });
+  assert.deepEqual(legacy.inbox, []);
+  assert.equal(legacy.inboxSources.routes, 'absent');
+
+  // sortInbox 稳定:同档同源保插入序
+  const sorted = sortInbox([
+    { id: 'b', type: 'warning', source: 'council', title: 'b', description: '', timestamp: '', actionText: '' },
+    { id: 'a', type: 'warning', source: 'council', title: 'a', description: '', timestamp: '', actionText: '' },
+    { id: 'e', type: 'error', source: 'progress', title: 'e', description: '', timestamp: '', actionText: '' },
+  ]);
+  assert.deepEqual(sorted.map((it) => it.id), ['e', 'b', 'a']);
+});
+
+test('W16 AttentionInbox 副标题与空态由来源状态算出;四源全 ready 且空才说「无待处理」', () => {
+  const allReady = { progress: 'ready', routes: 'ready', skills: 'ready', council: 'ready' } as const;
+  const someAbsent = { progress: 'ready', routes: 'absent', skills: 'absent', council: 'ready' } as const;
+  assert.equal(inboxEmptyText(allReady), '无待处理');
+  assert.equal(inboxEmptyText(someAbsent), '已采集的来源里无待处理;未采集:路由台账、技能审计');
+  assert.equal(inboxEmptyText({ progress: 'absent', routes: 'absent', skills: 'absent', council: 'absent' }), '四个来源均未采集,待处理数未知');
+  assert.match(inboxSubtitle(allReady), /^来源:谱系进度、路由台账、技能审计、评审台账 · 失败 > 警告 > 在跑$/);
+  assert.match(inboxSubtitle(someAbsent), /未采集:路由台账、技能审计/);
+
+  const emptyHtml = renderToStaticMarkup(React.createElement(AttentionInbox, { items: [], sources: allReady }));
+  assert.match(emptyHtml, /无待处理/);
+  assert.match(emptyHtml, /0 待处理/);
+  assert.doesNotMatch(emptyHtml, /badge--failed/, '空态徽章不能是失败态');
+  assert.match(emptyHtml, /badge--done/);
+  const partialHtml = renderToStaticMarkup(React.createElement(AttentionInbox, { items: [], sources: someAbsent }));
+  assert.doesNotMatch(partialHtml, />无待处理</, '有来源缺席时不能无条件说无待处理');
+  assert.match(partialHtml, /未采集:路由台账、技能审计/);
+
+  // 源锁:组件里不得再出现静态单源声明
+  const here = dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(join(here, '..', 'components', 'console', 'AttentionInbox.tsx'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ');
+  assert.doesNotMatch(src, /来自 \/api\/swarm\/progress/, 'AttentionInbox 又写死了单一来源');
+  assert.doesNotMatch(src, /待审批/, '「待审批」今天没有控制台级数据源,不得出现在收件箱文案里');
+});

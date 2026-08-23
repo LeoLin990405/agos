@@ -11,6 +11,10 @@ import { SessionMatrix } from '@/components/console/SessionMatrix';
 import { useResource, type ResourceFetcher } from '@/lib/useResource';
 import type { ResourceFailure, ResourceStatus } from '@/lib/resource';
 import { sessionsStore, type SessionSummaryRow, type TelemetryState } from '@/stores/live';
+import { fetchJsonResource } from '@/lib/useResource';
+import { parseRoutesPayload, type RoutesPayload } from '@/components/console/routes-model';
+import { parseVisionLedger, type CouncilRecord } from '@/components/console/council-ledger-model';
+import type { InboxItemData, InboxSource, InboxSourceState } from '@/components/console/AttentionInbox';
 
 export interface ConsoleDerived {
   running: number | undefined; failed: number | undefined; calls: number | undefined; rows: number | undefined;
@@ -20,7 +24,10 @@ export interface ConsoleDerived {
   skillsServedWarn: number | undefined; skillsServedError: number | undefined;
   skillsConsoleWarn: number | undefined;
   skillsConsistency: string | undefined;
-  inbox: { id: string; type: 'error' | 'warning' | 'running'; title: string; description: string; timestamp: string; actionText: string }[];
+  /** W16:多台账汇合;每条带 source,排序见 sortInbox。类型即 AttentionInbox 的 InboxItemData(去掉 onAction)。 */
+  inbox: Omit<InboxItemData, 'onAction'>[];
+  /** W16:四个来源各自是否采集到。'absent' 的来源**不产出条目**,空态也不能说「无待处理」。 */
+  inboxSources: InboxSourceState;
   matrix: SessionSummaryRow[];
   progressLive: boolean;
   sessionsLive: boolean;
@@ -37,6 +44,8 @@ export interface ConsoleLive extends ConsoleDerived {
   progressError: ResourceFailure | undefined;
   refreshOverview: () => void;
   refreshProgress: () => void;
+  routesStatus: ResourceStatus;
+  councilStatus: ResourceStatus;
 }
 
 export interface UseConsoleLiveOptions {
@@ -44,6 +53,11 @@ export interface UseConsoleLiveOptions {
   progressEnabled?: boolean;
   overviewFetcher?: ResourceFetcher<Record<string, unknown>>;
   progressFetcher?: ResourceFetcher<Record<string, unknown>>;
+  /** W16:路由台账与评审台账也进收件箱;默认跟 overview 同一个门。 */
+  routesEnabled?: boolean;
+  councilEnabled?: boolean;
+  routesFetcher?: ResourceFetcher<RoutesPayload>;
+  councilFetcher?: ResourceFetcher<CouncilRecord[]>;
 }
 
 export const numAt = (o: Record<string, unknown> | undefined, ...path: string[]): number | undefined => {
@@ -72,29 +86,125 @@ export function overviewLamp(status: ResourceStatus): 'running' | 'queued' | 'fa
   return 'queued';
 }
 
-export function deriveConsole(t: TelemetryState, s: { rows: SessionSummaryRow[]; loadedAt?: number }): ConsoleDerived {
-  const ov = t.overview;
-  const calls = t.progress?.calls ?? [];
-  const running = numAt(ov, 'lineage', 'running');
-  const failed = numAt(ov, 'lineage', 'failed');
-  const inbox: ConsoleDerived['inbox'] = [];
+type InboxRow = Omit<InboxItemData, 'onAction'>;
+
+export interface ConsoleExtraSources {
+  /** undefined = 未采集(没拉 / 没回);[] 或 stats 为 0 才是真实的空。 */
+  routes?: RoutesPayload | undefined;
+  council?: CouncilRecord[] | undefined;
+}
+
+/** W16 分支 1:谱系进度(原有逻辑,只抽成函数)。失败行 error,在跑批次 running。 */
+export function inboxFromProgress(calls: readonly Record<string, unknown>[]): InboxRow[] {
+  const inbox: InboxRow[] = [];
   for (const call of calls) {
     const rows = Array.isArray(call['rows']) ? call['rows'] as Record<string, unknown>[] : [];
     const rFail = rows.filter((r) => r['status'] === 'failed');
     const rRun = rows.filter((r) => r['status'] === 'running');
     const label = String(call['description'] ?? call['callId'] ?? '批次');
     for (const fr of rFail.slice(0, 2)) {
-      inbox.push({ id: `${String(call['callId'])}:${String(fr['index'])}`, type: 'error',
+      inbox.push({ id: `${String(call['callId'])}:${String(fr['index'])}`, type: 'error', source: 'progress',
         title: `子任务未成功:${String(fr['item'] ?? fr['index'])}`,
         description: `${label} · ${String(fr['error'] ?? '见谱系详情')}`.slice(0, 120),
         timestamp: '', actionText: '查看谱系' });
     }
     if (rRun.length > 0) {
-      inbox.push({ id: `${String(call['callId'])}:run`, type: 'running',
+      inbox.push({ id: `${String(call['callId'])}:run`, type: 'running', source: 'progress',
         title: `批次执行中 (${rows.filter((r) => r['status'] === 'completed').length}/${rows.length} 完成)`,
         description: label.slice(0, 120), timestamp: `${rRun.length} 在跑`, actionText: '查看谱系' });
     }
   }
+  return inbox;
+}
+
+/**
+ * W16 分支 2:路由决策待回填(stats.pending,全台账口径,不是窗口长度)。
+ * 「待回填」是 outcome 仍为 null,**不是待审批**——两种语义,文案不混。pending 为 0 不产出。
+ */
+export function inboxFromRoutes(routes: RoutesPayload | undefined): InboxRow[] {
+  if (routes === undefined) return [];
+  const pending = routes.stats.pending;
+  if (!(pending > 0)) return [];
+  return [{
+    id: 'routes:pending', type: 'warning', source: 'routes',
+    title: `${pending} 条路由决策待回填结果`,
+    description: `台账 ${routes.stats.total} 条,已回填 ${routes.stats.filled} 条。待回填是 outcome 仍为空,不是待审批。`,
+    timestamp: routes.at !== undefined && routes.at > 0 ? new Date(routes.at).toLocaleString('zh-CN', { hour12: false }) : '',
+    actionText: '去路由决策',
+  }];
+}
+
+/**
+ * W16 分支 3:技能内容漂移(overview.skills.consistency.drifted)。
+ * overview.skills 只回热缓存,重启后未进技能页整组缺席 → 不产出(由 inboxSources.skills='absent' 说明)。
+ */
+export function inboxFromSkillsDrift(ov: Record<string, unknown> | undefined): InboxRow[] {
+  const drifted = numAt(ov, 'skills', 'consistency', 'drifted');
+  if (drifted === undefined || drifted <= 0) return [];
+  const skills = ov?.['skills'];
+  const c = typeof skills === 'object' && skills !== null ? (skills as Record<string, unknown>)['consistency'] : undefined;
+  const summary = typeof c === 'object' && c !== null && typeof (c as Record<string, unknown>)['summary'] === 'string'
+    ? String((c as Record<string, unknown>)['summary']) : undefined;
+  const at = numAt(ov, 'skills', 'at');
+  return [{
+    id: 'skills:drift', type: 'warning', source: 'skills',
+    title: `${drifted} 个 skill 多根内容不一致`,
+    description: summary ?? '同名 skill 在多个根之间内容漂移',
+    timestamp: at !== undefined && at > 0 ? new Date(at).toLocaleString('zh-CN', { hour12: false }) : '',
+    actionText: '去技能页',
+  }];
+}
+
+/** W16 分支 4:评审台账里被标记(flagged 非空)的记录,每条一项。kind 缺席写「类型未采集」。 */
+export function inboxFromCouncil(records: readonly CouncilRecord[] | undefined): InboxRow[] {
+  if (records === undefined) return [];
+  const out: InboxRow[] = [];
+  records.forEach((r, i) => {
+    if (r.flagged.length === 0) return;
+    const t = r.time !== undefined ? Date.parse(r.time) : Number.NaN;
+    out.push({
+      id: `council:${r.time ?? i}:${i}`, type: 'warning', source: 'council',
+      title: `评审被标记:${(r.question ?? '问题未采集').slice(0, 40)}`,
+      description: `${r.kind ?? '类型未采集'} · ${r.flagged.join(' · ')}`.slice(0, 120),
+      timestamp: Number.isFinite(t) ? new Date(t).toLocaleString('zh-CN', { hour12: false }) : '时间未采集',
+      actionText: '去评审台账',
+    });
+  });
+  return out;
+}
+
+const INBOX_RANK: Record<InboxRow['type'], number> = { error: 0, warning: 1, running: 2 };
+const SOURCE_RANK: Record<InboxSource, number> = { progress: 0, council: 1, routes: 2, skills: 3 };
+
+/**
+ * W16 真排序:失败 > 警告 > 在跑;同档按来源固定序(谱系 > 评审 > 路由 > 技能),再按插入序(稳定)。
+ * 「待审批」今天没有控制台级数据源(yolo 端点要 sessionId;fold 待决只在已打开会话且在冻结层),不设空档位。
+ */
+export function sortInbox(items: readonly InboxRow[]): InboxRow[] {
+  return items
+    .map((it, i) => ({ it, i }))
+    .sort((a, b) => (INBOX_RANK[a.it.type] - INBOX_RANK[b.it.type]) || (SOURCE_RANK[a.it.source] - SOURCE_RANK[b.it.source]) || (a.i - b.i))
+    .map((x) => x.it);
+}
+
+export function deriveConsole(t: TelemetryState, s: { rows: SessionSummaryRow[]; loadedAt?: number }, extra: ConsoleExtraSources = {}): ConsoleDerived {
+  const ov = t.overview;
+  const calls = t.progress?.calls ?? [];
+  const running = numAt(ov, 'lineage', 'running');
+  const failed = numAt(ov, 'lineage', 'failed');
+  const skillsGroup = typeof ov?.['skills'] === 'object' && ov?.['skills'] !== null;
+  const inboxSources: InboxSourceState = {
+    progress: t.progress !== undefined ? 'ready' : 'absent',
+    routes: extra.routes !== undefined ? 'ready' : 'absent',
+    skills: skillsGroup ? 'ready' : 'absent',
+    council: extra.council !== undefined ? 'ready' : 'absent',
+  };
+  const inbox = sortInbox([
+    ...inboxFromProgress(calls),
+    ...inboxFromCouncil(extra.council),
+    ...inboxFromRoutes(extra.routes),
+    ...inboxFromSkillsDrift(ov),
+  ]);
   return {
     running, failed, calls: numAt(ov, 'lineage', 'calls') ?? (t.progress === undefined ? undefined : calls.length),
     rows: numAt(ov, 'lineage', 'rows'),
@@ -112,18 +222,27 @@ export function deriveConsole(t: TelemetryState, s: { rows: SessionSummaryRow[];
       const summary = (c as Record<string, unknown>)['summary'];
       return typeof summary === 'string' ? summary : undefined;
     })(),
-    inbox, matrix: s.rows.slice(0, 8),
+    inbox, inboxSources, matrix: s.rows.slice(0, 8),
     progressLive: t.progress !== undefined,
     sessionsLive: typeof s.loadedAt === 'number' && s.loadedAt > 0,
     live: ov !== undefined,
   };
 }
 
+const fetchRoutesForInbox: ResourceFetcher<RoutesPayload> = async (url, signal) =>
+  parseRoutesPayload(await fetchJsonResource<unknown>(url, signal));
+const fetchCouncilForInbox: ResourceFetcher<CouncilRecord[]> = async (url, signal) =>
+  parseVisionLedger(await fetchJsonResource<unknown>(url, signal));
+
 export function useConsoleLive({
   overviewEnabled = true,
   progressEnabled = true,
   overviewFetcher,
   progressFetcher,
+  routesEnabled = overviewEnabled,
+  councilEnabled = overviewEnabled,
+  routesFetcher = fetchRoutesForInbox,
+  councilFetcher = fetchCouncilForInbox,
 }: UseConsoleLiveOptions = {}): ConsoleLive {
   const overview = useResource<Record<string, unknown>>({
     url: '/api/agos/overview',
@@ -137,8 +256,13 @@ export function useConsoleLive({
     intervalMs: 10_000,
     fetcher: progressFetcher,
   });
+  // W16:两个只读台账(GET),30s 一轮;不 POST。
+  const routes = useResource<RoutesPayload>({ url: '/api/agos/routes', enabled: routesEnabled, intervalMs: 30_000, fetcher: routesFetcher });
+  const council = useResource<CouncilRecord[]>({ url: '/api/cn/council-records', enabled: councilEnabled, intervalMs: 30_000, fetcher: councilFetcher });
   const sessions = useSyncExternalStore(sessionsStore.subscribe, sessionsStore.getSnapshot);
   const overviewData = overviewEnabled ? overview.data : undefined;
+  const routesData = routesEnabled ? routes.data : undefined;
+  const councilData = councilEnabled ? council.data : undefined;
   const progressData = useMemo(
     () => progressEnabled ? normalizeProgressPayload(progress.data) : undefined,
     [progress.data, progressEnabled],
@@ -147,7 +271,7 @@ export function useConsoleLive({
     overview: overviewData,
     progress: progressData,
     at: numAt(overviewData, 'at') ?? overview.at ?? 0,
-  }, sessions), [overview.at, overviewData, progressData, sessions]);
+  }, sessions, { routes: routesData, council: councilData }), [overview.at, overviewData, progressData, sessions, routesData, councilData]);
 
   return {
     ...derived,
@@ -159,6 +283,8 @@ export function useConsoleLive({
     progressError: progressEnabled ? progress.error : undefined,
     refreshOverview: () => { overview.refresh(); },
     refreshProgress: () => { progress.refresh(); },
+    routesStatus: routesEnabled ? routes.status : 'idle',
+    councilStatus: councilEnabled ? council.status : 'idle',
   };
 }
 
@@ -206,7 +332,10 @@ export const RealOverview: React.FC<{
   onNavigateLineage?: () => void;
   onNavigateStudio?: () => void;
   onNavigateAssemble?: () => void;
-}> = ({ live, density = 'dense', onNavigateChat, onNavigateLineage, onNavigateStudio, onNavigateAssemble }) => {
+  /** W16:收件箱条目按来源分流;没给就不挂按钮动作。 */
+  onNavigateSkills?: () => void;
+  onNavigateCouncil?: () => void;
+}> = ({ live, density = 'dense', onNavigateChat, onNavigateLineage, onNavigateStudio, onNavigateAssemble, onNavigateSkills, onNavigateCouncil }) => {
   if (!live.live) {
     if (live.overviewStatus === 'error' && live.overviewError !== undefined) {
       return (
@@ -308,11 +437,22 @@ export const RealOverview: React.FC<{
           正在更新谱系明细，当前显示 {formatCollectedAt(live.progressAt)} 的结果。
         </p>
       )}
-      <AttentionInbox items={live.inbox.map((it) => ({ ...it, onAction: onNavigateLineage }))} />
     </>
     ) : (
       <ResourceUnavailableNotice status={live.progressStatus} route="/api/swarm/progress" error={live.progressError} onRetry={live.refreshProgress} />
     )}
+
+    {/* W16:收件箱不再挂在 progress 门内——progress 挂掉时路由/评审/技能的条目仍要可见。 */}
+    <AttentionInbox
+      items={live.inbox.map((it) => ({
+        ...it,
+        onAction: it.source === 'progress' ? onNavigateLineage
+          : it.source === 'routes' ? onNavigateAssemble
+          : it.source === 'skills' ? onNavigateSkills
+          : onNavigateCouncil,
+      }))}
+      sources={live.inboxSources}
+    />
 
     {live.sessionsLive ? <SessionMatrix
       sessions={live.matrix.map((r) => ({
