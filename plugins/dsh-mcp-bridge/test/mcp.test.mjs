@@ -65,13 +65,12 @@ test('tools/call agos_sessions reads a fixture projcache through /mcp', async (t
   })
 })
 
-test('prompt is intercepted and memory search strips graph-only fields', async (t) => {
+test('prompt is intercepted and memory search goes through /api/memory/search (BM25), stripping non-contract fields', async (t) => {
   const prompts = []
   const internalJson = async (path) => {
-    assert.equal(path, '/api/memory/graph')
-    return { nodes: [
-      { id: 'project_alpha', description: 'Alpha bridge', type: 'project', bytes: 999, mtime: 123 },
-      { id: 'other', description: 'No match', type: 'reference', bytes: 888 },
+    assert.equal(path, '/api/memory/search?q=alpha&limit=50')
+    return { at: 1, query: 'alpha', results: [
+      { slug: 'project_alpha', description: 'Alpha bridge', score: 0.03, matchedBy: ['bm25'], body: 'NEVER' },
     ] }
   }
   const { call } = await harness(t, {
@@ -89,6 +88,13 @@ test('prompt is intercepted and memory search strips graph-only fields', async (
     name: 'agos_memory_search', arguments: { q: 'alpha' },
   }))).text)
   assert.deepEqual(JSON.parse(searched.result.content[0].text).nodes, [
-    { id: 'project_alpha', description: 'Alpha bridge', type: 'project' },
+    { id: 'project_alpha', description: 'Alpha bridge', type: '', score: 0.03, matchedBy: ['bm25'] },
   ])
+  assert.doesNotMatch(searched.result.content[0].text, /NEVER/)
+
+  // 201 字的查询在桥接里就被拦下,不会打到路由(路由对 >200 返回 400,会变成 throw)。
+  const tooLong = JSON.parse((await call(request(6, 'tools/call', {
+    name: 'agos_memory_search', arguments: { q: 'x'.repeat(201) },
+  }))).text)
+  assert.ok(tooLong.error !== undefined || tooLong.result?.isError === true, JSON.stringify(tooLong).slice(0, 200))
 })

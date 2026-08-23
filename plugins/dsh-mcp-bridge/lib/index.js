@@ -53,10 +53,11 @@ export const MCP_TOOLS = Object.freeze([
   },
   {
     name: 'agos_memory_search',
-    description: 'Search local memory graph node ids and descriptions, returning at most 50 minimal records. Read-only.',
+    description: 'Search Fleet Memory (BM25 + CJK bigram + RRF via /api/memory/search), returning at most 50 minimal records. Read-only.',
     inputSchema: {
       type: 'object',
-      properties: { q: { type: 'string', minLength: 1 } },
+      // maxLength 与 /api/memory/search 的 400 阈值对齐:长查询在这里被 JSON-RPC 参数校验拦下,不打到路由。
+      properties: { q: { type: 'string', minLength: 1, maxLength: 200 } },
       required: ['q'],
       additionalProperties: false,
     },
@@ -217,18 +218,20 @@ export function createMcpRuntime(ctx, options = {}) {
       }
       if (name === 'agos_swarm_status') return result(await internalJson('/api/swarm/progress', env))
       if (name === 'agos_memory_search') {
-        const query = requireString(args.q, 'q').toLocaleLowerCase()
-        const graph = await internalJson('/api/memory/graph', env)
-        const nodes = Array.isArray(graph?.nodes) ? graph.nodes : []
-        const matches = nodes.filter((node) => {
-          const haystack = `${cleanText(node?.id)}\n${cleanText(node?.description)}`.toLocaleLowerCase()
-          return haystack.includes(query)
-        }).slice(0, 50).map((node) => ({
-          id: cleanText(node?.id),
-          description: cleanText(node?.description),
-          type: cleanText(node?.type),
+        // W15(a):原来拉整张图(~300KB / 447 节点)再本地子串过滤;同一进程里就有 BM25 + CJK bigram + RRF 的
+        // /api/memory/search。旧键名 id/description/type 保留(type 在 search 端没有,置空),新增 score/matchedBy。
+        const query = requireString(args.q, 'q')
+        if (Array.from(query).length > 200) throw new Error('q exceeds 200 characters')
+        const body = await internalJson(`/api/memory/search?q=${encodeURIComponent(query)}&limit=50`, env)
+        const results = Array.isArray(body?.results) ? body.results : []
+        const nodes = results.map((r) => ({
+          id: cleanText(r?.slug),
+          description: cleanText(r?.description),
+          type: '',
+          score: Number.isFinite(Number(r?.score)) ? Number(r.score) : 0,
+          matchedBy: Array.isArray(r?.matchedBy) ? r.matchedBy.filter((x) => typeof x === 'string') : [],
         }))
-        return result({ q: args.q, nodes: matches })
+        return result({ q: args.q, nodes, ...(typeof body?.error === 'string' ? { error: body.error } : {}) })
       }
       throw new Error(`unknown tool: ${name}`)
     },
