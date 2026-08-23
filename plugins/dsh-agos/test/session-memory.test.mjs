@@ -358,3 +358,18 @@ test('W20 来源门:裸 {kind:user} 不收;带 rpcId 收;子代理会话头(orig
   const keep = extractSessionMemory(eventsWithTurns(user(0, 1, '不要在记忆库里写任何凭据。Gen8 是服务面 + 存储面 + 记忆库权威。')), { now: () => new Date(FIXED) })
   assert.deepEqual(keep.items.map((i) => `${i.kind}:${i.text}`), ['constraint:不要在记忆库里写任何凭据。', 'fact:Gen8 是服务面 + 存储面 + 记忆库权威。'])
 })
+
+test('W20 来源门走生产链路:capture→drain→processSnapshot 带会话头,子代理会话整个不抽;深度 0 会话抽得到', async (t) => {
+  const { store } = await fixture(t)
+  const events = eventsWithTurns(user(0, 1, '不要在记忆库里写任何凭据。'))
+  const sub = { id: 'session-sub-1', status: 'idle', session: { events, header: { delegationDepth: 1, origin: 'subagent', parentSession: 'session-main-1' } } }
+  const main = { id: 'session-main-1', status: 'idle', session: { events, header: { delegationDepth: 0 } } }
+  assert.equal(store.capture(sub), true)
+  assert.equal(store.capture(main), true)
+  await store.whenIdle('session-sub-1')
+  await store.whenIdle('session-main-1')
+  const subDoc = await store.get('session-sub-1')
+  const mainDoc = await store.get('session-main-1')
+  assert.deepEqual(subDoc.items, [], '子代理会话的 user 文本是父模型写的任务书,整个不收')
+  assert.deepEqual(mainDoc.items.map((i) => i.text), ['不要在记忆库里写任何凭据。'])
+})

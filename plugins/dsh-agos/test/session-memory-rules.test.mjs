@@ -133,8 +133,11 @@ test('W20 acceptEdit 门:语料没动;每条原来通过的样本不得变失败
     if (corpusChanged && base !== null) {
       assert.equal(process.env.SESSION_MEMORY_ACCEPT_CORPUS, '1', '语料变了(sha/total 与基线不符):要重算基线请同时给 SESSION_MEMORY_ACCEPT_CORPUS=1,不要让语料与规则同时动而不自知')
     }
-    assert.deepEqual(regressions, [], `有单条回归,不接受为新基线:\n${regressions.map((r) => '  ' + r).join('\n')}`)
-    writeFileSync(BASELINE, JSON.stringify({ ...current, rulesNote: note, acceptedAt: new Date().toISOString() }, null, 2) + '\n')
+    // 有意的取舍(例:去掉「需要」关键词丢掉一条真规矩)必须逐条点名:SESSION_MEMORY_ACCEPT_REGRESSIONS="rpc:rpc-265,…"
+    const allowed = new Set((process.env.SESSION_MEMORY_ACCEPT_REGRESSIONS || '').split(',').map((x) => x.trim()).filter(Boolean))
+    const unexpected = regressions.filter((r) => !allowed.has(r))
+    assert.deepEqual(unexpected, [], `有单条回归,不接受为新基线(有意取舍请用 SESSION_MEMORY_ACCEPT_REGRESSIONS 逐条点名并写进 RULES_NOTE):\n${unexpected.map((r) => '  ' + r).join('\n')}`)
+    writeFileSync(BASELINE, JSON.stringify({ ...current, rulesNote: note, acceptedRegressions: regressions, acceptedAt: new Date().toISOString() }, null, 2) + '\n')
     console.log(`[W20] 基线已重写:${BLOCKS.map((b) => `${b} ${fmt(now[b])}`).join(' · ')}${gains.length ? ` · 新增通过 ${gains.length}` : ''}`)
     return
   }

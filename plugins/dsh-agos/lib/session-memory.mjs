@@ -109,12 +109,18 @@ export const splitCandidatesForCorpus = splitCandidates
  *  3) fact 先排除问句 / 表格行 / 代码围栏 / 命令行,再放宽到「带具名实体的 X 是 Y」与「机器:IP」两种陈述。
  * 规则仍然只看文本;说话人来源在 extractSessionMemory 的来源门里判(必须带 rpcId 的浏览器通道)。
  */
-const TURN_ONLY_RE = /(?:只回复|只回答|只输出|只呈现|只把|只做这一件事|只列出|原样|不要调用|不要使用(?:任何)?工具|禁止调用工具|不要解释|不要重复执行|不要传\s|不要自己|自己不要|不要重试|不要排查|不要读文件|不要做(?:其他|别的)|请按流程|按流程申请|先确认状态再继续|一句话|两个字|然后等它|告诉我)/u
+// 单轮指令:本轮输出格式 / 工具执行指令。形态要通用(对抗验证 2026-08-23:照语料抄短语不泛化,现网
+// 「先用 bash 执行 sleep 20，不要并行做别的」一个都没命中)。两类:
+//   a) 输出格式:只回复 / 只输出 / 原样 / 不要解释 …
+//   b) 工具执行:(只|先|再|直接)?(用|调用|执行|运行) … (bash|工具|sleep|脚本|命令);不要并行;读完立刻回答
+const TURN_ONLY_RE = /(?:只回复|只回答|只输出|只把|只列出|只做这一件事|原样|不要调用|不要使用(?:任何)?工具|禁止调用工具|不要解释|不要重复执行|不要自己|自己不要|不要并行|立刻回答|(?:^|[，,。;；\s])(?:只|先|再|直接)?(?:用|调用|执行|运行)\s*[^，,。;；]{0,12}(?:bash|工具|sleep|脚本|命令))/u
+const AUTO_CONTINUE_RE = /^继续\s*[（(]/u
+// 问句:句尾问号,或疑问词(含「是不是 / 是什么 / 为什么 / 有没有 / 能否 / 是否」)
+const QUESTION_RE = /[？?]\s*$|(?:是不是|是什么|为什么|有没有|能否|是否|哪个|什么|怎么|怎样|如何|能不能|可不可以|吗|呢)(?:[？?，,。]|$)|(?:是不是|是什么|为什么|有没有|能不能)/u
+// 表格行 / 代码围栏 / 反引号起头的列表项 / 命令行。markdown 标题(#)不否决:标题里也能写规矩(「## 第一件事:先读记忆,不要瞎猜」)
+const MARKUP_LINE_RE = /^(?:[|`]|```|[-*]\s*`)|^(?:ssh|curl|tailscale|cd|ls|cat|node|npm|git)\s/u
 // 片段(以冒号收尾的引子)与贴回来的报错,两类都不是话
 const FRAGMENT_RE = /[:：]\s*$|^(?:Error|Traceback|Exception)\b/u
-const AUTO_CONTINUE_RE = /^继续\s*[（(]/u
-const QUESTION_RE = /[？?]\s*$|(?:哪个|什么|怎么|怎样|如何|能不能|可不可以|吗|呢)(?:[？?，,。]|$)/u
-const MARKUP_LINE_RE = /^(?:[|`#]|```|[-*]\s*`)|^(?:ssh|curl|tailscale|cd|ls|cat|node|npm|git)\s/u
 
 function classifyUserText(text) {
   if (/^(?:已排除|排除|放弃)\s*[:：]?/u.test(text)
@@ -122,7 +128,9 @@ function classifyUserText(text) {
     || /\b(?:tried|tested).{0,60}\b(?:failed|did not work|doesn't work)\b/iu.test(text)) {
     return { kind: 'rejected', importance: 5 }
   }
-  if (AUTO_CONTINUE_RE.test(text) || TURN_ONLY_RE.test(text) || FRAGMENT_RE.test(text)) return undefined
+  // 问句 / 表格行 / 代码围栏 / 命令行 / 片段 / 单轮指令:对所有 kind 一律否决(不只 fact)
+  if (QUESTION_RE.test(text) || MARKUP_LINE_RE.test(text) || FRAGMENT_RE.test(text)) return undefined
+  if (AUTO_CONTINUE_RE.test(text) || TURN_ONLY_RE.test(text)) return undefined
   if (/(?:必须|务必|禁止|不许|只允许|只能|(?<!能)不能|不要|不得|应当|都要|一律)/u.test(text)
     || /\b(?:must|never|do not|don't|cannot|can't|required)\b/iu.test(text)) {
     return { kind: 'constraint', importance: 5 }
@@ -131,13 +139,13 @@ function classifyUserText(text) {
     || /\b(?:I|we)\s+(?:prefer|like|want|would rather)\b/iu.test(text)) {
     return { kind: 'preference', importance: 4 }
   }
-  // Pure rules cannot determine truth. Keep this gate intentionally narrow:
-  // declaratives only — no questions, no markdown/table/code lines, no shell commands.
-  if (QUESTION_RE.test(text) || MARKUP_LINE_RE.test(text)) return undefined
+  // Pure rules cannot determine truth. Keep this gate intentionally narrow (declaratives only).
   if (/(?:^|[，, ])(?:我(?:的|们)?|本机|当前|目前|项目|仓库|服务|端口|路径|版本).{1,}/u.test(text)
     || /\b(?:my|our|current|project|repository|service|version)\b.{1,}\b(?:is|are|uses?|runs?|lives?)\b/iu.test(text)
     // 「具名实体 是/为 …」:主语里得有 ASCII 字母或数字(Gen8 / M4-Knowledge / NucBoxG3),纯中文指代(这个是…)不算
-    || /^[-*]?\s*[^，。,]{0,24}[A-Za-z0-9][^，。,]{0,24}(?:是(?!否)|(?<![作以因认成])为)\s*\S/u.test(text)
+    // 「把 X 改为/设为/命名为 Y」是祈使句不是陈述;作为/以为/因为/认为/成为 也不是判断词
+    // 主语要短(ASCII 实体前 ≤12 字、后 ≤8 字):「这版 prompt 的重点已经把“记忆库是…」这种长主语是叙述不是陈述
+    || /^[-*#]*\s*[^，。,]{0,12}[A-Za-z0-9][^，。,]{0,8}(?:是(?!否)|(?<![作以因认成改设调换命定拆称视]|重命名)为)\s*\S/u.test(text)
     // 「机器:IP」行
     || /[：:]\s*`?\d{1,3}(?:\.\d{1,3}){3}/u.test(text)) {
     return { kind: 'fact', importance: 3 }
@@ -148,11 +156,9 @@ function classifyUserText(text) {
 function classifyAssistantRejected(text) {
   // Assistant output is not trusted as fact. Only an explicit rejection label
   // becomes a candidate, and only as kind=rejected.
-  // W20:显式结论句也算——「试过/先写 X,发现 … 无/不支持/不可用 …,改用/放弃 Y」「… 放弃重试」;
-  // 单独一个「改用 X:」是过程叙述(语料里 43 句有 20+ 句这种),不算。
-  if (/^(?:\[已排除\]|已排除\s*[:：]|REJECTED\s*[:：])/iu.test(text)
-    || /(?:试过|曾先写|尝试过|先写).{0,40}(?:发现|但).{0,40}(?:无此|没有|不支持|不可用|不存在|失败).{0,60}(?:改用|放弃|换成)/u.test(text)
-    || /(?:都是同一失败模式|均失败|全部失败).{0,30}放弃/u.test(text)) {
+  // W20 对抗验证后撤回了按语料仅有的 2 条正样本写的「显式结论句」正则(那是记忆不是规则);
+  // 助手侧 rejected 在 n=2 上不可评估,召回 0 如实报。
+  if (/^(?:\[已排除\]|已排除\s*[:：]|REJECTED\s*[:：])/iu.test(text)) {
     return { kind: 'rejected', importance: 4 }
   }
   return undefined
@@ -348,7 +354,13 @@ export function createSessionMemoryStore(options = {}) {
     try { identity = await lstat(path) } catch (error) {
       if (!(error && error.code === 'ENOENT')) throw error
       if (!create) return undefined
-      await mkdir(path, { recursive: false, mode: 0o700 })
+      // 两个会话同时首次落盘会同时 mkdir 同一层:EEXIST 不是错,下面的 lstat 会把它当既有目录重新校验
+      // (2026-08-23 W20 的生产链路测试暴露:此前 EEXIST 抛到 drain 被吞,一个会话的抽取结果静默丢失)。
+      try {
+        await mkdir(path, { recursive: false, mode: 0o700 })
+      } catch (mkdirError) {
+        if (!(mkdirError && mkdirError.code === 'EEXIST')) throw mkdirError
+      }
       identity = await lstat(path)
     }
     if (!identity.isDirectory() || identity.isSymbolicLink()) throw new Error('session memory directory is unsafe')
