@@ -121,6 +121,9 @@ test('illegal JSON / tool-call / empty text are rejected', async () => {
   )
   for (const code of ['PROVIDER_ERROR', 'TOOL_CALL', 'NO_TEXT', 'UNPARSEABLE', 'BAD_OUTPUT']) assert.ok(SELECTOR_ERROR_CODES.includes(code), code)
 
+  // W21 互指:与 yolo-mode-aligned/lib/policy.js extractJsonObject 同一做法,两边都要有「说明文字带花括号」的断言
+  assert.equal(parseSelectorOutput('任务 {写SQL} 的结论:{"pick":"qwen3.8-max","role":"coder","confidence":0.9,"reason":"x"}', ['qwen3.8-max'])?.pick, 'qwen3.8-max')
+  assert.equal(parseSelectorOutput('{"note":"复述"} {"pick":"qwen3.8-max","role":"coder","confidence":0.9,"reason":"x"} 以上 {完毕}', ['qwen3.8-max'])?.pick, 'qwen3.8-max')
   assert.equal(parseSelectorOutput('not json', ['qwen3.8-max']), null)
   assert.equal(parseSelectorOutput('{"pick":"nope","role":"coder","confidence":0.9,"reason":"x"}', ['qwen3.8-max']), null)
 })
