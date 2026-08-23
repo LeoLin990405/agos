@@ -1,0 +1,10 @@
+# Host-only selector. Desktop is the source of truth.
+- insert:
+    - id: agos-router
+      name: '@dsh-local/agos-router'
+      config:
+        provider: stepfun
+        model: step-3.7-flash
+        timeoutMs: 20000
+        maxTokens: 1024
+        concurrency: 2

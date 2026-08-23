@@ -1,0 +1,8 @@
+{"id": "known-00", "role": "user", "channel": "rpc", "depth": 0, "origin": null, "n": 1, "sample": "534efffb", "text": "只用 bash 执行 sleep 15，不要并行。", "label": {"kind": "constraint", "scope": "turn"}}
+{"id": "known-01", "role": "user", "channel": "rpc", "depth": 0, "origin": null, "n": 1, "sample": "534efffb", "text": "不要改文件。", "label": {"kind": "constraint", "scope": "turn"}}
+{"id": "known-02", "role": "user", "channel": "rpc", "depth": 0, "origin": null, "n": 1, "sample": "534efffb", "text": "如果没有这类工具，直接说没有，不要编造，不要改文件。", "label": {"kind": "constraint", "scope": "turn"}}
+{"id": "known-03", "role": "user", "channel": "rpc", "depth": 0, "origin": null, "n": 1, "sample": "534efffb", "text": "先用 bash 执行 sleep 20，不要并行做别的。", "label": {"kind": "constraint", "scope": "turn"}}
+{"id": "known-04", "role": "user", "channel": "rpc", "depth": 0, "origin": null, "n": 1, "sample": "534efffb", "text": "不要改任何文件。", "label": {"kind": "constraint", "scope": "turn"}}
+{"id": "known-05", "role": "user", "channel": "rpc", "depth": 0, "origin": null, "n": 1, "sample": "534efffb", "text": "不要修改任何文件，读完立刻回答。", "label": {"kind": "constraint", "scope": "turn"}}
+{"id": "known-06", "role": "user", "channel": "bare", "depth": 0, "origin": null, "n": 1, "sample": "fb8be508", "text": "你必须且只能调用一次名为 council 的工具。", "label": {"kind": "constraint", "scope": "turn"}}
+{"id": "known-07", "role": "user", "channel": "bare", "depth": 0, "origin": null, "n": 1, "sample": "fb8be508", "text": "不要自己回答这个问题。", "label": {"kind": "constraint", "scope": "turn"}}

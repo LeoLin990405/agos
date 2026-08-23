@@ -1,0 +1,16 @@
+{
+  "name": "@dsh-local/agos-router",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AgOS StepFun selector: route among CN candidates, append route-outcome.jsonl. Does not replace yolo-mode.",
+  "scripts": { "test": "node --test test/*.test.mjs" },
+  "main": "lib/index.js",
+  "exports": { ".": "./lib/index.js", "./package.json": "./package.json" },
+  "files": ["lib", "cordis.patch.yml"],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
