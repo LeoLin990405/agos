@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { describeYoloDecision, groupYoloByCallId, parseYoloDecisionsPayload, yoloDecisionsUrl, yoloVerdictText } from './yolo-decisions.ts'
+import { describeYoloDecision, groupYoloByCallId, parseYoloDecisionsPayload, yoloDecisionsUrl, yoloTargetText, yoloVerdictText } from './yolo-decisions.ts'
 
 const S = 'session-0b4b785c-1e7c-4223-bf0e-371d7f75b690'
 // 照台账真实行:第一条是修复前格式(judge+rejected 无 reason)。
@@ -44,4 +44,17 @@ test('文案由 decision×outcome 算出;理由只认 reason,justification 永�
   assert.equal(describeYoloDecision({ time: 0, callId: 'x', decision: 'weird', outcome: 'weird' }).kind, 'unknown')
   // error 只认机器码形状:自由文本不上屏。
   assert.equal(yoloVerdictText({ time: 0, callId: 'x', decision: 'judge', outcome: 'rejected', error: 'Invalid API Key: sk-abc' }), 'LLM 裁判拒绝（裁判未留理由）')
+})
+
+test('W18 yoloTargetText: 有 resourcePath 才说;inWorkspace 三态;存量行(无字段)→ undefined', () => {
+  const base = { time: 1, callId: 'c', decision: 'judge', outcome: 'rejected' }
+  assert.equal(yoloTargetText(base), undefined)
+  assert.equal(yoloTargetText({ ...base, resourcePath: '~/.dsh/logs/plans/plan-1.json', inWorkspace: false }), '目标 ~/.dsh/logs/plans/plan-1.json（工作区外）')
+  assert.equal(yoloTargetText({ ...base, resourcePath: '~/Projects/x/src/a.ts', inWorkspace: true }), '目标 ~/Projects/x/src/a.ts（工作区内）')
+  assert.equal(yoloTargetText({ ...base, resourcePath: 'rel/a', inWorkspace: null }), '目标 rel/a', '未采集不加括注')
+  const parsed = parseYoloDecisionsPayload({ sessionId: 's', items: [{ ...base, resourcePath: '~/x', inWorkspace: 'yes', workspaceRoot: '~/w' }, { ...base, callId: 'd' }] })
+  assert.equal(parsed.items[0]?.inWorkspace, null, '非布尔一律当未采集')
+  assert.equal(parsed.items[0]?.workspaceRoot, '~/w')
+  assert.equal(parsed.items[1]?.resourcePath, undefined)
+  assert.equal(parsed.items[1]?.inWorkspace, null)
 })

@@ -19,6 +19,11 @@ export interface YoloDecision {
   targetMode?: string
   currentMode?: string
   justification?: string
+  /** W18(2026-08-23)起写端才有:规范化+脱敏后的目标路径(只来自实参的显式路径键;bash 没有)。存量行缺席。 */
+  resourcePath?: string
+  /** true/false 是写端判过;null/undefined = 未采集(bash、无 workspaceRoot、存量行),不是 false。 */
+  inWorkspace?: boolean | null
+  workspaceRoot?: string
   decision: 'allow' | 'deny' | 'delegate' | 'judge' | string
   outcome: 'allowed-once' | 'rejected' | 'delegate' | string
   reason?: string
@@ -51,6 +56,9 @@ export function parseYoloDecisionsPayload(value: unknown): YoloDecisionsPayload 
       targetMode: optStr(row.targetMode),
       currentMode: optStr(row.currentMode),
       justification: optStr(row.justification),
+      resourcePath: optStr(row.resourcePath),
+      inWorkspace: row.inWorkspace === true || row.inWorkspace === false ? row.inWorkspace : null,
+      workspaceRoot: optStr(row.workspaceRoot),
       decision: row.decision,
       outcome: row.outcome,
       reason: optStr(row.reason),
@@ -117,4 +125,14 @@ export function yoloVerdictText(row: YoloDecision): string {
   if (d.reason !== undefined) return `${d.label}：${d.reason}`
   if (d.unreasoned) return `${d.label}（裁判未留理由）`
   return d.label
+}
+
+/**
+ * W18:裁决的目标路径一句话。只在写端真落了 resourcePath 时才有;inWorkspace 三态:
+ * true →「工作区内」,false →「工作区外」,null → 不加括注(未采集不是「内」)。
+ */
+export function yoloTargetText(row: YoloDecision): string | undefined {
+  if (row.resourcePath === undefined) return undefined
+  const where = row.inWorkspace === true ? '（工作区内）' : row.inWorkspace === false ? '（工作区外）' : ''
+  return `目标 ${row.resourcePath}${where}`
 }

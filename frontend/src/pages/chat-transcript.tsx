@@ -27,7 +27,7 @@ import type { OptimisticImageAttachment } from '@/components/chat/ImageAttachmen
 import { extractMultimodalMessageId, stripImagePlaceholder, stripMultimodalMessageMarker } from '@/components/chat/CommandDeck';
 import { MediaBlocks } from '@/components/chat/MediaBlocks';
 import { mediaFromResultBlocks, mediaFromTool } from '@/components/chat/media-blocks';
-import { EMPTY_YOLO, describeYoloDecision, groupYoloByCallId, parseYoloDecisionsPayload, yoloDecisionsUrl, yoloVerdictText, type YoloDecision, type YoloDecisionsPayload } from '@/components/chat/yolo-decisions';
+import { EMPTY_YOLO, describeYoloDecision, groupYoloByCallId, parseYoloDecisionsPayload, yoloDecisionsUrl, yoloTargetText, yoloVerdictText, type YoloDecision, type YoloDecisionsPayload } from '@/components/chat/yolo-decisions';
 import { fetchJsonResource, useResource } from '@/lib/useResource';
 import '@/design-system/tool-timeline.css';
 import '@/design-system/replay-scrubber.css';
@@ -362,6 +362,7 @@ const YoloChip: React.FC<{ rows: readonly YoloDecision[] | undefined }> = ({ row
   return (
     <Chip variant={d.kind === 'delegate' ? 'amber' : last.outcome === 'rejected' ? 'red' : 'default'} style={{ marginLeft: '6px' }} data-yolo={d.kind}>
       {yoloVerdictText(last)}
+      {yoloTargetText(last) !== undefined ? ` · ${yoloTargetText(last)}` : ''}
     </Chip>
   );
 };
@@ -631,6 +632,7 @@ function renderItem(
           <span data-yolo={verdict?.kind}>
             审批 {item.toolName ?? ''}:{item.outcome === 'allowed-once' ? '已放行(一次)' : item.outcome}
             {judged !== undefined ? ` · ${yoloVerdictText(judged)}` : ''}
+            {judged !== undefined && yoloTargetText(judged) !== undefined ? ` · ${yoloTargetText(judged)}` : ''}
           </span>
         </div>
       </div>
