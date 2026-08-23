@@ -70,10 +70,27 @@ done
 
 # 冻结层 codex 放行(2026-08-23):机器区要真渲染机器卡,锚「已配置」只在 /api/fleet/hosts 解析成功后出现;
 # 解析失败时页头是「等待 SSH 探测结果」+ TypeError 原文(08-21 到 08-23 现网就是这样,回归当时只点了 tab 没断内容)。
+# 探测要等四台不可达机器 SSH 超时,首屏是「等待 SSH 探测结果」;轮询到「已配置」出现为止(上限 60s),
+# 再断 codex 卡原样在(不是被藏)且没有解析 TypeError。
 step "进机器与机架" opencli browser $S click ".console-nav-item[aria-label=\"机器与机架\"]"
-sleep 8
-assert_text "机器区渲染(hosts 解析成功)" "已配置"
+for i in {1..12}; do
+	body="$(opencli browser $S extract --chunk-size 20000 2>/dev/null)"
+	print -r -- "$body" | /usr/bin/grep -q -- "SSH 探测于" && break
+	sleep 5
+done
+# 页头「已配置 N」在 extract 的正文区之外(实测 extract 从「### 机架」起),用机器卡上的探测时间句当锚
+assert_text "机器区渲染(hosts 解析成功)" "SSH 探测于"
 assert_text "codex 主机原样显示" "codex"
+assert_no_text() {  # assert_no_text <名称> <不该出现的文本>
+	local name="$1" needle="$2" body
+	body="$(opencli browser $S extract --chunk-size 20000 2>/dev/null)"
+	if print -r -- "$body" | /usr/bin/grep -q -- "$needle"; then
+		FAIL=$((FAIL+1)); RESULTS+=("FAIL  $name（出现了「$needle」）"); print "❌ $name（出现了「$needle」）"
+	else
+		PASS=$((PASS+1)); RESULTS+=("PASS  $name"); print "✅ $name（未见「$needle」）"
+	fi
+}
+assert_no_text "hosts 解析不再 throw" "must be local or remote"
 # W13:概览额度台账;锚只在载荷到达后出现(loading 态不渲染这句)。
 step "回概览" opencli browser $S click ".console-nav-item[aria-label=\"概览遥测\"]"
 sleep 3
