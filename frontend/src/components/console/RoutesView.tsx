@@ -29,6 +29,7 @@ import {
   formatCoverage,
   outcomeLabel,
   outcomeValueCopy,
+  fallbackReasonCopy,
   parseRoutesPayload,
   routesTierNote,
   ROUTES_READY_COPY,
@@ -88,7 +89,7 @@ function DecisionRow({
           候选 {(row.candidates || []).join(' / ') || '未采集'}
           {row.reason ? ` · ${row.reason}` : ''}
           {ruleReasonCopy(row.rule?.reason) ? ` · ${ruleReasonCopy(row.rule?.reason)}` : ''}
-          {row.fallbackReason ? ` · 回落 ${row.fallbackReason}` : ''}
+          {fallbackReasonCopy(row.fallbackReason) ? ` · 回落：${fallbackReasonCopy(row.fallbackReason)}` : row.fallbackReason ? ' · 回落：原因未识别' : ''}
         </p>
         {Array.isArray(row.annotations) && row.annotations.length > 0 && (
           <p className="surface-quiet surface-status--amber">

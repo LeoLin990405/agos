@@ -77,17 +77,35 @@ export const KNOWN_TURN_NOTES: readonly string[] = ['宿主未配置该模型'];
 /**
  * dispatch.js / selector-llm.js 的错误码全集 → 中文。认不出的不渲染原码(019 同口径)。
  * 用 Map 不用对象:`'__proto__' in obj` 为真,会把 Object.prototype 当文案渲染,React 直接抛错(第二轮 [1])。
- * BAD_OUTPUT 不写原因:dsh-llm 把供应商失败也以 finish{kind:'error'} 块交出,dispatch.js 一律记成
- * BAD_OUTPUT,前端无从知道是「非文本块」还是「供应商报错」(第二轮 [29])。
+ * 2026-08-23 插件把 BAD_OUTPUT 拆成四个码(stream-outcome.js):供应商报错在宿主里是 finish{kind:'error'}
+ * 块不是 throw,原来全被记成「无文本」。BAD_OUTPUT 一行保留,只为认得台账历史行(dsp-1787419059326)。
  */
-const TURN_ERROR_COPY = new Map<string, string>([
+export const TURN_ERROR_COPY = new Map<string, string>([
   ['UNRESOLVED', '宿主未配置该模型'],
   ['NO_ADAPTER', '宿主缺少 llm 适配器'],
   ['TIMEOUT', '超时'],
   ['ABORTED', '已中止'],
-  ['BAD_OUTPUT', '没有产出可见文本'],
+  ['BAD_OUTPUT', '没有产出可见文本（旧码，原因未拆分）'],
+  ['NO_TEXT', '没有产出文本块'],
+  ['TOOL_CALL', '模型试图调用工具'],
+  ['UNPARSEABLE', '输出不是约定的 JSON'],
+  ['PROVIDER_ERROR', '供应商报错'],
   ['STREAM_ERROR', '流式调用出错'],
   ['OVERLOAD', '供应商过载'],
+]);
+/** 供应商错误码(宿主 dsh-llm 的 failure.code 全集)→ 中文;认不出的不渲染。 */
+const PROVIDER_CODE_COPY = new Map<string, string>([
+  ['AUTH', '鉴权失败'],
+  ['QUOTA', '额度用尽'],
+  ['RATE_LIMIT', '限流'],
+  ['INVALID_REQUEST', '请求不合法'],
+  ['INVALID_CREDENTIAL', '凭据无效'],
+  ['MISSING_CREDENTIAL', '缺少凭据'],
+  ['SERVER', '供应商服务端错误'],
+  ['TIMEOUT', '供应商超时'],
+  ['TRANSPORT', '网络传输错误'],
+  ['CONTEXT_WINDOW_EXCEEDED', '超出上下文窗口'],
+  ['EMPTY_RESPONSE', '供应商返回空响应'],
 ]);
 export const TURN_ERROR_UNKNOWN_COPY = '失败，错误码未识别';
 export const TURN_TEXT_LIMIT = 400;
@@ -297,14 +315,19 @@ export function parseAssemblePlan(value: unknown): AssemblePlan | null {
   };
 }
 
-/** 回合失败说明:后端 note 只认表内那句,error 码译成中文,都认不出就说「未识别」。不搬运。 */
-export function turnFailureCopy(row: { note?: unknown; error?: unknown }): string {
+/**
+ * 回合失败说明:后端 note 只认表内那句,error 码译成中文,都认不出就说「未识别」。不搬运。
+ * PROVIDER_ERROR 再带供应商码的译文(认不出就不带);finish 为 max-tokens 时点明「被上限截断」——
+ * 这两样都是台账里的离散码,不是自由文本。
+ */
+export function turnFailureCopy(row: { note?: unknown; error?: unknown; providerCode?: unknown; finish?: unknown }): string {
   if (typeof row.note === 'string' && KNOWN_TURN_NOTES.includes(row.note)) return row.note;
-  if (typeof row.error === 'string') {
-    const copy = TURN_ERROR_COPY.get(row.error);
-    if (copy !== undefined) return copy;
-  }
-  return TURN_ERROR_UNKNOWN_COPY;
+  if (typeof row.error !== 'string') return TURN_ERROR_UNKNOWN_COPY;
+  const copy = TURN_ERROR_COPY.get(row.error);
+  if (copy === undefined) return TURN_ERROR_UNKNOWN_COPY;
+  const provider = typeof row.providerCode === 'string' ? PROVIDER_CODE_COPY.get(row.providerCode) : undefined;
+  const truncated = row.finish === 'max-tokens' ? '，输出被 maxTokens 上限截断' : '';
+  return `${copy}${provider ? `（${provider}）` : ''}${truncated}`;
 }
 
 export function parseDispatchRun(value: unknown): DispatchRun | null {

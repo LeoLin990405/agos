@@ -60,7 +60,10 @@ async function realEnvelopes(): Promise<{ assemblePost: Record<string, unknown>;
   });
   const dispatchPost = await dispatchJs.dispatchTeam(assemblePost.assemble, { confirm: true, ref: (assemblePost.assemble as { id: string }).id, task: '' }, {
     append: (record: unknown) => ledgerJs.appendLine(file, record),
-    streamRole: async (input: { role: string }) => (input.role === 'implementer' ? (() => { const e = new Error('x') as Error & { code: string }; e.code = 'BAD_OUTPUT'; throw e; })() : `${input.role} 文本`),
+    // 插件 2026-08-23 拆码后 implementer 失败形状:NO_TEXT + detail(finish/blockTypes/usage)。
+    streamRole: async (input: { role: string }) => (input.role === 'implementer'
+      ? (() => { const e = new Error('x') as Error & { code: string; detail: unknown }; e.code = 'NO_TEXT'; e.detail = { blockTypes: ['reasoning'], finish: 'max-tokens', usage: { inputTokens: 100, outputTokens: 256 } }; throw e; })()
+      : { text: `${input.role} 文本`, detail: { blockTypes: ['text'], finish: 'stop', usage: { inputTokens: 10, outputTokens: 5 } } }),
   });
   const routesGet = ledgerJs.listRoutes(file, 50);
   return { assemblePost, dispatchPost, routesGet };
@@ -104,7 +107,7 @@ test('插件真实信封:POST /assemble、POST /assemble/dispatch、GET /routes 
   assert.equal(run.ref, plan.id);
   assert.deepEqual(run.turns.map((t) => [t.role, t.ok, t.failure ?? t.text]), [
     ['planner', true, 'planner 文本'],
-    ['implementer', false, '没有产出可见文本'],
+    ['implementer', false, '没有产出文本块，输出被 maxTokens 上限截断'],
     ['reviewer', true, 'reviewer 文本'],
   ]);
 

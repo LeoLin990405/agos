@@ -9,6 +9,7 @@ import {
   outcomeValueCopy,
   parseRoutesPayload,
   ROUTES_READY_COPY,
+  fallbackReasonCopy,
   routesTierNote,
   ruleReasonCopy,
 } from './routes-model.ts'
@@ -97,4 +98,15 @@ test('RoutesView does not mount three-tier badges (TASK-019 W7 a)', () => {
   assert.doesNotMatch(view, /\w*[Bb]adge\s*\(/, 'RoutesView 在调用某个 *Badge helper')
   // d. 页头必须是算出来的，不是常量。
   assert.match(view, /routesTierNote\(payload\.decisions\)/)
+})
+
+test('fallbackReason 全集有中文，认不出的不渲染（与 ruleReasonCopy 同口径）', () => {
+  // 插件 selector-llm.js SELECTOR_ERROR_CODES + index.js 的 NOT_CONFIGURED / UNKNOWN。
+  for (const code of ['NOT_CONFIGURED', 'UNKNOWN', 'NO_ADAPTER', 'TIMEOUT', 'ABORTED', 'STREAM_ERROR', 'OVERLOAD', 'BAD_OUTPUT', 'NO_TEXT', 'TOOL_CALL', 'UNPARSEABLE', 'PROVIDER_ERROR']) {
+    const copy = fallbackReasonCopy(code)
+    assert.ok(copy !== undefined, code + ' 没有中文文案')
+    assert.doesNotMatch(copy, /\b(?!JSON\b)[A-Z_]{3,}\b/, code + ' 的文案里还带着机器码')
+  }
+  assert.equal(fallbackReasonCopy('brand-new'), undefined)
+  assert.equal(fallbackReasonCopy(undefined), undefined)
 })

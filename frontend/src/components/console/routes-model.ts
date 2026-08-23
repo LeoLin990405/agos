@@ -118,3 +118,27 @@ export function routesTierNote(decisions: RouteDecision[]): string {
     .map((r) => `${ruleReasonCopy(r)} ${counts.get(r)} 条`)
   return `三档阶梯未接回界面：这批决策里走到聚类的有 ${parts.join(' · ')}，历史行按原样保留、不改写。`
 }
+
+/**
+ * 决策行 fallbackReason(选择器为什么回落静态表)→ 中文。与 ruleReasonCopy 同口径:认不出不渲染。
+ * 原来 RoutesView 把原码直接上屏(「回落 BAD_OUTPUT」),2026-08-23 插件拆码后会出现 PROVIDER_ERROR 等新码。
+ */
+const FALLBACK_REASON_COPY: Record<string, string> = {
+  NOT_CONFIGURED: '选择器未配置',
+  UNKNOWN: '选择器失败，原因未记录',
+  NO_ADAPTER: '宿主缺少 llm 适配器',
+  TIMEOUT: '选择器超时',
+  ABORTED: '选择器已中止',
+  STREAM_ERROR: '选择器流式调用出错',
+  OVERLOAD: '选择器过载',
+  BAD_OUTPUT: '选择器输出不可用（旧码，原因未拆分）',
+  NO_TEXT: '选择器没有产出文本块',
+  TOOL_CALL: '选择器试图调用工具',
+  UNPARSEABLE: '选择器输出不是约定的 JSON',
+  PROVIDER_ERROR: '选择器供应商报错',
+}
+
+export function fallbackReasonCopy(reason: string | undefined): string | undefined {
+  if (!reason) return undefined
+  return FALLBACK_REASON_COPY[reason]
+}

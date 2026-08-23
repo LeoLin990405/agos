@@ -221,13 +221,27 @@ test('违约预览有上限且按原串计数，alert 区不是后端文本的�
 test('回合文案：note 只认表内那句，error 码译成中文，原型链键不泄漏，text 截 400', () => {
   assert.deepEqual([...KNOWN_TURN_NOTES], ['宿主未配置该模型']);
   assert.equal(turnFailureCopy({ note: '宿主未配置该模型' }), '宿主未配置该模型');
-  assert.equal(turnFailureCopy({ note: '已接入本跳会话并换了模型', error: 'BAD_OUTPUT' }), '没有产出可见文本');
+  assert.equal(turnFailureCopy({ note: '已接入本跳会话并换了模型', error: 'BAD_OUTPUT' }), '没有产出可见文本（旧码，原因未拆分）');
+  // 2026-08-23 拆码:四个新码各有译文;PROVIDER_ERROR 带供应商码译文;max-tokens 点明截断;认不出的供应商码不带。
+  assert.equal(turnFailureCopy({ error: 'NO_TEXT', finish: 'max-tokens' }), '没有产出文本块，输出被 maxTokens 上限截断');
+  assert.equal(turnFailureCopy({ error: 'TOOL_CALL' }), '模型试图调用工具');
+  assert.equal(turnFailureCopy({ error: 'UNPARSEABLE' }), '输出不是约定的 JSON');
+  assert.equal(turnFailureCopy({ error: 'PROVIDER_ERROR', providerCode: 'QUOTA' }), '供应商报错（额度用尽）');
+  assert.equal(turnFailureCopy({ error: 'PROVIDER_ERROR', providerCode: '__proto__' }), '供应商报错');
+  assert.equal(turnFailureCopy({ error: 'PROVIDER_ERROR', providerCode: 'Invalid API Key: sk-abc' }), '供应商报错');
   assert.equal(turnFailureCopy({ error: 'WHATEVER_NEW' }), TURN_ERROR_UNKNOWN_COPY);
   assert.equal(turnFailureCopy({}), TURN_ERROR_UNKNOWN_COPY);
   // 第二轮 [1]:`'__proto__' in {}` 为真,原来会把 Object.prototype 当文案渲染,React 直接抛错。
   for (const key of ['__proto__', 'constructor', 'toString', 'valueOf', 'hasOwnProperty']) {
     assert.equal(turnFailureCopy({ error: key }), TURN_ERROR_UNKNOWN_COPY, key);
   }
+  const tr = parseDispatchRun({ dispatch: { ...GOOD_DISPATCH, turns: [
+    { role: 'planner', model: 'glm-5.2', ok: false, error: 'PROVIDER_ERROR', providerCode: 'AUTH', finish: 'error', blockTypes: [], usage: { inputTokens: 1, outputTokens: 0 } },
+    { role: 'implementer', model: 'qwen3.8-max', ok: true, text: 'x', finish: 'stop', blockTypes: ['text'], usage: { inputTokens: 1, outputTokens: 5 } },
+    TURNS[2],
+  ] } });
+  assert.equal(tr?.turns[0]?.failure, '供应商报错（鉴权失败）');
+  assert.equal(tr?.turns[1]?.ok, true);
   const run = parseDispatchRun({ dispatch: { ...GOOD_DISPATCH, turns: [
     { role: 'planner', model: 'glm-5.2', ok: false, note: '已接入本跳会话并换了模型', error: '__proto__' },
     { role: 'implementer', model: 'qwen3.8-max', ok: true, text: 'Y'.repeat(5000), note: '随便' },
