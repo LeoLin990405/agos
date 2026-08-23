@@ -59,3 +59,16 @@ test('路由:GET only;sessionId 经 validateSessionId;200 形状 {version, sessi
   assert.equal(ok.body.fileExists, true)
   assert.doesNotMatch(JSON.stringify(ok.body), /\/Users\/|\/tmp\//)
 })
+
+test('W18 读侧:resourcePath/workspaceRoot 透传,inWorkspace 只收 boolean(null = 未采集不透传),argumentsSummary 不透传;存量行无字段不发明', () => {
+  const rows = [
+    { time: 1, sessionId: 's', callId: 'c', decision: 'judge', outcome: 'rejected', resourcePath: '~/x', inWorkspace: false, workspaceRoot: '~/w', argumentsSummary: '{"path":"~/x"}' },
+    { time: 2, sessionId: 's', callId: 'd', decision: 'judge', outcome: 'rejected', inWorkspace: null },
+    { time: 3, sessionId: 's', callId: 'e', decision: 'deny', outcome: 'rejected' },
+  ]
+  const items = selectYoloDecisions(rows, 's')
+  assert.deepEqual(items[0], { time: 1, callId: 'c', workspaceRoot: '~/w', resourcePath: '~/x', inWorkspace: false, decision: 'judge', outcome: 'rejected' })
+  assert.equal('inWorkspace' in items[1], false)
+  assert.equal('resourcePath' in items[2], false)
+  assert.doesNotMatch(JSON.stringify(items), /argumentsSummary|\/Users\//)
+})

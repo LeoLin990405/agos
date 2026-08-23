@@ -41,6 +41,8 @@ export function selectYoloDecisions(rows, sessionId, limit = DEFAULT_LIMIT) {
       const v = row[key]
       if (v === undefined || v === null) continue
       if (key === 'time') { if (typeof v === 'number' && Number.isFinite(v)) out.time = v; continue }
+      // W18:inWorkspace 是三态 boolean/null(null 在上面 v === null 已 continue = 未采集,不透传);其余只收 string。
+      if (key === 'inWorkspace') { if (typeof v === 'boolean') out.inWorkspace = v; continue }
       if (typeof v !== 'string') continue
       out[key] = key === 'justification' ? v.slice(0, JUSTIFICATION_LIMIT) : v
     }
