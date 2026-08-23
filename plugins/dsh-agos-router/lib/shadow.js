@@ -140,19 +140,23 @@ export async function shadowDecide(body, deps = {}) {
 }
 
 /** 派发真的发生后,把 batchId 挂到影子决策上(追加关联行,不改写历史行)。 */
-export function buildShadowLinkRecord({ ref, batchId }) {
+export function buildShadowLinkRecord({ ref, batchId, hosts }) {
   const safeRef = typeof ref === 'string' && DEC_ID_RE.test(ref) ? ref : null
   const safeBatch = typeof batchId === 'string' && BATCH_ID_RE.test(batchId) ? batchId : null
   if (!safeRef) throw new Error('shadow link ref must be a dec-… id')
   if (!safeBatch) throw new Error('shadow link batchId must be a b-… id')
-  return { ev: SHADOW_LINK_EV, ref: safeRef, batchId: safeBatch, at: Date.now() }
+  // 实际落的机器(派发结果 runs[].host 去重):有它才判得出「建议有没有被采用」
+  const safeHosts = Array.isArray(hosts) ? [...new Set(hosts.filter((h) => typeof h === 'string' && HOST_NAME_RE.test(h)))].slice(0, 32) : []
+  return { ev: SHADOW_LINK_EV, ref: safeRef, batchId: safeBatch, hosts: safeHosts, at: Date.now() }
 }
 
-/** foldLedger 之外的关联折叠:返回 Map<decId, batchId>(后写的覆盖)。 */
+/** foldLedger 之外的关联折叠:返回 Map<decId, {batchId, hosts}>(后写的覆盖)。 */
 export function shadowLinks(rows) {
   const map = new Map()
   for (const row of Array.isArray(rows) ? rows : []) {
-    if (row && row.ev === SHADOW_LINK_EV && typeof row.ref === 'string' && typeof row.batchId === 'string') map.set(row.ref, row.batchId)
+    if (row && row.ev === SHADOW_LINK_EV && typeof row.ref === 'string' && typeof row.batchId === 'string') {
+      map.set(row.ref, { batchId: row.batchId, hosts: Array.isArray(row.hosts) ? row.hosts.filter((h) => typeof h === 'string') : [] })
+    }
   }
   return map
 }
@@ -185,21 +189,38 @@ export function fleetBatchStates(runRows) {
  * 回填:已挂 batchId、outcome 仍空、批次已终态的影子决策 → outcome 行(source 'fleet-end')。
  * 纯函数:返回要追加的行,不写。decisions 须是 foldLedger 折叠后的(outcome 已合并)。
  */
+/** 建议是否被采用:pick 在实际落的机器里。没 pick / 没记实际机器 → null(判不了)。 */
+export function shadowAdopted(pick, link) {
+  if (typeof pick !== 'string' || !pick || !link || !Array.isArray(link.hosts) || link.hosts.length === 0) return null
+  return link.hosts.includes(pick)
+}
+
+/**
+ * 回填:已挂 batchId、outcome 仍空、批次已终态、**且建议被采用**的影子决策 → outcome 行(source 'fleet-end')。
+ * 建议没被采用(批次跑在别的机器上)时 outcome 留空:批次成败说的是用户选的机器,不是建议的对错——
+ * 两种语义不往一个字段里塞(017「明确不做」第 3 条)。
+ * 纯函数:返回要追加的行,不写。decisions 须是 foldLedger 折叠后的(outcome 已合并)。
+ */
 export function backfillShadowOutcomes({ decisions, links, batchStates }) {
   const out = []
   for (const d of Array.isArray(decisions) ? decisions : []) {
     if (!d || d.mode !== SHADOW_MODE || typeof d.id !== 'string') continue
     if (d.outcome !== null && d.outcome !== undefined) continue
-    const batchId = links.get(d.id)
-    if (!batchId) continue
-    const st = batchStates.get(batchId)
+    const link = links.get(d.id)
+    if (!link) continue
+    if (shadowAdopted(d.pick, link) !== true) continue
+    const st = batchStates.get(link.batchId)
     if (!st || !st.ended) continue
     out.push(buildOutcomeRecord({ ref: d.id, result: st.ok ? 'ok' : 'fail', source: SHADOW_OUTCOME_SOURCE }))
   }
   return out
 }
 
-/** 把关联折进决策行(只读派生,给 GET 用):batchRef 字段。 */
+/** 把关联折进决策行(只读派生,给 GET 用):batchRef / actualHosts / adopted。 */
 export function attachShadowLinks(decisions, links) {
-  return decisions.map((d) => (d && d.mode === SHADOW_MODE && links.has(d.id) ? { ...d, batchRef: links.get(d.id) } : d))
+  return decisions.map((d) => {
+    if (!d || d.mode !== SHADOW_MODE || !links.has(d.id)) return d
+    const link = links.get(d.id)
+    return { ...d, batchRef: link.batchId, actualHosts: link.hosts, adopted: shadowAdopted(d.pick, link) }
+  })
 }

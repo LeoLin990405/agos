@@ -105,22 +105,26 @@ export function publicizeDecision(row) {
 
 /**
  * 台账汇总。W17 起影子行(mode:'shadow',pick 是机器名)**单列** shadow:{total, filled, pending, suggested, agreed}:
- * 它们的 pick 不是模型,混进 cells 会把「(角色, 模型) 格」的口径搅坏;stats.total 仍含影子行(台账真有那么多行)。
+ * 它们的 pick 不是模型,混进 cells 会把「(角色, 模型) 格」的口径搅坏;filled/pending 只算模型路由行;
+ * stats.total 仍含影子行(台账真有那么多行)。
  */
 export function summarizeOutcomes(rows) {
   const cells = new Set()
   let filled = 0
   const shadow = { total: 0, filled: 0, pending: 0, suggested: 0, agreed: 0 }
+  let routed = 0
   for (const row of rows) {
     const done = row.outcome !== null && row.outcome !== undefined
-    if (done) filled += 1
     if (row.mode === 'shadow') {
+      // 影子行的「待回填」与模型路由的「待回填」不是一回事(建议没被采用就永远不回填),只进 shadow 小计
       shadow.total += 1
       if (done) shadow.filled += 1
       if (typeof row.pick === 'string' && row.pick) shadow.suggested += 1
       if (row.shadow && row.shadow.agreed === true) shadow.agreed += 1
       continue
     }
+    routed += 1
+    if (done) filled += 1
     const role = row.role || ''
     const model = row.pick || ''
     if (role && model) cells.add(`${role}\t${model}`)
@@ -129,7 +133,7 @@ export function summarizeOutcomes(rows) {
   return {
     total: rows.length,
     filled,
-    pending: rows.length - filled,
+    pending: routed - filled,
     cells: cells.size,
     shadow,
   }
