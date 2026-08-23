@@ -51,7 +51,8 @@ sleep 3
 step "首屏标题" opencli browser $S get title
 
 print "\n▸ 2 主导航四面"
-for nav in "控制台" "记忆星图" "系统设置" "对话流"; do
+# e75278e 把侧栏「记忆星图」改成了「记忆」(记忆工作台三栏),aria-label 跟着改;内容锚仍是 019 的「星图已采集」。
+for nav in "控制台" "记忆" "系统设置" "对话流"; do
 	# 侧栏与顶栏都有同名动作(双入口是有意的),用 CSS 收窄到侧栏,避免 semantic_ambiguous
 	step "导航→$nav" opencli browser $S click ".app-rail button[aria-label=\"$nav\"]"
 	sleep 2
@@ -67,8 +68,13 @@ for tab in "概览遥测" "机器与机架" "会话矩阵" "智能体谱系" "�
 	sleep 1.5
 done
 
+# W13:概览额度台账;锚只在载荷到达后出现(loading 态不渲染这句)。
+step "回概览" opencli browser $S click ".console-nav-item[aria-label=\"概览遥测\"]"
+sleep 3
+assert_text "额度台账渲染" "后端全局 stale="
+
 print "\n▸ 4 记忆星图"
-step "进星图" opencli browser $S click ".app-rail button[aria-label=\"记忆星图\"]"
+step "进星图" opencli browser $S click ".app-rail button[aria-label=\"记忆\"]"
 sleep 3
 assert_text "星图渲染" "星图已采集"
 assert_text "补链对照" "补链对照已采集"
@@ -89,9 +95,17 @@ assert_text "技能分母" "使用率分母已采集"
 step "开路由面" opencli browser $S click ".console-nav-item[aria-label=\"路由决策\"]"
 sleep 6
 assert_text "路由面渲染" "路由档位"
+# W10:结果行覆盖视图挂在路由面下方;锚「带完整标签」只在载荷到达后出现(小标题是无条件的,不能当锚)。
+assert_text "结果行覆盖" "带完整标签"
 step "开读图台账" opencli browser $S click ".console-nav-item[aria-label=\"读图台账\"]"
 sleep 6
 assert_text "读图台账渲染" "读图台账已采集"
+step "开轨迹面" opencli browser $S click ".console-nav-item[aria-label=\"轨迹时间流\"]"
+sleep 4
+# 可接入计数与「接入」按钮同源(TraceView 的 joinIdOf):按钮读它、这句也读它。
+# 归档会话不计入 —— 点它会被对话页守卫弹到别处。extract 读不到 <button> 文案,
+# 按钮本体由 trace-join.test.ts 的源锁守(2026-08-22 验收 P1)。
+assert_text "轨迹接入" "可接入"
 
 print "\n▸ 6 收尾"
 step "关闭会话" opencli browser $S close
