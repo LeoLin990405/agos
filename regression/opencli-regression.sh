@@ -68,6 +68,12 @@ for tab in "概览遥测" "机器与机架" "会话矩阵" "智能体谱系" "�
 	sleep 1.5
 done
 
+# 冻结层 codex 放行(2026-08-23):机器区要真渲染机器卡,锚「已配置」只在 /api/fleet/hosts 解析成功后出现;
+# 解析失败时页头是「等待 SSH 探测结果」+ TypeError 原文(08-21 到 08-23 现网就是这样,回归当时只点了 tab 没断内容)。
+step "进机器与机架" opencli browser $S click ".console-nav-item[aria-label=\"机器与机架\"]"
+sleep 8
+assert_text "机器区渲染(hosts 解析成功)" "已配置"
+assert_text "codex 主机原样显示" "codex"
 # W13:概览额度台账;锚只在载荷到达后出现(loading 态不渲染这句)。
 step "回概览" opencli browser $S click ".console-nav-item[aria-label=\"概览遥测\"]"
 sleep 3
