@@ -29,6 +29,7 @@ export interface RoutesPayload {
   at?: number
   decisions: RouteDecision[]
   assemble?: unknown
+  dispatch?: unknown
   stats: {
     total: number
     filled: number

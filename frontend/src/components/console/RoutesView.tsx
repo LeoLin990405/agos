@@ -3,13 +3,27 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { fetchJsonResource, ResourceHttpError, useResource } from '@/lib/useResource';
 import {
+  ASSEMBLE_CONFIRM_COPY,
   ASSEMBLE_COPY,
   ASSEMBLE_EMPTY_COPY,
+  ASSEMBLE_HOW_COPY,
+  deriveAssembleView,
+  DISPATCH_BUTTON_COPY,
+  DISPATCH_CONFIRM_CHECK_COPY,
+  DISPATCH_COPY,
+  DISPATCH_EMPTY_COPY,
+  DISPATCH_NO_TOOLS_COPY,
+  formatViolations,
   LIVE_DISPATCH_OFF_COPY,
   OUTCOME_CONFIRM_COPY,
-  parseAssemblePlan,
+  postAssembleDispatch,
+  postAssembleProposal,
   postRouteOutcome,
+  sourceCopy,
+  TURN_TEXT_PREFIX,
+  TURN_TEXT_REDACTED_COPY,
   type AssemblePlan,
+  type DispatchRun,
 } from './routes-assemble';
 import {
   formatCoverage,
@@ -23,6 +37,7 @@ import {
   type RoutesPayload,
 } from './routes-model';
 
+// 路由面唯一的 GET;写端点全部在 routes-assemble.ts,本文件不发请求(见那边的锁法说明)。
 const fetchRoutes = async (url: string, signal: AbortSignal): Promise<RoutesPayload> =>
   parseRoutesPayload(await fetchJsonResource<unknown>(url, signal));
 
@@ -33,6 +48,17 @@ function errorText(error: { status?: number; message?: string } | undefined): st
   }
   return error.message || '未采集'
 }
+
+/** 操作反馈:失败走 alert,成功走 status。违约也是失败。 */
+type Note = { tone: 'ok' | 'error'; text: string };
+const NoteLine: React.FC<{ note: Note | undefined }> = ({ note }) => {
+  if (!note) return null;
+  return (
+    <p role={note.tone === 'error' ? 'alert' : 'status'} className={`surface-quiet${note.tone === 'error' ? ' surface-status--amber' : ''}`}>
+      {note.text}
+    </p>
+  );
+};
 
 function DecisionRow({
   row,
@@ -52,8 +78,8 @@ function DecisionRow({
       <div>
         <strong className="surface-strong">{row.pick || '未采集'}</strong>
         <div className="surface-cluster">
-          <Badge state={row.source === 'selector' ? 'done' : 'queued'}>{row.source === 'fallback' ? '静态回落' : '选择器'}</Badge>
-          <Badge state={row.role ? 'queued' : 'queued'}>{row.role || '角色未采集'}</Badge>
+          <Badge state={row.source === 'selector' ? 'done' : 'queued'}>{sourceCopy(row.source)}</Badge>
+          <Badge state="queued">{row.role || '角色未采集'}</Badge>
         </div>
       </div>
       <div>
@@ -93,54 +119,73 @@ export const RoutesView: React.FC = () => {
   const payload = resource.data;
   const isBusy = resource.status === 'idle' || resource.status === 'loading';
   const capturedAt = resource.at ? new Date(resource.at).toLocaleString('zh-CN', { hour12: false }) : '未采集';
-  const listedAssemble = parseAssemblePlan(payload?.assemble ?? null);
   const [task, setTask] = useState('');
   const [confirmAssemble, setConfirmAssemble] = useState(false);
+  const [confirmDispatch, setConfirmDispatch] = useState(false);
   const [confirmOutcome, setConfirmOutcome] = useState(false);
   const [proposed, setProposed] = useState<AssemblePlan | null>(null);
-  const [assembleNote, setAssembleNote] = useState<string | undefined>();
-  const [outcomeNote, setOutcomeNote] = useState<string | undefined>();
-  const assemble = proposed ?? listedAssemble;
+  const [localRun, setLocalRun] = useState<DispatchRun | null>(null);
+  const [assembleNote, setAssembleNote] = useState<Note | undefined>();
+  const [dispatchNote, setDispatchNote] = useState<Note | undefined>();
+  const [outcomeNote, setOutcomeNote] = useState<Note | undefined>();
+  // 组装段落的一切判断都在这里算出来;下面的 JSX 只渲染,不自己判断。
+  const view = deriveAssembleView({ payload, proposed, localRun });
 
   const proposeAssemble = async (): Promise<void> => {
     if (!confirmAssemble) return;
     setAssembleNote(undefined);
     try {
-      const response = await fetch('/api/agos/routes/assemble', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ task, confirm: true }),
-      });
-      const payload = await response.json() as unknown;
-      if (!response.ok) {
-        const error = payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
-          ? payload.error
-          : `HTTP ${response.status}`;
-        setAssembleNote(error);
+      const posted = await postAssembleProposal({ task, confirm: true });
+      if (!posted.ok) {
+        setAssembleNote({ tone: 'error', text: posted.error });
+        // 后端是先落盘再返回的:失败也要重读台账,否则屏上由旧载荷算出的句子会和 alert 打架。
+        resource.refresh();
         return;
       }
-      const plan = parseAssemblePlan(payload);
-      if (!plan) {
-        setAssembleNote('组装响应缺少角色名单。');
-        return;
-      }
-      setProposed(plan);
-      setAssembleNote(`${plan.note}。${plan.live}。`);
+      setProposed(posted.plan);
+      setLocalRun(null);
+      // 文案是冻结常量,不从载荷搬运:载荷里的 note 已经校验过等于它(或退役值)。
+      setAssembleNote({ tone: 'ok', text: `${ASSEMBLE_COPY}。${LIVE_DISPATCH_OFF_COPY}。` });
       resource.refresh();
     } catch (caught) {
-      setAssembleNote(caught instanceof Error ? caught.message : '组装失败');
+      setAssembleNote({ tone: 'error', text: caught instanceof Error ? caught.message : '组装请求失败' });
+    }
+  };
+
+  const runDispatch = async (): Promise<void> => {
+    if (!confirmDispatch || view.assemble === null) return;
+    setDispatchNote(undefined);
+    try {
+      const posted = await postAssembleDispatch({ task, ref: view.assemble.id ?? '', confirm: true });
+      if (!posted.ok) {
+        setDispatchNote({ tone: 'error', text: posted.error });
+        // 失败(含 409 不是台账最新提案)就放掉本地提案、重读台账;否则旧提案永远压着台账,每次都 409。
+        setProposed(null);
+        setLocalRun(null);
+        resource.refresh();
+        return;
+      }
+      setLocalRun(posted.dispatch);
+      setDispatchNote({ tone: 'ok', text: `${DISPATCH_COPY}。${DISPATCH_NO_TOOLS_COPY}。` });
+      resource.refresh();
+    } catch (caught) {
+      setDispatchNote({ tone: 'error', text: caught instanceof Error ? caught.message : '试跑请求失败' });
     }
   };
 
   const recordOutcome = async (ref: string, result: 'ok' | 'fail'): Promise<void> => {
     setOutcomeNote(undefined);
-    const recorded = await postRouteOutcome({ ref, result, confirm: confirmOutcome });
-    if (!recorded.ok) {
-      setOutcomeNote(recorded.error);
-      return;
+    try {
+      const recorded = await postRouteOutcome({ ref, result, confirm: confirmOutcome });
+      if (!recorded.ok) {
+        setOutcomeNote({ tone: 'error', text: recorded.error });
+        return;
+      }
+      setOutcomeNote({ tone: 'ok', text: `已回填 ${ref} = ${result === 'ok' ? '成功' : '失败'}。` });
+      resource.refresh();
+    } catch (caught) {
+      setOutcomeNote({ tone: 'error', text: caught instanceof Error ? caught.message : '回填请求失败' });
     }
-    setOutcomeNote(`已回填 ${ref} = ${result === 'ok' ? '成功' : '失败'}。`);
-    resource.refresh();
   };
 
   return (
@@ -149,7 +194,7 @@ export const RoutesView: React.FC = () => {
         <div>
           <h2 className="surface-title">路由决策</h2>
           <p className="surface-lede">
-            outcome 为 null 时显示待回填，不是成功或失败。只报告。{ASSEMBLE_COPY}。{LIVE_DISPATCH_OFF_COPY}。
+            outcome 为 null 时显示待回填，不是成功或失败。只报告。
           </p>
         </div>
         <Button size="sm" disabled={isBusy} onClick={() => resource.refresh()}>
@@ -175,8 +220,8 @@ export const RoutesView: React.FC = () => {
       )}
 
       <section className="surface-section" aria-label="组装提案">
-        <h3 className="surface-h3">{ASSEMBLE_COPY}</h3>
-        <p className="surface-quiet">{LIVE_DISPATCH_OFF_COPY}。小模型只给任务类和首选模型，后验再填三角色。不调用路由 decide 接口。</p>
+        <h3 className="surface-h3">组装提案</h3>
+        <p className="surface-quiet">{ASSEMBLE_HOW_COPY}</p>
         <label className="skills-studio-field">
           <span className="u-microlabel">任务描述</span>
           <textarea
@@ -193,38 +238,86 @@ export const RoutesView: React.FC = () => {
             checked={confirmAssemble}
             onChange={(event) => setConfirmAssemble(event.target.checked)}
           />
-          确认只生成组装提案，不换当前会话模型
+          {ASSEMBLE_CONFIRM_COPY}
         </label>
         <div className="surface-cluster">
           <Button size="sm" disabled={!confirmAssemble || isBusy} onClick={() => void proposeAssemble()}>
             组装提案
           </Button>
         </div>
-        {!assemble && (
-          <p className="surface-quiet">{ASSEMBLE_EMPTY_COPY}。确认后生成三角色，不换当前会话模型。</p>
+        {view.assembleViolations.length > 0 && (
+          <p role="alert" className="surface-quiet surface-status--amber">
+            {formatViolations('组装', view.assembleViolations)}
+          </p>
         )}
-        {assemble && (
+        {view.showAssembleEmpty && (
+          <p className="surface-quiet">{ASSEMBLE_EMPTY_COPY}。确认后生成三角色，不换本跳会话模型。</p>
+        )}
+        {view.assemble && (
           <>
+            {/* 整行由 deriveAssembleView 给:类别句 + 保证句(台账试跑没自报相反证据时)+ 时态句。 */}
+            <p className="surface-quiet">{view.assembleLine}</p>
             <p className="surface-quiet">
-              {assemble.label ? `任务类 ${assemble.label}` : '任务类未采集'}
-              {assemble.pick ? ` · 首选 ${assemble.pick}` : ''}
-              {assemble.source ? ` · ${assemble.source === 'fallback' ? '静态回落' : '选择器'}` : ''}
-              {assemble.distinct === true ? ' · 评审≠实现' : ''}
+              {view.assemble.label ? `任务类 ${view.assemble.label}` : '任务类未采集'}
+              {view.assemble.pick ? ` · 首选 ${view.assemble.pick}` : ' · 首选未采集'}
+              {` · ${sourceCopy(view.assemble.source)}`}
+              {view.assemble.distinct ? ' · 评审≠实现' : ' · 评审与实现同一模型'}
             </p>
             <ul className="surface-list">
-              {assemble.roles.map((row) => (
+              {view.assemble.roles.map((row) => (
                 <li key={row.role} className="surface-row surface-row--inline">
                   <strong className="surface-strong">{row.role}</strong>
                   <code className="surface-code">{row.model}</code>
                 </li>
               ))}
             </ul>
-            {assemble.notes && assemble.notes.length > 0 && (
-              <p className="surface-quiet">{assemble.notes.join(' · ')}</p>
+            {(view.assemble.notes.length > 0 || view.assemble.unknownNotes > 0) && (
+              <p className="surface-quiet">
+                {view.assemble.notes.join(' · ')}
+                {view.assemble.unknownNotes > 0 ? `${view.assemble.notes.length > 0 ? ' · ' : ''}另有 ${view.assemble.unknownNotes} 条说明与同屏角色表不一致或未识别，未显示` : ''}
+              </p>
             )}
           </>
         )}
-        {assembleNote && <p role="status" className="surface-quiet">{assembleNote}</p>}
+        <NoteLine note={assembleNote} />
+        <label className="skills-studio-check">
+          <input
+            type="checkbox"
+            checked={confirmDispatch}
+            onChange={(event) => setConfirmDispatch(event.target.checked)}
+          />
+          {DISPATCH_CONFIRM_CHECK_COPY}
+        </label>
+        <div className="surface-cluster">
+          <Button size="sm" disabled={!confirmDispatch || !view.assemble || isBusy} onClick={() => void runDispatch()}>
+            {DISPATCH_BUTTON_COPY}
+          </Button>
+        </div>
+        {view.dispatchViolations.length > 0 && (
+          <p role="alert" className="surface-quiet surface-status--amber">
+            {formatViolations('试跑', view.dispatchViolations)}
+          </p>
+        )}
+        {view.showDispatchEmpty && (
+          <p className="surface-quiet">{DISPATCH_EMPTY_COPY}。{DISPATCH_NO_TOOLS_COPY}。</p>
+        )}
+        {view.dispatchOfThis && (
+          <>
+            <p className="surface-quiet">{view.dispatchHeader}。{DISPATCH_NO_TOOLS_COPY}。</p>
+            <ul className="surface-list">
+              {view.dispatchOfThis.turns.map((row) => (
+                <li key={`${row.role}:${row.model}`} className="surface-row surface-row--inline">
+                  <strong className="surface-strong">{row.role}</strong>
+                  <code className="surface-code">{row.model}</code>
+                  <span className="surface-quiet">
+                    {row.ok ? (row.redacted ? TURN_TEXT_REDACTED_COPY : `${TURN_TEXT_PREFIX}${row.text ?? ''}`) : row.failure}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        <NoteLine note={dispatchNote} />
       </section>
 
       {payload && (
@@ -242,7 +335,7 @@ export const RoutesView: React.FC = () => {
             />
             {OUTCOME_CONFIRM_COPY}
           </label>
-          {outcomeNote && <p role="status" className="surface-quiet">{outcomeNote}</p>}
+          <NoteLine note={outcomeNote} />
           {payload.decisions.length === 0 ? (
             <p className="surface-quiet">还没有决策记录。成功读到空台账时这里仍会显示路由档位。</p>
           ) : (

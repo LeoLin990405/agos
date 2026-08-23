@@ -288,7 +288,7 @@ export const RealOverview: React.FC<{
     <section className="surface-section" aria-label="产品入口">
       <h3 className="surface-h3">工作室与组装</h3>
       <p className="surface-quiet">
-        技能工作室只写模型根。路由组装是提案，不是已派活。
+        技能工作室只写模型根。路由组装是提案，只定角色不执行。三角色试跑需确认，只出文本、不开子代理。
       </p>
       <div className="surface-cluster">
         <Button size="sm" onClick={onNavigateStudio}>打开工作室</Button>
