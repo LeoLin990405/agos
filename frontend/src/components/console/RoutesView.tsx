@@ -31,6 +31,7 @@ import {
   outcomeValueCopy,
   fallbackReasonCopy,
   parseRoutesPayload,
+  posteriorCopy,
   routesTierNote,
   ROUTES_READY_COPY,
   ruleReasonCopy,
@@ -222,7 +223,7 @@ export const RoutesView: React.FC = () => {
 
       <section className="surface-section" aria-label="组装提案">
         <h3 className="surface-h3">组装提案</h3>
-        <p className="surface-quiet">{ASSEMBLE_HOW_COPY}</p>
+        <p className="surface-quiet">{ASSEMBLE_HOW_COPY}{payload ? ` ${posteriorCopy(payload.stats)}。` : ''}</p>
         <label className="skills-studio-field">
           <span className="u-microlabel">任务描述</span>
           <textarea

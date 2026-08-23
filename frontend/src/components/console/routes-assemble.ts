@@ -38,7 +38,7 @@ export const DISPATCH_CONFIRM_CHECK_COPY = '确认三角色试跑：只出文本
 export const DISPATCH_EMPTY_COPY = '还没有试跑记录';
 export const DISPATCH_BUTTON_COPY = '开始三角色试跑';
 export const ASSEMBLE_CONFIRM_COPY = '确认只生成组装提案，不换本跳会话模型';
-export const ASSEMBLE_HOW_COPY = '组装会在后端内部跑一次选择器（或静态回落）并写一条待回填决策行；界面本身不调用 decide 接口。';
+export const ASSEMBLE_HOW_COPY = '组装会在后端内部跑一次选择器（或静态回落）选首选模型，再按后验排三角色，并写一条待回填决策行；界面本身不调用 decide 接口。';
 export const CONTRACT_VIOLATION_COPY = '响应与冻结契约不符';
 
 /** 时态句(由同屏数据算出)用到的片段。 */

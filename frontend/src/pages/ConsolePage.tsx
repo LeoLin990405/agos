@@ -9,6 +9,7 @@ import { PlansView } from '@/components/console/PlansView';
 import { SkillsView } from '@/components/console/SkillsView';
 import { CouncilLedgerView } from '@/components/console/CouncilLedgerView';
 import { RoutesView } from '@/components/console/RoutesView';
+import { OutcomesCoverage } from '@/components/console/OutcomesCoverage';
 import { TraceView } from '@/components/console/TraceView';
 import { overviewLamp, RealOverview, useConsoleLive } from '@/pages/console-live';
 import type { SkillsConsoleTab } from '@/pages/app-navigation';
@@ -194,7 +195,7 @@ export const ConsolePage: React.FC<ConsolePageProps> = ({
           {activeTab === 'skills' && (
             <SkillsView initialTab={skillsTab} initialSkill={initialSkill} />
           )}
-          {activeTab === 'routes' && <RoutesView />}
+          {activeTab === 'routes' && <><RoutesView /><OutcomesCoverage /></>}
           {activeTab === 'ledger' && <CouncilLedgerView />}
 
           {activeTab === 'overview' && (

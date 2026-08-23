@@ -405,7 +405,8 @@ test('routes-assemble.ts：fetch 只出现为直接被调函数、实参是白�
 
 // ── 写端点锁 ③:仓级 —— TypeScript 扫描器取字面量,不被注释/字符串骗 ──────
 
-const ROUTES_GET_RE = /^\/api\/agos\/routes(\?[^ ]*)?$/;
+/** 只读端点:任何文件都可以 GET。写端点只许在 routes-assemble.ts。 */
+const ROUTES_GET_RE = /^\/api\/agos\/routes(\/outcomes)?(\?[^ ]*)?$/;
 
 function listSources(dir: string): string[] {
   const out: string[] = [];

@@ -37,6 +37,8 @@ export interface RoutesPayload {
     cells: number
     window?: number
     limit?: number
+    /** 后验分母:真实观测条数(outcome∈{ok,fail} 的决策)与 (角色,模型) 格数。老载荷没有。 */
+    posterior?: { observations: number; cells: number }
   }
 }
 
@@ -141,4 +143,15 @@ const FALLBACK_REASON_COPY: Record<string, string> = {
 export function fallbackReasonCopy(reason: string | undefined): string | undefined {
   if (!reason) return undefined
   return FALLBACK_REASON_COPY[reason]
+}
+
+/**
+ * 「后验再填三角色」这句原来是常量;后验今天到底有几条真实观测,得由载荷说(审查 P2-5:当时只有 1 条,
+ * 且指向本来就排第一的模型,输出与静态基准表不可区分)。分母缺席就说未采集。
+ */
+export function posteriorCopy(stats: RoutesPayload['stats']): string {
+  const p = stats.posterior
+  if (!p || !Number.isFinite(p.observations) || !Number.isFinite(p.cells)) return '后验分母未采集'
+  if (p.observations === 0) return '后验暂无真实观测，三角色来自静态基准表'
+  return `后验真实观测 ${p.observations} 条，覆盖 ${p.cells} 个角色×模型格`
 }
