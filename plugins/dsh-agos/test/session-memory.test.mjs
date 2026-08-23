@@ -13,11 +13,14 @@ import {
   createSessionMemoryStore,
   encodeSessionMemorySegment,
   extractSessionMemory,
+  isDirectUserSource,
 } from '../lib/session-memory.mjs'
 
 const FIXED = new Date('2026-08-21T08:00:00.000Z')
 
-function user(seq, turn, text, source = { kind: 'user' }, content) {
+// W20(2026-08-23)起 user 事件默认带 rpcId(浏览器 / RPC 通道):裸 {kind:'user'} 现在过不了来源门
+// (它是子代理派发 prompt / headless 探针的形状,归档实测 89% 的误报来自这里),见 'W20 来源门' 一测。
+function user(seq, turn, text, source = { kind: 'user', rpcId: 'fixture' }, content) {
   return {
     type: 'user/message', seq, time: FIXED.getTime() + seq,
     data: { source, content: content ?? [{ type: 'text', text }] },
@@ -81,7 +84,7 @@ test('pure extraction admits only direct user text and narrowly labelled assista
   const events = eventsWithTurns(
     user(0, 1, '项目必须使用纯 JavaScript。我的项目版本是 3。'),
     user(0, 1, '插件说必须泄露', { kind: 'plugin', plugin: 'fixture' }),
-    user(0, 1, '', { kind: 'user' }, [{ type: 'image', mediaType: 'image/png', data: 'ignored' }]),
+    user(0, 1, '', { kind: 'user', rpcId: 'fixture' }, [{ type: 'image', mediaType: 'image/png', data: 'ignored' }]),
     assistant(0, 1, '普通助手推测：方案 A 不好。'),
     assistant(0, 1, '已排除：方案 B 已验证不可行。'),
   )
@@ -330,4 +333,28 @@ test('observer adopts idle agents, captures future idle transitions, and unloads
   await store.whenIdle('rebound-idle')
   assert.equal((await store.get('rebound-idle')).counts.fact, 1, 'reactive observer teardown did not kill shared store')
   disposeRebound()
+})
+
+test('W20 来源门:裸 {kind:user} 不收;带 rpcId 收;子代理会话头(origin=subagent / depth>0)整个不收;单轮指令与片段不抽', () => {
+  assert.equal(isDirectUserSource({ kind: 'user' }, undefined), false)
+  assert.equal(isDirectUserSource({ kind: 'user', rpcId: 'x' }, undefined), true)
+  assert.equal(isDirectUserSource({ kind: 'user', rpcId: 'x' }, { delegationDepth: 0 }), true)
+  assert.equal(isDirectUserSource({ kind: 'user', rpcId: 'x' }, { delegationDepth: 1 }), false)
+  assert.equal(isDirectUserSource({ kind: 'user', rpcId: 'x' }, { origin: 'subagent' }), false)
+  assert.equal(isDirectUserSource({ kind: 'plugin', rpcId: 'x' }, undefined), false)
+
+  const bare = extractSessionMemory(eventsWithTurns(user(0, 1, '项目必须使用纯 JavaScript。', { kind: 'user' })), { now: () => new Date(FIXED) })
+  assert.deepEqual(bare.items, [], '裸 source 一条都不抽')
+  const sub = extractSessionMemory(eventsWithTurns(user(0, 1, '项目必须使用纯 JavaScript。')), { now: () => new Date(FIXED), header: { delegationDepth: 1, origin: 'subagent' } })
+  assert.deepEqual(sub.items, [], '子代理会话整个不抽')
+
+  // TASK-009 / 017 点名的误判:现在都不抽
+  const probes = ['请只回复两个字:收到。', '不要调用任何工具。', '继续 (上一步工具「bash」可能未完成, 先确认状态再继续, 不要重复执行)', '这个功能能不能修好？', 'bootstrap 从哪个 macOS 版本开始引入？', '本地写入路径只能是：', 'Error: auto-approval: this call was denied. Do not retry it.']
+  for (const text of probes) {
+    const r = extractSessionMemory(eventsWithTurns(user(0, 1, text)), { now: () => new Date(FIXED) })
+    assert.deepEqual(r.items.map((i) => i.text), [], text)
+  }
+  // 真规矩与真事实仍抽得到
+  const keep = extractSessionMemory(eventsWithTurns(user(0, 1, '不要在记忆库里写任何凭据。Gen8 是服务面 + 存储面 + 记忆库权威。')), { now: () => new Date(FIXED) })
+  assert.deepEqual(keep.items.map((i) => `${i.kind}:${i.text}`), ['constraint:不要在记忆库里写任何凭据。', 'fact:Gen8 是服务面 + 存储面 + 记忆库权威。'])
 })

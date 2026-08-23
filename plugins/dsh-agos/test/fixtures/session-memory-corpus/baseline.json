@@ -1,13 +1,13 @@
 {
   "inTotal": 198,
   "outTotal": 198,
-  "inPass": 151,
-  "outPass": 144,
+  "inPass": 188,
+  "outPass": 183,
   "assistant": {
     "total": 43,
-    "pass": 41
+    "pass": 43
   },
   "corpusSha256": "bafa1933a956ecb88453c9ce0890f6351a81eeb3b91bcc918b34c7a14f8987d0",
-  "rulesNote": "现规则(W20 改动前):只看文本不看来源;祈使句即 constraint imp5;评分器修正后重算",
-  "acceptedAt": "2026-08-23T10:40:49.021Z"
+  "rulesNote": "W20 第二步规则:来源门(rpcId + 非子代理会话头)+ 单轮指令/片段/报错否决 + 去「需要」/排除「能不能」+ fact 排除问句/标记行并放宽具名实体陈述与机器:IP + 助手 rejected 显式结论句",
+  "acceptedAt": "2026-08-23T10:42:16.092Z"
 }

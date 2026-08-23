@@ -101,14 +101,30 @@ function splitCandidates(text) {
 /** W20 尺专用:把切分器原样暴露给语料挖矿器,保证语料里的「句」与规则看到的「句」同一口径。不改行为。 */
 export const splitCandidatesForCorpus = splitCandidates
 
+/**
+ * W20(2026-08-23)起的规则。改动前的读数(尺:test/fixtures/session-memory-corpus/baseline.json 的第一版)
+ * constraint 精确率 0.24 / 0.26:任何祈使句都被当成持久约束。三处改法:
+ *  1) 单轮指令否决:「只回复…」「不要调用工具」「原样呈现」、auto-continue 模板——这些是本轮输出/工具指令,不是规矩;
+ *  2) constraint 关键词去掉「需要」(问句与陈述里到处都是),「不能」排除「能不能」;
+ *  3) fact 先排除问句 / 表格行 / 代码围栏 / 命令行,再放宽到「带具名实体的 X 是 Y」与「机器:IP」两种陈述。
+ * 规则仍然只看文本;说话人来源在 extractSessionMemory 的来源门里判(必须带 rpcId 的浏览器通道)。
+ */
+const TURN_ONLY_RE = /(?:只回复|只回答|只输出|只呈现|只把|只做这一件事|只列出|原样|不要调用|不要使用(?:任何)?工具|禁止调用工具|不要解释|不要重复执行|不要传\s|不要自己|自己不要|不要重试|不要排查|不要读文件|不要做(?:其他|别的)|请按流程|按流程申请|先确认状态再继续|一句话|两个字|然后等它|告诉我)/u
+// 片段(以冒号收尾的引子)与贴回来的报错,两类都不是话
+const FRAGMENT_RE = /[:：]\s*$|^(?:Error|Traceback|Exception)\b/u
+const AUTO_CONTINUE_RE = /^继续\s*[（(]/u
+const QUESTION_RE = /[？?]\s*$|(?:哪个|什么|怎么|怎样|如何|能不能|可不可以|吗|呢)(?:[？?，,。]|$)/u
+const MARKUP_LINE_RE = /^(?:[|`#]|```|[-*]\s*`)|^(?:ssh|curl|tailscale|cd|ls|cat|node|npm|git)\s/u
+
 function classifyUserText(text) {
   if (/^(?:已排除|排除|放弃)\s*[:：]?/u.test(text)
     || /(?:试过|尝试过|验证过).{0,40}(?:不行|失败|不可用|行不通)/u.test(text)
     || /\b(?:tried|tested).{0,60}\b(?:failed|did not work|doesn't work)\b/iu.test(text)) {
     return { kind: 'rejected', importance: 5 }
   }
-  if (/(?:必须|务必|禁止|不许|只允许|只能|不能|不要|不得|需要|应当)/u.test(text)
-    || /\b(?:must|never|do not|don't|only|cannot|can't|required|should)\b/iu.test(text)) {
+  if (AUTO_CONTINUE_RE.test(text) || TURN_ONLY_RE.test(text) || FRAGMENT_RE.test(text)) return undefined
+  if (/(?:必须|务必|禁止|不许|只允许|只能|(?<!能)不能|不要|不得|应当|都要|一律)/u.test(text)
+    || /\b(?:must|never|do not|don't|cannot|can't|required)\b/iu.test(text)) {
     return { kind: 'constraint', importance: 5 }
   }
   if (/(?:我|我们)?(?:偏好|更喜欢|喜欢|希望|倾向|习惯)/u.test(text)
@@ -116,9 +132,14 @@ function classifyUserText(text) {
     return { kind: 'preference', importance: 4 }
   }
   // Pure rules cannot determine truth. Keep this gate intentionally narrow:
-  // direct-user declaratives with a concrete first-person/project/state cue.
+  // declaratives only — no questions, no markdown/table/code lines, no shell commands.
+  if (QUESTION_RE.test(text) || MARKUP_LINE_RE.test(text)) return undefined
   if (/(?:^|[，, ])(?:我(?:的|们)?|本机|当前|目前|项目|仓库|服务|端口|路径|版本).{1,}/u.test(text)
-    || /\b(?:my|our|current|project|repository|service|version)\b.{1,}\b(?:is|are|uses?|runs?|lives?)\b/iu.test(text)) {
+    || /\b(?:my|our|current|project|repository|service|version)\b.{1,}\b(?:is|are|uses?|runs?|lives?)\b/iu.test(text)
+    // 「具名实体 是/为 …」:主语里得有 ASCII 字母或数字(Gen8 / M4-Knowledge / NucBoxG3),纯中文指代(这个是…)不算
+    || /^[-*]?\s*[^，。,]{0,24}[A-Za-z0-9][^，。,]{0,24}(?:是(?!否)|(?<![作以因认成])为)\s*\S/u.test(text)
+    // 「机器:IP」行
+    || /[：:]\s*`?\d{1,3}(?:\.\d{1,3}){3}/u.test(text)) {
     return { kind: 'fact', importance: 3 }
   }
   return undefined
@@ -127,7 +148,11 @@ function classifyUserText(text) {
 function classifyAssistantRejected(text) {
   // Assistant output is not trusted as fact. Only an explicit rejection label
   // becomes a candidate, and only as kind=rejected.
-  if (/^(?:\[已排除\]|已排除\s*[:：]|REJECTED\s*[:：])/iu.test(text)) {
+  // W20:显式结论句也算——「试过/先写 X,发现 … 无/不支持/不可用 …,改用/放弃 Y」「… 放弃重试」;
+  // 单独一个「改用 X:」是过程叙述(语料里 43 句有 20+ 句这种),不算。
+  if (/^(?:\[已排除\]|已排除\s*[:：]|REJECTED\s*[:：])/iu.test(text)
+    || /(?:试过|曾先写|尝试过|先写).{0,40}(?:发现|但).{0,40}(?:无此|没有|不支持|不可用|不存在|失败).{0,60}(?:改用|放弃|换成)/u.test(text)
+    || /(?:都是同一失败模式|均失败|全部失败).{0,30}放弃/u.test(text)) {
     return { kind: 'rejected', importance: 4 }
   }
   return undefined
@@ -149,6 +174,17 @@ function itemId(kind, text) {
   return createHash('sha256').update(kind + '\0' + text).digest('hex').slice(0, 24)
 }
 
+/** W20 来源门(纯函数,可单测)。 */
+export function isDirectUserSource(source, header) {
+  if (!source || source.kind !== 'user') return false
+  if (typeof source.rpcId !== 'string' || source.rpcId === '') return false
+  if (header && typeof header === 'object') {
+    if (header.origin === 'subagent') return false
+    if (Number.isInteger(header.delegationDepth) && header.delegationDepth > 0) return false
+  }
+  return true
+}
+
 /** Pure, deterministic extraction. It never calls a model or reads persistence. */
 export function extractSessionMemory(events, options = {}) {
   const afterSeq = Number.isSafeInteger(options.afterSeq) ? options.afterSeq : -1
@@ -168,6 +204,11 @@ export function extractSessionMemory(events, options = {}) {
     let classify
     let sourceTurn = currentTurn
     if (event.type === 'user/message' && event.data?.source?.kind === 'user') {
+      // W20 来源门:只收浏览器 / RPC 通道(source 带 rpcId)的用户文本。裸 {kind:'user'} 是子代理派发 prompt
+      // 或 headless 直发探针——归档实测 89% 的产出来自这里,没有一条是 Leo 的规矩。
+      // 会话头(options.header)若给了,子代理会话(origin==='subagent' 或 delegationDepth>0)整个不收:
+      // 它的 user 文本是父模型写的任务书。两信号都看;都缺席按「不是 Leo 的话」处理。
+      if (!isDirectUserSource(event.data.source, options.header)) continue
       parts = textParts(event.data.content)
       classify = classifyUserText
     } else if (event.type === 'assistant/message' && event.data?.message?.source?.kind === 'model') {
@@ -398,10 +439,10 @@ export function createSessionMemoryStore(options = {}) {
     sessionId, Buffer.from(JSON.stringify(document, null, 2) + '\n'), mayCommit,
   )
 
-  const processSnapshot = async (sessionId, snapshot, generation) => {
+  const processSnapshot = async (sessionId, snapshot, generation, header) => {
     if (disposed || tombstones.has(sessionId) || stateFor(sessionId).generation !== generation) return
     const previous = await readDocument(sessionId)
-    const extracted = extractSessionMemory(snapshot, { afterSeq: previous.watermark, now })
+    const extracted = extractSessionMemory(snapshot, { afterSeq: previous.watermark, now, header })
     if (extracted.watermark <= previous.watermark) return
     const next = {
       version: VERSION,
@@ -424,7 +465,7 @@ export function createSessionMemoryStore(options = {}) {
       while (state.pending && !disposed && !tombstones.has(sessionId)) {
         const pending = state.pending
         state.pending = undefined
-        await processSnapshot(sessionId, pending.snapshot, pending.generation)
+        await processSnapshot(sessionId, pending.snapshot, pending.generation, pending.header)
       }
     })()
     state.running = operation
@@ -445,8 +486,10 @@ export function createSessionMemoryStore(options = {}) {
     // alias synchronously at the idle transition. Deep-freezing the detached
     // copy documents and enforces the background worker's read-only contract.
     const snapshot = deepFreeze(structuredClone(agent.session.events))
+    // W20:会话头随快照走(子代理会话整个不抽);header 不是事件,单独克隆。
+    const header = agent.session.header && typeof agent.session.header === 'object' ? deepFreeze(structuredClone(agent.session.header)) : undefined
     const state = stateFor(sessionId)
-    state.pending = { snapshot, generation: state.generation }
+    state.pending = { snapshot, header, generation: state.generation }
     if (!state.scheduled && !state.running) state.scheduled = setImmediate(() => drain(sessionId))
     return true
   }
