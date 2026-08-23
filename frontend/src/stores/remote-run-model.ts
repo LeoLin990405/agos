@@ -65,7 +65,12 @@ export interface FleetHostRun {
 
 export interface FleetHost {
   name: string
-  kind: 'local' | 'remote'
+  /**
+   * 2026-08-23(Leo 拍板,冻结层唯一改动):宿主自 08-21 起会吐 kind:'codex' 等新种类,这里原来对
+   * local/remote 之外直接 throw,整个机器列表跟着挂(FleetView「暂不可用」、派发弹窗零候选)。
+   * 现在原样放行任意非空种类,由各消费者按 === 'remote' 自己筛(DispatchModal/FleetView 已如此)。
+   */
+  kind: 'local' | 'remote' | (string & {})
   model: string
   tags: string[]
   maxConcurrency: number
@@ -352,8 +357,7 @@ export function parseFleetHostsResponse(value: unknown): FleetHost[] {
   return array(root['hosts'], 'fleet hosts response.hosts').map((entry, index) => {
     const label = `fleet hosts response.hosts[${index}]`
     const row = object(entry, label)
-    const kind = string(row['kind'], `${label}.kind`)
-    if (kind !== 'local' && kind !== 'remote') throw new TypeError(`${label}.kind must be local or remote`)
+    const kind = nonEmptyString(row['kind'], `${label}.kind`)
     return {
       name: nonEmptyString(row['name'], `${label}.name`),
       kind,
