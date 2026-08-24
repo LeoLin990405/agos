@@ -143,7 +143,7 @@ test('关联行与回填:fold 不把 shadow-link 当决策;只看建议那台机
   const stats = summarizeOutcomes(folded2.decisions)
   assert.equal(stats.cells, 1, '只有 dec-9 的 coder/qwen 格')
   assert.equal(stats.pending, 1); assert.equal(stats.total, 4)
-  assert.deepEqual(stats.shadow, { total: 3, filled: 2, pending: 1, suggested: 2, agreed: 0 })
+  assert.deepEqual(stats.shadow, { total: 3, filled: 2, pending: 1, suggested: 2, agreed: 0, filledOk: 1 })
   assert.deepEqual(allocationStateFromLedger([...rows, ...fills]), [], '影子行不进 Beta 后验')
   assert.equal(isShadowDecisionRef(rows, 'dec-1787000000000-abcdef12'), true); assert.equal(isShadowDecisionRef(rows, 'dec-9'), false)
 })
@@ -218,7 +218,7 @@ test('apply():POST /routes/shadow 未配置选择器时写 fallback 行(零模�
   assert.equal(listed.status, 200)
   const row = listed.body.decisions.find((d) => d.id === id)
   assert.equal(row.batchRef, 'b-f785f00d-8463-4369-9a02-4bf6dc7e3024'); assert.equal(row.outcome, null); assert.equal(row.adopted, null); assert.deepEqual(row.actualHosts, ['leo-01'])
-  assert.deepEqual(listed.body.stats.shadow, { total: 1, filled: 0, pending: 1, suggested: 0, agreed: 0 })
+  assert.deepEqual(listed.body.stats.shadow, { total: 1, filled: 0, pending: 1, suggested: 0, agreed: 0, filledOk: 0 })
   assert.equal(listed.body.stats.cells, 0, '影子行不进 (角色,模型) 格')
 
   // 手工放一条「选择器成功且被采用」的影子行 + 关联,终态到了 → GET 回填 ok;回落行永远不回填
@@ -237,7 +237,7 @@ test('apply():POST /routes/shadow 未配置选择器时写 fallback 行(零模�
   // 手工胜负写到影子行 → 400
   const manual = await call(routes.get('/api/agos/routes/outcome'), 'POST', '/api/agos/routes/outcome', { ref: id, result: 'ok', source: 'manual' })
   assert.equal(manual.status, 400); assert.match(manual.body.error, /影子决策行只接受 fleet 终态回填/)
-  assert.deepEqual(listed.body.stats.shadow, { total: 2, filled: 1, pending: 1, suggested: 1, agreed: 1 })
+  assert.deepEqual(listed.body.stats.shadow, { total: 2, filled: 1, pending: 1, suggested: 1, agreed: 1, filledOk: 1 })
   const lines = readLedgerLines(audit)
   assert.equal(lines.filter((r) => r.kind === 'outcome').length, 1)
   // 再 GET 一次不重复回填

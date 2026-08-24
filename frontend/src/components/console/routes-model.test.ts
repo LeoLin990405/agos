@@ -129,10 +129,16 @@ test('posteriorCopy 与 decisionReasonCopy 由数据算出,不搬运原码', () 
 })
 
 test('W17 路由页文案:覆盖句把影子行单列;影子行徽章按 pick/batchRef/adopted/outcome 算;shadowRowCopy 各分支', async () => {
-  const { formatCoverage, routedTotal, shadowOutcomeCopy, shadowRowCopy } = await import('./routes-model.ts')
+  const { formatCoverage, routedTotal, shadowOutcomeCopy, shadowRowCopy, shadowScoreCopy } = await import('./routes-model.ts')
   const stats = { total: 9, window: 8, limit: 50, filled: 1, pending: 7, cells: 5, shadow: { total: 1, filled: 0, pending: 1, suggested: 1, agreed: 0 } }
   assert.equal(routedTotal(stats), 8)
-  assert.equal(formatCoverage(stats), '显示最近 8 条，台账共 9 条（模型路由 8 条）· 已回填结果 1 条 · 覆盖 5 个 (角色, 模型) 格 · 另有 1 条影子建议行（1 条有建议、0 条已按 fleet 终态回填；不计入格与待回填）')
+  assert.equal(formatCoverage(stats), '显示最近 8 条，台账共 9 条（模型路由 8 条）· 已回填结果 1 条 · 覆盖 5 个 (角色, 模型) 格 · 另有 1 条影子建议行（1 条有建议、0 条已按 fleet 终态回填；不计入格与待回填）；与勾选一致 0/1')
+  // shadowScoreCopy:成绩句是载荷的函数——不同载荷不同句;n<5 拒绝出比率;老载荷缺 filledOk 不默认成 0
+  assert.equal(shadowScoreCopy({ filled: 0, suggested: 0, agreed: 0 }), '')
+  assert.equal(shadowScoreCopy({ filled: 1, suggested: 7, agreed: 2, filledOk: 1 }), '；与勾选一致 2/7；已回填 1 条（成功 1）——样本不足，不出比率')
+  assert.equal(shadowScoreCopy({ filled: 6, suggested: 8, agreed: 3, filledOk: 4 }), '；与勾选一致 3/8；被采纳建议终态 成功 4/6')
+  assert.equal(shadowScoreCopy({ filled: 2, suggested: 2, agreed: 1 }), '；与勾选一致 1/2；已回填 2 条（胜负构成未采集）——样本不足，不出比率')
+  assert.notEqual(shadowScoreCopy({ filled: 1, suggested: 7, agreed: 2, filledOk: 1 }), shadowScoreCopy({ filled: 1, suggested: 7, agreed: 2, filledOk: 0 }), '成功数变句子必须变')
   assert.equal(formatCoverage({ total: 8, filled: 1, pending: 7, cells: 5 }), '显示最近 8 条，台账共 8 条（模型路由 8 条）· 已回填结果 1 条 · 覆盖 5 个 (角色, 模型) 格')
   const base = { id: 'dec-1', mode: 'shadow', pick: 'knowledge-m4', source: 'selector', outcome: null, shadow: { chosen: ['leo-01'], agreed: false } }
   assert.equal(shadowOutcomeCopy(base), '待派发关联')

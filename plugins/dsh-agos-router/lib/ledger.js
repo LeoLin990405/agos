@@ -111,7 +111,7 @@ export function publicizeDecision(row) {
 export function summarizeOutcomes(rows) {
   const cells = new Set()
   let filled = 0
-  const shadow = { total: 0, filled: 0, pending: 0, suggested: 0, agreed: 0 }
+  const shadow = { total: 0, filled: 0, pending: 0, suggested: 0, agreed: 0, filledOk: 0 }
   let routed = 0
   for (const row of rows) {
     const done = row.outcome !== null && row.outcome !== undefined
@@ -119,6 +119,8 @@ export function summarizeOutcomes(rows) {
       // 影子行的「待回填」与模型路由的「待回填」不是一回事(建议没被采用就永远不回填),只进 shadow 小计
       shadow.total += 1
       if (done) shadow.filled += 1
+      // filledOk 只认 fleet 终态回填出的 'ok'(影子行拒收手工胜负,这里天然只有 fleet-end 来源)
+      if (row.outcome === 'ok') shadow.filledOk += 1
       if (typeof row.pick === 'string' && row.pick) shadow.suggested += 1
       if (row.shadow && row.shadow.agreed === true) shadow.agreed += 1
       continue

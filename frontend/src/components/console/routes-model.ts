@@ -45,7 +45,7 @@ export interface RoutesPayload {
     window?: number
     limit?: number
     /** W17:影子行小计(total 含它们,filled/pending/cells 不含)。老载荷没有。 */
-    shadow?: { total: number; filled: number; pending: number; suggested: number; agreed: number }
+    shadow?: { total: number; filled: number; pending: number; suggested: number; agreed: number; filledOk?: number }
     /** 后验分母:真实观测条数(outcome∈{ok,fail} 的决策)与 (角色,模型) 格数。老载荷没有。 */
     posterior?: { observations: number; cells: number }
   }
@@ -81,11 +81,29 @@ export function routedTotal(stats: RoutesPayload['stats']): number {
   return stats.total - (stats.shadow?.total ?? 0)
 }
 
+/**
+ * 影子建议的成绩句——整句由载荷算出,永不写死比率:
+ * - 一致数只在有建议时谈(suggested=0 时「一致」无意义);
+ * - 回填 <5 条时只报计数不出比率(n=1 的百分比是装饰不是测量);
+ * - 老载荷没有 filledOk 字段 → 胜负构成「未采集」,不默认成 0。
+ */
+export function shadowScoreCopy(shadow: { filled: number; suggested: number; agreed: number; filledOk?: number }): string {
+  const parts: string[] = []
+  if (shadow.suggested > 0) parts.push(`与勾选一致 ${shadow.agreed}/${shadow.suggested}`)
+  if (shadow.filled > 0) {
+    const okPart = shadow.filledOk === undefined ? '胜负构成未采集' : `成功 ${shadow.filledOk}`
+    parts.push(shadow.filled >= 5
+      ? `被采纳建议终态 ${okPart}/${shadow.filled}`
+      : `已回填 ${shadow.filled} 条（${okPart}）——样本不足，不出比率`)
+  }
+  return parts.length > 0 ? `；${parts.join('；')}` : ''
+}
+
 export function formatCoverage(stats: RoutesPayload['stats']): string {
   const window = stats.window ?? stats.total
   const shadow = stats.shadow
   const shadowPart = shadow !== undefined && shadow.total > 0
-    ? ` · 另有 ${shadow.total} 条影子建议行（${shadow.suggested} 条有建议、${shadow.filled} 条已按 fleet 终态回填；不计入格与待回填）`
+    ? ` · 另有 ${shadow.total} 条影子建议行（${shadow.suggested} 条有建议、${shadow.filled} 条已按 fleet 终态回填；不计入格与待回填）${shadowScoreCopy(shadow)}`
     : ''
   return `显示最近 ${window} 条，台账共 ${stats.total} 条（模型路由 ${routedTotal(stats)} 条）· 已回填结果 ${stats.filled} 条 · 覆盖 ${stats.cells} 个 (角色, 模型) 格${shadowPart}`
 }
