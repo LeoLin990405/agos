@@ -139,6 +139,10 @@ export interface AssembleRole {
 
 /** 解析结果里没有 note / live:界面文案由冻结常量给出,不从载荷搬运。 */
 export interface AssemblePlan {
+  /** RSI:三角色是均值排的还是一次 Thompson 采样排的;老行没有此字段(不臆断为 mean)。 */
+  ranking?: 'mean' | 'thompson';
+  /** RSI:读取期衰减口径;后端没开衰减时为 undefined。 */
+  decay?: { halfLifeDays: number; effectiveObservations: number };
   id?: string;
   label?: string;
   source?: 'selector' | 'fallback';
@@ -168,6 +172,12 @@ export interface DispatchTurn {
 
 export interface DispatchRun {
   id?: string;
+  /** RSI 评审飞轮:整行判定的解析结果;null=没有可用判定(成因看 verdictNull);老行没有此字段。 */
+  verdict?: 'ok' | 'fail' | null;
+  /** verdict 为 null 时的成因码(REVIEWER_ABSENT/UNPARSEABLE/AMBIGUOUS);判定在场时为 null。 */
+  verdictNull?: string | null;
+  verdictFed?: boolean;
+  verdictSkip?: string | null;
   /** 指向被试跑的那条组装提案(asm-…)。界面靠它判断「这条提案试跑过没有」。 */
   ref?: string;
   dispatched: true;
@@ -317,8 +327,16 @@ export function parseAssemblePlan(value: unknown): AssemblePlan | null {
   const consistent = (note: string): boolean => (note === NOTE_DISTINCT_COPY ? true : note === NOTE_POOL_SMALL_COPY ? !distinct : false);
   const notes = rawNotes.filter((item): item is string => typeof item === 'string' && consistent(item));
   const label = typeof root.label === 'string' && root.label.length <= LABEL_LIMIT && LABEL_RE.test(root.label) ? root.label : undefined;
+  const decayRoot = isRecord(root.decay) ? root.decay : undefined;
+  const decay = decayRoot
+    && typeof decayRoot.halfLifeDays === 'number' && Number.isFinite(decayRoot.halfLifeDays) && decayRoot.halfLifeDays > 0
+    && typeof decayRoot.effectiveObservations === 'number' && Number.isFinite(decayRoot.effectiveObservations) && decayRoot.effectiveObservations >= 0
+    ? { halfLifeDays: decayRoot.halfLifeDays, effectiveObservations: decayRoot.effectiveObservations }
+    : undefined;
   return {
     id: idField(root.id, ASSEMBLE_ID_RE),
+    ranking: root.ranking === 'thompson' || root.ranking === 'mean' ? root.ranking : undefined,
+    decay,
     label,
     source: root.source === 'selector' || root.source === 'fallback' ? root.source : undefined,
     pick: idField(root.pick, MODEL_ID_RE),
@@ -365,6 +383,10 @@ export function parseDispatchRun(value: unknown): DispatchRun | null {
   return {
     id: idField(root.id, DISPATCH_ID_RE),
     ref: idField(root.ref, ASSEMBLE_ID_RE),
+    verdict: root.verdict === 'ok' || root.verdict === 'fail' ? root.verdict : root.verdict === null ? null : undefined,
+    verdictNull: typeof root.verdictNull === 'string' ? root.verdictNull : null,
+    verdictFed: root.verdictFed === true,
+    verdictSkip: typeof root.verdictSkip === 'string' ? root.verdictSkip : null,
     dispatched: true,
     sessionSwitched: false,
     outcome: null,
@@ -376,6 +398,45 @@ export function sourceCopy(source: string | undefined): string {
   if (source === 'fallback') return '静态回落';
   if (source === 'selector') return '选择器';
   return '来源未采集';
+}
+
+/** RSI:排序口径必须能被读出来——采样分数是抽样值,不许装成均值。老行(无字段)不说话。 */
+export function rankingCopy(plan: { ranking?: 'mean' | 'thompson'; decay?: { halfLifeDays: number; effectiveObservations: number } }): string | undefined {
+  if (plan.ranking === undefined) return undefined;
+  const base = plan.ranking === 'thompson'
+    ? '三角色按一次 Thompson 采样排出——分数是抽样值，不是均值'
+    : '三角色按后验均值排出';
+  return plan.decay
+    ? `${base} · 后验按半衰期 ${plan.decay.halfLifeDays} 天加权，有效证据 ${plan.decay.effectiveObservations} 份`
+    : base;
+}
+
+const VERDICT_SKIP_COPY: Record<string, string> = {
+  IMPLEMENTER_ABSENT: '实现缺席，判定不入账',
+  ALREADY_JUDGED: '该决策已有胜负，判定只展示不入账',
+  NO_LEDGER: '无台账读取端，判定未入账',
+  NO_DECISION_REF: '试跑未挂决策引用，判定未入账',
+  DECISION_NOT_FOUND: '决策行未找到，判定未入账',
+};
+
+const VERDICT_NULL_COPY: Record<string, string> = {
+  REVIEWER_ABSENT: '评审角色未产出，判定未采集',
+  UNPARSEABLE: '评审未给出整行「判定：通过|驳回」，判定未采集',
+  AMBIGUOUS: '评审同时给出两种整行判定，按未采集处理',
+};
+
+/** RSI 评审飞轮:判定行文案由载荷算出。老行(无字段)不说话;null 的三种成因各说各的,不许张冠李戴。 */
+export function verdictLineCopy(run: { verdict?: 'ok' | 'fail' | null; verdictNull?: string | null; verdictFed?: boolean; verdictSkip?: string | null }): string | undefined {
+  if (run.verdict === undefined) return undefined;
+  if (run.verdict === null) {
+    return typeof run.verdictNull === 'string'
+      ? (VERDICT_NULL_COPY[run.verdictNull] ?? '判定未采集（成因码未识别）')
+      : '判定未采集（成因未采集）';
+  }
+  const word = run.verdict === 'ok' ? '通过' : '驳回';
+  if (run.verdictFed === true) return `评审判定：${word} · 已入账（source: reviewer-verdict）`;
+  const why = typeof run.verdictSkip === 'string' ? (VERDICT_SKIP_COPY[run.verdictSkip] ?? '判定未入账（原因码未识别）') : '判定未入账（原因未采集）';
+  return `评审判定：${word} · ${why}`;
 }
 
 /** W17:影子决策行在路由页的来源文案——它没驱动任何派发,只是「如果让选择器选」的记录。 */

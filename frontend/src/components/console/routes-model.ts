@@ -47,7 +47,7 @@ export interface RoutesPayload {
     /** W17:影子行小计(total 含它们,filled/pending/cells 不含)。老载荷没有。 */
     shadow?: { total: number; filled: number; pending: number; suggested: number; agreed: number; filledOk?: number }
     /** 后验分母:真实观测条数(outcome∈{ok,fail} 的决策)与 (角色,模型) 格数。老载荷没有。 */
-    posterior?: { observations: number; cells: number }
+    posterior?: { observations: number; cells: number; halfLifeDays?: number }
   }
 }
 
@@ -200,7 +200,11 @@ export function posteriorCopy(stats: RoutesPayload['stats']): string {
   const p = stats.posterior
   if (!p || !Number.isFinite(p.observations) || !Number.isFinite(p.cells)) return '后验分母未采集'
   if (p.observations === 0) return '后验暂无真实观测，三角色来自静态基准表'
-  return `后验真实观测 ${p.observations} 条，落在 ${p.cells} 个已有胜负的（角色，模型）格（与上面「覆盖 N 个格」不是一个口径：那个数所有决策都算，这个只算有胜负的）`
+  // RSI:半衰期开着时 observations 是加权后的有效证据量(可为小数),口径必须点明。
+  const unit = Number.isFinite(p.halfLifeDays) && (p.halfLifeDays as number) > 0
+    ? `份有效证据（半衰期 ${p.halfLifeDays} 天加权）`
+    : '条'
+  return `后验真实观测 ${p.observations} ${unit}，落在 ${p.cells} 个已有胜负的（角色，模型）格（与上面「覆盖 N 个格」不是一个口径：那个数所有决策都算，这个只算有胜负的）`
 }
 
 /**

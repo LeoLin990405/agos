@@ -276,10 +276,17 @@ export function apply(ctx, rawConfig) {
     const links = shadowLinks(readLedgerLines(cfg.auditFile))
     listed.decisions = attachShadowLinks(listed.decisions, links, links.size > 0 ? fleetBatchRuns(readFleetRuns(homedir())) : new Map())
     // 后验的分母写进载荷:真实观测条数与格子数,由台账算出。前端不得自称「后验再填三角色」而不给数(审查 P2-5)。
-    const state = allocationStateFromLedger(readLedgerLines(cfg.auditFile))
+    const state = allocationStateFromLedger(readLedgerLines(cfg.auditFile), { halfLifeDays: cfg.posteriorHalfLifeDays })
     listed.stats.posterior = {
-      observations: state.reduce((n, e) => n + e.s + e.f, 0),
+      // 衰减开着时这是有效证据量(可为小数),关着时就是行数——口径由 halfLifeDays 一并携带。
+      // 正数不许被凑成 0:0 意味着「暂无观测」,与同载荷 cells>0 会互相打脸(对抗审查 P3)。
+      observations: (() => {
+        const sum = state.reduce((n, e) => n + e.s + e.f, 0)
+        const rounded = Math.round(sum * 100) / 100
+        return rounded === 0 && sum > 0 ? Number(sum.toPrecision(2)) : rounded
+      })(),
       cells: state.length,
+      ...(cfg.posteriorHalfLifeDays > 0 ? { halfLifeDays: cfg.posteriorHalfLifeDays } : {}),
     }
     return listed
   }
@@ -322,6 +329,9 @@ export function apply(ctx, rawConfig) {
       decide: decideLive,
       readRows: () => readLedgerLines(cfg.auditFile),
       append: (record) => appendLine(cfg.auditFile, record),
+      // RSI:采样与半衰期由配置进,默认 mean/关——asm 行会如实记 ranking/decay。
+      sampling: cfg.assembleSampling,
+      halfLifeDays: cfg.posteriorHalfLifeDays,
     })
   }
 
@@ -342,6 +352,7 @@ export function apply(ctx, rawConfig) {
       task: typeof body.task === 'string' ? body.task : '',
     }, {
       append: (record) => appendLine(effectiveConfig().auditFile, record),
+      readRows: () => readLedgerLines(effectiveConfig().auditFile),
       streamRole: (input) => streamRoleText(input, {
         llm: ctx.llm,
         BlockAssembler,

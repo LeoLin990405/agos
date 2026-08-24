@@ -11,6 +11,8 @@ export const RouterSettingsSchema = z.object({
   timeoutMs: z.natural(),
   maxTokens: z.natural(),
   concurrency: z.natural(),
+  assembleSampling: z.string(),
+  posteriorHalfLifeDays: z.number(),
   auditFile: z.string(),
 })
 

@@ -607,3 +607,39 @@ test('「派活」只许出现在 AgosComputer.tsx（swarm 子代理）；组装
   // 概览入口的句子是正向断言,不只是「没有派活」(第二轮 [34])。
   assert.match(readFileSync(join(srcRoot, 'pages', 'console-live.tsx'), 'utf8'), /路由组装是提案，只定角色不执行。三角色试跑需确认，只出文本、不开子代理。/);
 });
+
+test('RSI:asm 行的 ranking/decay 与 dsp 行的判定字段——加性解析,老行不臆断;文案由载荷算', async () => {
+  const { parseAssemblePlan, parseDispatchRun, rankingCopy, verdictLineCopy } = await import('./routes-assemble.ts');
+  const baseAsm = GOOD_ASSEMBLE;
+  const old = parseAssemblePlan({ assemble: baseAsm });
+  assert.ok(old); assert.equal(old.ranking, undefined); assert.equal(old.decay, undefined);
+  assert.equal(rankingCopy(old), undefined, '老行没有字段就不说话,不臆断为 mean');
+  const mean = parseAssemblePlan({ assemble: { ...baseAsm, ranking: 'mean', decay: null } });
+  assert.ok(mean); assert.equal(mean.ranking, 'mean'); assert.equal(mean.decay, undefined);
+  assert.equal(rankingCopy(mean), '三角色按后验均值排出');
+  const th = parseAssemblePlan({ assemble: { ...baseAsm, ranking: 'thompson', decay: { halfLifeDays: 7, effectiveObservations: 4.5 } } });
+  assert.ok(th);
+  assert.equal(rankingCopy(th), '三角色按一次 Thompson 采样排出——分数是抽样值，不是均值 · 后验按半衰期 7 天加权，有效证据 4.5 份');
+  assert.notEqual(rankingCopy(mean), rankingCopy(th), '排序口径变文案必须变');
+
+  const baseDsp = GOOD_DISPATCH;
+  const noField = parseDispatchRun({ dispatch: baseDsp });
+  assert.ok(noField); assert.equal(noField.verdict, undefined);
+  assert.equal(verdictLineCopy(noField), undefined, '老行不说话');
+  assert.equal(verdictLineCopy(parseDispatchRun({ dispatch: { ...baseDsp, verdict: null, verdictNull: 'UNPARSEABLE', verdictFed: false, verdictSkip: null } })!),
+    '评审未给出整行「判定：通过|驳回」，判定未采集');
+  assert.equal(verdictLineCopy(parseDispatchRun({ dispatch: { ...baseDsp, verdict: null, verdictNull: 'REVIEWER_ABSENT', verdictFed: false, verdictSkip: null } })!),
+    '评审角色未产出，判定未采集');
+  assert.equal(verdictLineCopy(parseDispatchRun({ dispatch: { ...baseDsp, verdict: null, verdictNull: 'AMBIGUOUS', verdictFed: false, verdictSkip: null } })!),
+    '评审同时给出两种整行判定，按未采集处理');
+  assert.equal(verdictLineCopy(parseDispatchRun({ dispatch: { ...baseDsp, verdict: null, verdictFed: false, verdictSkip: null } })!),
+    '判定未采集（成因未采集）');
+  assert.equal(verdictLineCopy(parseDispatchRun({ dispatch: { ...baseDsp, verdict: 'ok', verdictFed: true, verdictSkip: null } })!),
+    '评审判定：通过 · 已入账（source: reviewer-verdict）');
+  assert.equal(verdictLineCopy(parseDispatchRun({ dispatch: { ...baseDsp, verdict: 'fail', verdictFed: false, verdictSkip: 'IMPLEMENTER_ABSENT' } })!),
+    '评审判定：驳回 · 实现缺席，判定不入账');
+  assert.equal(verdictLineCopy(parseDispatchRun({ dispatch: { ...baseDsp, verdict: 'ok', verdictFed: false, verdictSkip: 'ALREADY_JUDGED' } })!),
+    '评审判定：通过 · 该决策已有胜负，判定只展示不入账');
+  assert.equal(verdictLineCopy(parseDispatchRun({ dispatch: { ...baseDsp, verdict: 'ok', verdictFed: false, verdictSkip: 'WHO_KNOWS' } })!),
+    '评审判定：通过 · 判定未入账（原因码未识别）');
+});

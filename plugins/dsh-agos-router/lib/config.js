@@ -10,6 +10,12 @@ export const DEFAULTS = {
   maxTokens: 2048,
   concurrency: 2,
   systemPrompt: '',
+  // RSI(FuguNano 路线):'mean'=后验均值贪心;'thompson'=一次高斯近似 Beta 采样(探索欠采样格)。
+  // 默认 mean:零行为变化;采样属实盘行为变更,须显式配置开启,且 asm 行会如实标 ranking。
+  assembleSampling: 'mean',
+  // 读取期半衰期(天):0=关。衰减是「读的口径」不是改史——台账一字节不动,
+  // 旧胜负按 2^(-age/halfLife) 加权(FuguNano 只有手动 decay --gamma,这里补上时间维)。
+  posteriorHalfLifeDays: 0,
 }
 
 export function normalizeConfig(raw) {
@@ -21,6 +27,9 @@ export function normalizeConfig(raw) {
     maxTokens: Number.isInteger(src.maxTokens) && src.maxTokens > 0 ? src.maxTokens : DEFAULTS.maxTokens,
     concurrency: Number.isInteger(src.concurrency) && src.concurrency > 0 ? src.concurrency : DEFAULTS.concurrency,
     systemPrompt: typeof src.systemPrompt === 'string' ? src.systemPrompt : '',
+    assembleSampling: src.assembleSampling === 'thompson' ? 'thompson' : DEFAULTS.assembleSampling,
+    posteriorHalfLifeDays: Number.isFinite(src.posteriorHalfLifeDays) && src.posteriorHalfLifeDays > 0
+      ? src.posteriorHalfLifeDays : DEFAULTS.posteriorHalfLifeDays,
     auditFile: typeof src.auditFile === 'string' && src.auditFile ? src.auditFile : defaultLedgerPath(homedir()),
   }
 }

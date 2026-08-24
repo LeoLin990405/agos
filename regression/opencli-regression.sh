@@ -144,6 +144,20 @@ case "$SHADOW_KIND" in
 	fallback:*)        assert_text "影子决策行(回落)" "影子：选择器未产出建议" ;;
 	*) ;;
 esac
+
+# 影子成绩单(4d309d0):覆盖句尾的成绩短语由 stats.shadow 算出——台账什么形态就断什么。
+# suggested>0 才有「与勾选一致 a/s」;0<filled<5 断「样本不足，不出比率」;filled>=5 断「被采纳建议终态」。
+SCORE_KIND=$(curl -s --noproxy '*' 'http://127.0.0.1:3091/api/agos/routes?limit=1' | python3 -c '
+import sys,json
+sh=json.load(sys.stdin)["stats"].get("shadow") or {}
+sug=sh.get("suggested",0); fil=sh.get("filled",0)
+print(("agree" if sug>0 else "noagree")+":"+("none" if fil==0 else ("few" if fil<5 else "many"))+":"+str(sh.get("agreed",0))+"/"+str(sug))' 2>/dev/null || echo skip)
+case "$SCORE_KIND" in
+	agree:few:*)  assert_text "成绩单一致数" "与勾选一致 ${SCORE_KIND##*:}"; assert_text "成绩单拒出比率" "样本不足，不出比率" ;;
+	agree:many:*) assert_text "成绩单一致数" "与勾选一致 ${SCORE_KIND##*:}"; assert_text "成绩单终态短语" "被采纳建议终态" ;;
+	agree:none:*) assert_text "成绩单一致数" "与勾选一致 ${SCORE_KIND##*:}" ;;
+	*) ;;
+esac
 step "开读图台账" opencli browser $S click ".console-nav-item[aria-label=\"读图台账\"]"
 sleep 6
 assert_text "读图台账渲染" "读图台账已采集"

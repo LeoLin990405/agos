@@ -24,7 +24,8 @@ import {
   TURN_TEXT_REDACTED_COPY,
   TURN_TRUNCATED_COPY,
   type AssemblePlan,
-  type DispatchRun, shadowSourceCopy } from './routes-assemble';
+  type DispatchRun, shadowSourceCopy, rankingCopy, verdictLineCopy,
+} from './routes-assemble';
 import {
   formatCoverage,
   outcomeLabel,
@@ -278,6 +279,9 @@ export const RoutesView: React.FC = () => {
                 </li>
               ))}
             </ul>
+            {rankingCopy(view.assemble) !== undefined && (
+              <p className="surface-quiet">{rankingCopy(view.assemble)}</p>
+            )}
             {(view.assemble.notes.length > 0 || view.assemble.unknownNotes > 0) && (
               <p className="surface-quiet">
                 {view.assemble.notes.join(' · ')}
@@ -322,6 +326,9 @@ export const RoutesView: React.FC = () => {
                 </li>
               ))}
             </ul>
+            {verdictLineCopy(view.dispatchOfThis) !== undefined && (
+              <p className="surface-quiet">{verdictLineCopy(view.dispatchOfThis)}</p>
+            )}
           </>
         )}
         <NoteLine note={dispatchNote} />

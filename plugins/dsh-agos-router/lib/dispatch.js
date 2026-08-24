@@ -2,10 +2,14 @@
 // 词汇:这一侧叫「试跑」。「派活」只指 swarm 子代理批次(会动仓库),这里明令不碰仓库
 // (2026-08-23 审查 P1-3:同一个词横跨两个危险方向相反的轴)。端点名 /assemble/dispatch、
 // kind:'dispatch'、dsp- 前缀是英文标识符,不改:改了会让历史行 dsp-1787419059326 失联。
-// Does not switch the live session model, does not spawn tools, does not write outcome.
+// Does not switch the live session model, does not spawn tools.
+// RSI(FuguNano 评审飞轮):评审若给出结构化判定,且过三重门(实现终稿在场·判定可解析·该决策尚无胜负),
+// 则追加一条 source:'reviewer-verdict' 的 outcome 行喂后验——除此之外仍不写任何 outcome。
+// 「调用成功≠好答案」:turns 的 ok 只是流成功,永不直接喂后验;喂的只有评审的判定。
 import { ASSEMBLE_EMPTY_COPY, LIVE_DISPATCH_OFF_COPY } from './assemble.js'
 import { sanitizePreview } from './sanitize.js'
 import { classifyStream, streamError } from './stream-outcome.js'
+import { foldLedger as foldLedgerRows } from './ledger.js'
 
 export const DISPATCH_COPY = '本次是三角色试跑，未换本跳会话模型'
 export const DISPATCH_NO_TOOLS_COPY = '三角色只出文本，不改仓库'
@@ -14,7 +18,7 @@ export const ASSEMBLE_MISMATCH_COPY = '请求指定的提案不是台账最新�
 export const MODEL_UNRESOLVED_COPY = '宿主未配置该模型'
 export const REVIEWER_SEES_FINAL_COPY = '评审只看实现终稿'
 export const DISPATCH_EMPTY_COPY = '还没有试跑记录'
-export const DEFAULT_DISPATCH_TASK = '三角色试跑。各角色只回不超过 80 字中文。planner：列出三步、每步一个文件名。implementer：只写将改的文件和一句话做法，不要补丁。reviewer：只根据实现终稿判断是否空转，答通过或驳回一句。禁止改仓库，禁止声称已经接入会话或开了子代理。'
+export const DEFAULT_DISPATCH_TASK = '三角色试跑。各角色只回不超过 80 字中文。planner：列出三步、每步一个文件名。implementer：只写将改的文件和一句话做法，不要补丁。reviewer：首行只写「判定：通过」或「判定：驳回」，第二行一句理由。禁止改仓库，禁止声称已经接入会话或开了子代理。'
 
 export const TURN_TEXT_LIMIT = 400
 export const DISPATCH_TIMEOUT_MS = 45000
@@ -41,7 +45,7 @@ export function roleSystemPrompt(role) {
     return '你是实现角色。只出终稿说明，不要补丁，不要改仓库，不要调用工具。'
   }
   if (role === 'reviewer') {
-    return `${REVIEWER_SEES_FINAL_COPY}。看不到规划稿。不要调用工具。`
+    return `${REVIEWER_SEES_FINAL_COPY}。看不到规划稿。不要调用工具。首行必须是「判定：通过」或「判定：驳回」，不许别的开头；第二行一句理由。`
   }
   return '只出一段短文本。不要调用工具。'
 }
@@ -57,6 +61,25 @@ export function roleUserPrompt(role, task, turns) {
   }
   const finalText = lastTurnText(turns, 'implementer')
   return `实现终稿：${finalText || '实现未采集'}`
+}
+
+/**
+ * 严格解析评审判定(FuguNano review-packet 的确定性纪律):
+ * 只认整行「判定：通过|驳回」(全角/半角冒号均可,行内不许有别的字)。
+ * 返回 'ok'|'fail'|'ambiguous'(两种整行判定同现)|null(没有可解析判定)——
+ * 三种「没有判定」成因不同,台账要分开记,前端文案不许把一种说成另一种(对抗审查 P3)。
+ */
+export function parseReviewerVerdict(text) {
+  if (typeof text !== 'string' || !text.trim()) return null
+  let seen = null
+  for (const line of text.split(/\r?\n/u)) {
+    const m = /^\s*判定[：:]\s*(通过|驳回)\s*$/u.exec(line)
+    if (!m) continue
+    const v = m[1] === '通过' ? 'ok' : 'fail'
+    if (seen !== null && seen !== v) return 'ambiguous'
+    seen = v
+  }
+  return seen
 }
 
 function lastTurnText(turns, role) {
@@ -144,6 +167,8 @@ export async function dispatchTeam(assemble, input, deps = {}) {
   }
   const task = typeof input.task === 'string' && input.task.trim() ? input.task.trim() : DEFAULT_DISPATCH_TASK
   const turns = []
+  // 判定必须从评审「原文」解析:sanitizePreview 会把换行压成空格,整行判定在净文里已不可辨。
+  let reviewerRawText = ''
   for (const row of assemble.roles) {
     const role = row && row.role
     const model = row && row.model
@@ -182,6 +207,7 @@ export async function dispatchTeam(assemble, input, deps = {}) {
       // streamRole 可返回裸字符串(测试替身)或 {text, detail}(streamRoleText)。
       const text = typeof streamed === 'string' ? streamed : streamed && typeof streamed.text === 'string' ? streamed.text : ''
       const detail = streamed && typeof streamed === 'object' && streamed.detail ? streamed.detail : undefined
+      if (role === 'reviewer') reviewerRawText = text
       turns.push({
         role,
         model,
@@ -213,6 +239,58 @@ export async function dispatchTeam(assemble, input, deps = {}) {
     }
   }
   const record = buildDispatchRecord(assemble, turns, task)
+  // RSI 评审飞轮:判定与入账与否都如实记在 dispatch 行上,门没过也要写明是哪道门。
+  const reviewerTurn = turns.find((t) => t && t.role === 'reviewer')
+  const implementerTurn = turns.find((t) => t && t.role === 'implementer')
+  const implementerFinal = lastTurnText(turns, 'implementer')
+  const parsed = reviewerTurn && reviewerTurn.ok === true ? parseReviewerVerdict(reviewerRawText) : null
+  const verdict = parsed === 'ok' || parsed === 'fail' ? parsed : null
+  record.verdict = verdict
+  // null 的三种成因分开记:评审角色没产出 / 文本里没有整行判定 / 两行相反判定同现。
+  record.verdictNull = verdict !== null ? null
+    : !(reviewerTurn && reviewerTurn.ok === true) ? 'REVIEWER_ABSENT'
+    : parsed === 'ambiguous' ? 'AMBIGUOUS'
+    : 'UNPARSEABLE'
+  record.verdictFed = false
+  record.verdictSkip = null
+  if (verdict !== null) {
+    if (!implementerFinal) {
+      // 评审判的是「实现未采集」——判决属实但对象缺席,不喂(今天现网就发生过这种判)。
+      record.verdictSkip = 'IMPLEMENTER_ABSENT'
+    } else if (!implementerTurn || typeof implementerTurn.model !== 'string' || !implementerTurn.model) {
+      record.verdictSkip = 'IMPLEMENTER_ABSENT'
+    } else if (typeof (assemble && assemble.ref) !== 'string' || !assemble.ref) {
+      record.verdictSkip = 'NO_DECISION_REF'
+    } else if (typeof deps.readRows !== 'function') {
+      record.verdictSkip = 'NO_LEDGER'
+    } else {
+      const { decisions } = foldLedgerRows(deps.readRows())
+      const target = decisions.find((d) => d && d.id === assemble.ref)
+      if (!target) {
+        record.verdictSkip = 'DECISION_NOT_FOUND'
+      } else if (target.outcome === 'ok' || target.outcome === 'fail') {
+        // 改判不改史:已有胜负(手工或回填)的决策,评审判定只展示不入账。
+        record.verdictSkip = 'ALREADY_JUDGED'
+      } else if (typeof target.pick !== 'string' || target.pick.trim().toLowerCase() !== implementerTurn.model.trim().toLowerCase()) {
+        // 归因门(对抗审查 P1):后验按 (label, decision.pick) 记账,而评审只判了 implementer 的产出。
+        // 两者不是同一个模型时喂进去就是替人挨打/领功——归因有歧义就不喂,一分都不喂。
+        record.verdictSkip = 'PICK_NOT_IMPLEMENTER'
+      } else if (typeof deps.append === 'function') {
+        deps.append({
+          kind: 'outcome',
+          ref: assemble.ref,
+          result: verdict,
+          at: Date.now(),
+          source: 'reviewer-verdict',
+          judge: reviewerTurn.model,
+          judged: implementerTurn.model,
+        })
+        record.verdictFed = true
+      } else {
+        record.verdictSkip = 'NO_LEDGER'
+      }
+    }
+  }
   if (typeof deps.append === 'function') deps.append(record)
   return {
     dispatch: record,

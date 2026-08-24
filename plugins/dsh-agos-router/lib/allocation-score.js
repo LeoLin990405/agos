@@ -10,7 +10,10 @@ export function betaPseudoCounts(p0, kappa) {
   return { a0: kappa * p0 + 1, b0: kappa * (1 - p0) + 1 }
 }
 
-export const applyOutcome = (state, outcome) => {
+export const applyOutcome = (state, outcome, weight = 1) => {
+  // weight:读取期衰减的口径(2^(-age/halfLife));默认 1 = FuguNano 原语义。
+  const w = Number.isFinite(weight) && weight > 0 ? weight : 0
+  if (w === 0) return state
   let updated = false
   const next = state.map((entry) => {
     if (entry.taskType !== outcome.taskType || entry.agent !== outcome.agent) return entry
@@ -18,8 +21,8 @@ export const applyOutcome = (state, outcome) => {
     return {
       taskType: entry.taskType,
       agent: entry.agent,
-      s: entry.s + (outcome.result === 'ok' ? 1 : 0),
-      f: entry.f + (outcome.result === 'fail' ? 1 : 0),
+      s: entry.s + (outcome.result === 'ok' ? w : 0),
+      f: entry.f + (outcome.result === 'fail' ? w : 0),
     }
   })
   if (updated) return next
@@ -28,8 +31,8 @@ export const applyOutcome = (state, outcome) => {
     {
       taskType: outcome.taskType,
       agent: outcome.agent,
-      s: outcome.result === 'ok' ? 1 : 0,
-      f: outcome.result === 'fail' ? 1 : 0,
+      s: outcome.result === 'ok' ? w : 0,
+      f: outcome.result === 'fail' ? w : 0,
     },
   ]
 }

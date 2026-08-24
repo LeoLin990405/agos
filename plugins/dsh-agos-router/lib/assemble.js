@@ -44,8 +44,18 @@ export function allocationBench() {
   return new Map(Object.entries(ROLE_BENCH))
 }
 
-export function allocationStateFromLedger(rows) {
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * RSI:读取期半衰期(FuguNano 只有手动 decay --gamma 且无时间戳;台账有 outcomeAt,补上时间维)。
+ * 衰减是读的口径,不是改史:台账一字节不动,权重 = 2^(-age/halfLife)。
+ * opts.halfLifeDays<=0 = 关(权重恒 1,与 FuguNano 原语义逐位一致);
+ * 时间取 outcomeAt(胜负落账时刻),缺了退回决策 ts;两个都缺(不该发生)按权重 1 计,不编年龄。
+ */
+export function allocationStateFromLedger(rows, opts = {}) {
   const { decisions } = foldLedger(Array.isArray(rows) ? rows : [])
+  const halfLife = Number.isFinite(opts.halfLifeDays) && opts.halfLifeDays > 0 ? opts.halfLifeDays : 0
+  const now = Number.isFinite(opts.now) ? opts.now : Date.now()
   let state = []
   for (const row of decisions) {
     if (row.outcome !== 'ok' && row.outcome !== 'fail') continue
@@ -55,9 +65,30 @@ export function allocationStateFromLedger(rows) {
     // 小写折叠:bench 键全小写,MiniMax-M3 若从 candidates 原样进来会和 minimax-m3 裂成两格。
     const agent = typeof row.pick === 'string' ? row.pick.trim().toLowerCase() : ''
     if (!taskType || !agent) continue
-    state = applyOutcome(state, { taskType, agent, result: row.outcome })
+    let weight = 1
+    if (halfLife > 0) {
+      const at = Number.isFinite(row.outcomeAt) ? row.outcomeAt : (Number.isFinite(row.ts) ? row.ts : undefined)
+      if (at !== undefined) {
+        const ageDays = Math.max(0, (now - at) / DAY_MS)
+        weight = Math.pow(2, -ageDays / halfLife)
+      }
+    }
+    state = applyOutcome(state, { taskType, agent, result: row.outcome }, weight)
   }
   return state
+}
+
+/**
+ * 衰减后的有效证据量(Σ s+f,保留两位)。带 taskType 时只算该任务类的格——
+ * asm 行上这个数说的是「这次排序用了多少证据」,别的任务类的证据不许算进来(对抗审查 P3×3)。
+ */
+export function effectiveObservations(state, taskType) {
+  let sum = 0
+  for (const entry of Array.isArray(state) ? state : []) {
+    if (taskType !== undefined && entry.taskType !== taskType) continue
+    sum += (entry.s || 0) + (entry.f || 0)
+  }
+  return Math.round(sum * 100) / 100
 }
 
 function poolIds(candidates) {
@@ -125,13 +156,20 @@ export function assembleTeam(decision, state, options = {}) {
     : defaultPoolCandidates()
   const label = (decision && (decision.label || decision.role)) || 'implementer'
   const bench = options.bench ?? allocationBench()
+  // RSI:'thompson' = 一次采样探索(FuguNano --sample);分数是抽样值不是均值,asm 行必须如实标 ranking。
+  const sampling = options.sampling === 'thompson' ? 'thompson' : 'mean'
   const ranked = rankAgents(label, bench, state ?? [], options.params ?? DEFAULT_ALLOCATION_PARAMS, {
-    sample: false,
+    sample: sampling === 'thompson',
+    random: typeof options.random === 'function' ? options.random : Math.random,
   })
   const assigned = assignRoles(decision || {}, ranked, candidates)
+  const halfLife = Number.isFinite(options.halfLifeDays) && options.halfLifeDays > 0 ? options.halfLifeDays : 0
   return {
     kind: 'assemble',
     label,
+    ranking: sampling,
+    // decay=null 表示「没开衰减」;开了就记口径与有效证据量——读的口径要能被读出来。
+    decay: halfLife > 0 ? { halfLifeDays: halfLife, effectiveObservations: effectiveObservations(state, label) } : null,
     source: (decision && decision.source) || 'fallback',
     pick: decision && decision.pick,
     dispatched: false,
@@ -155,6 +193,8 @@ export function buildAssembleRecord(decision, team) {
     ref: decision && decision.id,
     ts: Date.now(),
     label: team.label,
+    ranking: team.ranking === 'thompson' ? 'thompson' : 'mean',
+    decay: team.decay && typeof team.decay === 'object' ? team.decay : null,
     source: team.source,
     pick: team.pick,
     dispatched: false,
@@ -181,7 +221,14 @@ export async function assembleLive(input, deps = {}) {
     candidates,
   })
   const rows = typeof deps.readRows === 'function' ? deps.readRows() : []
-  const team = assembleTeam(decision, allocationStateFromLedger(rows), { candidates })
+  const halfLifeDays = Number.isFinite(deps.halfLifeDays) && deps.halfLifeDays > 0 ? deps.halfLifeDays : 0
+  const state = allocationStateFromLedger(rows, { halfLifeDays, now: Number.isFinite(deps.now) ? deps.now : Date.now() })
+  const team = assembleTeam(decision, state, {
+    candidates,
+    sampling: deps.sampling === 'thompson' ? 'thompson' : 'mean',
+    random: typeof deps.random === 'function' ? deps.random : Math.random,
+    halfLifeDays,
+  })
   const record = buildAssembleRecord(decision, team)
   if (typeof deps.append === 'function') deps.append(record)
   return { decision, assemble: record, dispatched: false }
