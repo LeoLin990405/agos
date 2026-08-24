@@ -1,54 +1,139 @@
-# AgOS
+<div align="center">
 
-AgOS 是跑在 [DeepSeek Harness(DSH)](https://github.com/deepseek-ai/deepseek-harness) 之上的 Agent OS 产品层:遥测甲板(控制台 / 路由决策 / 记忆工作台 / Homelab 机器与派发)+ 一组 DSH 插件后端。本仓是它的**唯一源码真源**(2026-08-24 由三个仓合成,历史完整保留)。
+[![English](https://img.shields.io/badge/Language-English-2ea44f?style=for-the-badge)](README.md) &nbsp; [![中文](https://img.shields.io/badge/语言-中文-555555?style=for-the-badge)](README.zh-CN.md)
 
+</div>
+
+<p align="center">
+  <img src="./docs/media/agos-banner.svg" alt="AgOS Banner" width="100%" />
+</p>
+
+# AgOS — An Honesty-First Agent Operating System Deck on DeepSeek Harness
+
+### One telemetry deck, five host plugins, and a hard rule: the screen never says anything the data cannot prove.
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Surfaces-12-gold?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Plugins-5-crimson?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/HTTP%20Routes-41-blue?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Unit%20Tests-583-purple?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Browser%20Regression-41%20steps-blueviolet?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/License-MIT-yellowgreen?style=for-the-badge" />
+</p>
+
+> **A position**: most agent dashboards are optimistic fiction — green badges with no probe behind them, leaderboards built on three samples, "97% healthy" strings typed by hand. AgOS takes the opposite bet: an agent operating system becomes *trustworthy* exactly when its UI is forbidden to decorate. Every number on screen is derived from a ledger on disk; every missing field renders as **“not collected”** instead of a made-up zero; every model-driven suggestion is recorded *before* it is trusted, shadowed *before* it is wired in.
+
+---
+
+## Abstract
+
+**AgOS** is a single-user Agent OS layer for the [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) runtime. It replaces the stock web UI with a full **telemetry deck** — chat with multimodal input, sub-agent lineage, machine fleet, model routing, skills, and a memory workbench — backed by five DSH plugins that expose everything as auditable JSONL ledgers and typed HTTP routes.
+
+The project explores one question end to end: **what does an agent cockpit look like if fabrication is a build error?** The answer shipped here includes repo-wide static locks that fail CI when a screen string is not derived from on-screen data, a *shadow mode* for model-driven routing that records decisions without letting them drive anything, and a labeled-corpus “ruler” that must be re-passed before any memory-extraction heuristic is allowed to change.
+
+---
+
+## 1. Surfaces
+
+The deck runs at `http://127.0.0.1:3091/agos/` and maps the entire backend 1:1 — no page exists without a real data source behind it.
+
+| Surface | What it shows | Backing |
+|---|---|---|
+| **Chat** | multimodal transcript (text · image · voice) with approval panels, permission-verdict annotations, session trash, per-segment voice provenance | host mux + `dsh-agos` |
+| **Overview** | attention inbox merged from four ledgers (lineage failures, pending route outcomes, skill drift, flagged reviews) with per-source `ready / stale / absent` states | `/api/agos/overview` + 3 ledgers |
+| **Machines & Racks** | homelab fleet: reachability, wake-on-LAN, in-flight load, batch dispatch with a cost-confirmation step | `dsh-fleet` |
+| **Route Decisions** | every model-routing decision as a ledger row: pick, confidence, reason, source, outcome backfill; shadow rows visibly marked *“suggestion only — drove nothing”* | `dsh-agos-router` |
+| **Outcome Coverage** | five heterogeneous ledgers normalized into one seven-field result table — deliberately **without** merging their semantics | `outcomes.js` deriver |
+| **Sessions / Lineage / Trace / Plans** | live session matrix, sub-agent genealogy, timeline, plan archive | host RPC + ledgers |
+| **Skills** | registry audit (model-facing vs console-only roots, content-drift detection) + a studio that only ever *proposes* | `dsh-agos` skills routes |
+| **Vision Council** | multi-model image-reading panel with an arbiter that flags suspected fabrication per panelist | `cn-capabilities` |
+| **Memory Workbench** | episodic / semantic / skill memory as a wikilink graph with an inspector | `dsh-civ` memory routes |
+
+## 2. The Honesty Contract
+
+These are not style guidelines — they are enforced by tests that fail the build:
+
+1. **On-screen claims must be computed from on-screen data.** Sentences about a dataset are functions of the payload, never string constants. A repo-wide TypeScript AST scanner rejects hard-coded verdict copy.
+2. **Absent ≠ zero ≠ false.** Every nullable field has three rendered states; “not collected” is a first-class UI state with its own copy.
+3. **Write endpoints are quarantined.** All mutating `fetch` calls live in one file, checked by an AST lock (allow-listed literal URLs, no aliasing, no concatenation). The model-routing `decide` endpoint is *unreachable from the UI by construction* — the string literal itself is banned repo-wide.
+4. **Suggestions are recorded, not obeyed.** The LLM route selector runs in **shadow mode**: one call per dispatch review, written to the ledger with the user's actual choice alongside — agreement is measured, never assumed. Outcome backfill only happens when the suggested machine actually ran the batch; a batch that ran elsewhere never scores the suggestion.
+5. **Heuristics carry a ruler.** The session-memory extractor ships with a labeled corpus, per-sample pass baselines, and an `acceptEdit` gate: any previously-passing sample that regresses turns the suite red — improvements cannot offset regressions, and accepting a new baseline is an explicit, named act.
+6. **Security gates are tested as gates.** The media route sniffs magic bytes for content-addressed files and treats caller-supplied MIME as an *expectation to verify*, with dedicated unit tests for traversal, symlinks, double extensions, and forged types.
+
+## 3. Architecture
+
+```mermaid
+flowchart LR
+  subgraph Browser
+    SPA["frontend/ · Vite + React SPA<br/>(served at /agos/)"]
+  end
+  subgraph DSH host process
+    AGOS["dsh-agos<br/>console · skills · session memory · SPA server"]
+    ROUTER["dsh-agos-router<br/>selector · assemble · shadow · outcome ledger"]
+    CN["cn-capabilities<br/>vision council · ASR · media gate · usage"]
+    FLEET["dsh-fleet<br/>hosts · dispatch · wake · batches"]
+    MCP["dsh-mcp-bridge<br/>agos_* MCP tools"]
+  end
+  subgraph Disk
+    LEDGERS[("JSONL ledgers<br/>route-outcome · runs · council · plans · judge")]
+  end
+  SPA -->|typed HTTP + mux frames| AGOS & ROUTER & CN & FLEET
+  ROUTER --> LEDGERS
+  FLEET --> LEDGERS
+  CN --> LEDGERS
+  AGOS --> LEDGERS
+  MCP -->|loopback HTTP| AGOS
 ```
-frontend/     Vite + React SPA(/agos/),契约 vendored 自 deepseek-harness(UPSTREAM.pin),npm run verify 含契约零漂移闸
-plugins/      DSH 插件:dsh-agos(控制台/技能/会话记忆/SPA 服务)· dsh-agos-router(路由选择器/组装/试跑/影子)
-              · dsh-mcp-bridge(agos_* MCP 工具)· cn-capabilities(国产模型能力:视觉/语音/议会/额度/media)· dsh-fleet(Homelab 多机派发)
-regression/   OpenCLI 驱动真实 Chrome 的全站回归(opencli-regression.sh,41 步,零模型调用)+ AgOS.app 壳 build.sh
-scripts/      deploy-plugins.sh(仓 → profile 部署)· dev-links.sh(仓内跑插件单测用的软链)· test-all.sh(全闸)
-```
 
-## 运行形态(为什么是拷贝不是软链)
+- **`frontend/`** — Vite + React SPA. The DSH API contract is vendored and pinned (`UPSTREAM.pin`); `npm run verify` includes a zero-drift check against upstream.
+- **`plugins/`** — five DSH plugins (plain ESM, host dependencies provided by the DSH profile). Cross-plugin coupling is file-level (shared ledgers), not import-level, with one documented exception.
+- **`regression/`** — a 41-step full-site browser regression driven through a real Chrome instance, asserting *content* (not just clickability), plus the macOS app shell.
+- **`scripts/`** — `iterate.sh` (build → deploy → restart-only-if-plugins-changed → health checks), `deploy-plugins.sh` (checksum-based drift detection), `test-all.sh`.
 
-DSH 宿主按文件 **realpath** 向上找 `@deepseek-ai/*` / `dsh-kimicode-swarm`;插件真身一旦离开 `~/.dsh/profiles/<profile>/` 目录树,裸 import 全部 `MODULE_NOT_FOUND`。而 desktop(DSH Desktop.app asar)与 web(`~/.npm-global`)是两套宿主包,一份 node_modules 伺候不了两边。所以:
+## 4. Getting Started
 
-- 本仓 `plugins/` 是源码真源;
-- `scripts/deploy-plugins.sh` 把它 rsync 到 `~/.dsh/profiles/desktop/plugins/<name>/` 与 `~/.dsh/profiles/web/plugins/<name>/`(部署副本);profile 内的 `file:./plugins/<name>`、node_modules 软链、`dsh-preflight`、headless 指向全部不变;
-- 3091(`dsh web --port 3091`)跑 web profile,部署后要重启才生效;SPA 由 dsh-agos 直接服务 `frontend/dist`(`DSH_AGOS_DIST` 可覆盖)。
-
-## 日常(一条命令)
+Requirements: a DSH host (DSH Desktop or `@deepseek-ai/dsh`), Node ≥ 22, and a DSH profile directory.
 
 ```bash
-scripts/iterate.sh          # 构建前端 → 部署插件 → 插件真变了才重启 3091 → 健康检查
+git clone https://github.com/LeoLin990405/agos && cd agos
+
+# frontend
+cd frontend && npm install && npm run build && cd ..
+
+# plugins → your DSH profile (copies, not symlinks: the host resolves
+# @deepseek-ai/* from the plugin file's realpath, so plugins must live
+# inside the profile tree)
+scripts/deploy-plugins.sh
+
+# register the five plugins in your profile's package.json / cordis.patch.yml,
+# then run the web host
+dsh web --port 3091 --no-open
+# → http://127.0.0.1:3091/agos/
 ```
 
-- **改前端**:不用重启——serveSpa 每请求读盘,`iterate.sh`(或 `cd frontend && npm run build`)完刷新页面即可。
-- **改插件**:`iterate.sh` 会检测到变更并自动重启 3091;`--restart` 强制重启,`--no-build` 跳过前端,`--test` 先跑全闸红了不部署。
-- 3091 与 DSH Desktop 两个实例会互踩会话目录:脚本等旧进程真退了才起新的,起不来会把日志尾巴打出来。
-
-零碎命令(iterate.sh 内部就是它们):
+Day-to-day iteration is one command:
 
 ```bash
-scripts/dev-links.sh                 # 一次性:仓内跑插件单测的软链
-scripts/test-all.sh                  # 全闸:前端 verify + 五插件 node --test + 部署漂移
-scripts/deploy-plugins.sh --check    # 只看 仓↔desktop↔web 漂移,不写
-~/bin/dsh-preflight                  # 宿主侧闸(软链/语法/twin 漂移)
-zsh regression/opencli-regression.sh # 全站回归(需 OpenCLI 桥接健康,41 步,零模型调用)
+scripts/iterate.sh   # build → deploy → restart 3091 only if plugin bytes changed → health checks
 ```
 
-## 红线(来自 TASK-017/019,仍有效)
-- 前端冻结层 `src/stores/** src/fold/** src/api-client/** src/contract/** vite.config.ts package.json`:改动需 Leo 拍板;`vendor:diff` 必须零漂移。
-- UI 不 POST `/api/agos/routes/decide`;写端点只许在 `routes-assemble.ts`(仓级锁)。
-- 数据零编造:屏上断言由同屏数据算出;缺字段写「未采集」。
-- 真实模型调用要记账(cost-meter);W17 影子选择器预算 ≤10 次。
+Frontend-only edits never need a restart — the SPA is read from disk per request.
 
-## 许可与来源
+## 5. Development
 
-- 本仓 [MIT](LICENSE)。
-- `frontend/src/contract/`(及 `UPSTREAM.pin` 钉住的 API 契约)vendored 自 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)(MIT,Copyright DeepSeek);`npm run vendor:diff` 保证零漂移。
-- 运行需要 DSH 宿主(DSH Desktop 或 `@deepseek-ai/dsh`);插件的 `@deepseek-ai/*` 依赖由宿主 profile 提供,本仓不再分发。
-- **不在公开仓里的**:W20 记忆抽取尺的三块语料(维护者真实会话原句,私有数据;相关测试在语料缺席时自动跳过,口径与基线读数保留在仓内)、以及任何部署环境地址(唤醒网关等在 profile 层配置)。
+```bash
+scripts/dev-links.sh   # once: node_modules links so plugin tests resolve host packages in-repo
+scripts/test-all.sh    # frontend verify (incl. contract zero-drift) + 5 plugin suites + deploy drift
+```
 
-旧仓 `LeoLin990405/agos-frontend`、`agos-app` 已归档;`dsh-plugins` 仍是其余 DSH 插件(vendored 上游等)的真源,AgOS 五插件已从它移出。
+Test surface at a glance: **583** unit tests (286 frontend / 297 plugins), session-replay invariants over archived transcripts, byte-identical fold golden files, and the 41-step browser regression. The memory-ruler suite auto-skips when its locally generated corpus (built from your own session archives via `mine.mjs`) is not present.
+
+## 6. Shadow Routing, in One Paragraph
+
+When you review a fleet dispatch, AgOS asks a small model (StepFun `step-3.7-flash`, 1024 max tokens, one call) which machine *it* would pick — then does nothing with the answer except write it down. The ledger row records the suggestion, its reason, the candidates it saw, and whether it agreed with what you actually chose; if the batch later runs on the suggested machine, its terminal state backfills the row. Over time this produces the only thing that can honestly justify automated routing: a record of real decisions with real outcomes, accumulated *before* the selector is given any authority.
+
+## License & Credits
+
+- [MIT](LICENSE).
+- The API contract under `frontend/src/contract/` is vendored from [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) (MIT, © DeepSeek) and kept drift-free by `npm run vendor:diff`.
+- Built to run on the DeepSeek Harness plugin runtime (`cordis`); host packages (`@deepseek-ai/*`) are provided by your DSH installation.
