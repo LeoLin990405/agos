@@ -163,10 +163,20 @@ sleep 6
 assert_text "读图台账渲染" "读图台账已采集"
 step "开轨迹面" opencli browser $S click ".console-nav-item[aria-label=\"轨迹时间流\"]"
 sleep 4
-# 可接入计数与「接入」按钮同源(TraceView 的 joinIdOf):按钮读它、这句也读它。
-# 归档会话不计入 —— 点它会被对话页守卫弹到别处。extract 读不到 <button> 文案,
+# 可接入计数与「接入」按钮同源(TraceView 的 joinIdOf):joinable = rawId 前缀 session- 且未归档。
+# 台账什么形态就断什么:>0 断精确计数句;=0 断「可接入」不在屏上(页面正确地不说)。
 # 按钮本体由 trace-join.test.ts 的源锁守(2026-08-22 验收 P1)。
-assert_text "轨迹接入" "可接入"
+JOIN_N=$(curl -s --noproxy '*' http://127.0.0.1:3091/api/trace/sessions | python3 -c '
+import sys,json,urllib.request
+rows=json.load(sys.stdin).get("sessions",[])
+meta=json.load(urllib.request.urlopen("http://127.0.0.1:3091/api/agos/session-meta"))
+hidden=set(meta.get("archived",[]))|set(meta.get("hostArchived",[]))
+print(sum(1 for r in rows if str(r.get("rawId","")).startswith("session-") and r.get("rawId") not in hidden))' 2>/dev/null || echo "?")
+if [[ "$JOIN_N" == <1-> ]]; then
+	assert_text "轨迹接入计数" "可接入 $JOIN_N 条会话"
+elif [[ "$JOIN_N" == "0" ]]; then
+	assert_no_text "轨迹无可接入时不渲染计数句" "可接入"
+fi
 
 print "\n▸ 6 收尾"
 step "关闭会话" opencli browser $S close
