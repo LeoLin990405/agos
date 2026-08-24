@@ -2,8 +2,9 @@ import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const EXPECTED_CODEX_SDK_VERSION = '0.147.0'
+const EXPECTED_CODEX_SDK_VERSION = '0.149.1'
 const DEFAULT_CODEX_WORKSPACE = '~/.dsh/workspaces/codex'
 const RUN_ID_RE = /^[A-Za-z0-9_-]{1,64}$/
 
@@ -133,7 +134,21 @@ function createCodexHostRunner({
   const probe = async () => {
     try {
       await sdk()
-      return { at: now(), ok: true, version: `codex-sdk ${EXPECTED_CODEX_SDK_VERSION}` }
+      // 版本报实测,不报期望——期望常量当「待核实的期望」用:读不到就说未采集,不一致就并排写明。
+      let actual = null
+      try {
+        // exports 只有 "import" 条件(无 require/default),createRequire.resolve 会挂——
+        // 必须走 ESM 解析:import.meta.resolve 命中入口(dist/index.js),再上两级读 package.json。
+        const entry = fileURLToPath(import.meta.resolve('@openai/codex-sdk'))
+        const pkgPath = resolve(entry, '..', '..', 'package.json')
+        actual = JSON.parse(await fs.readFile(pkgPath, 'utf8')).version || null
+      } catch {}
+      const version = actual === null
+        ? `codex-sdk 版本未采集（期望 ${EXPECTED_CODEX_SDK_VERSION}）`
+        : actual === EXPECTED_CODEX_SDK_VERSION
+          ? `codex-sdk ${actual}`
+          : `codex-sdk ${actual}（期望 ${EXPECTED_CODEX_SDK_VERSION}）`
+      return { at: now(), ok: true, version }
     } catch (error) {
       return { at: now(), ok: false, error: scrubSecrets(errorText(error)).slice(0, 500) }
     }
