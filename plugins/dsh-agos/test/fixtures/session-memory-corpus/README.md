@@ -1,3 +1,8 @@
+> ⚠️ **rpc.jsonl / bare.jsonl / assistant.jsonl 不在公开仓里**:它们是从 Leo 真实会话归档里挖出的原句(含内网拓扑),
+> 属于私有数据。本机放在 `~/.dsh/agos-private/session-memory-corpus/`(或设 `SESSION_MEMORY_CORPUS_DIR`);
+> 语料缺席时 `test/session-memory-rules.test.mjs` 整体跳过。`known-misreports.jsonl`(8 句探针文本)与
+> `baseline.json`(读数与逐条通过集合)留在仓里,口径与数字可复核。
+
 # W2 短期记忆抽取规则的尺(TASK-2026-08-22-017 W20 · 2026-08-23,对抗验证后重做)
 
 **先装尺再改规则。** 这里是标注语料 + 评分器 + `acceptEdit` 门;规则改动必须让 `test/session-memory-rules.test.mjs` 过。

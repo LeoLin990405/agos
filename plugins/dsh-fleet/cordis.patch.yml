@@ -5,6 +5,7 @@
       config:
         enabled: true
         announceToAgent: true
+        # wakeGateway(WoL 中转,如 root@<旁路由>)按部署环境在 profile 层补;公开仓不带具体地址
         hosts:
           - { name: local,    kind: local,  model: deepseek-v4-flash, tags: [general],                            maxConcurrency: 3 }
           # Codex is opt-in only: default fleet traffic never selects kind=codex.

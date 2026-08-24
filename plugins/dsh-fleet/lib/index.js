@@ -81,7 +81,8 @@ const Config = z.object({
   taskTimeoutMs: z.number().default(900000),
   globalMaxConcurrency: z.number().default(8),
   powerNodes: z.dict(z.string()).default(DEFAULT_POWER_NODES),
-  wakeGateway: z.string().default('root@192.0.2.18'),
+  // 唤醒网关(WoL 中转)是部署配置,不进源码:真实值写在插件 bundle patch 的 config 里(不进公开仓的部署侧)
+  wakeGateway: z.string().default(''),
   wakeCommand: z.string().default('/usr/local/sbin/fleet-wake'),
   wakeBudgetMs: z.dict(z.number()).default({ 'm4-a': 45000, 'm4-b': 45000, _default: 120000 }),
   wakePollMs: z.number().default(5000),

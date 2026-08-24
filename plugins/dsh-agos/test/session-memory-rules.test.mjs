@@ -18,11 +18,26 @@ import { extractSessionMemory } from '../lib/session-memory.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const CORPUS = join(here, 'fixtures', 'session-memory-corpus')
+// 2026-08-24 开源:rpc/bare/assistant 三块是 Leo 真实会话原句(含 homelab 拓扑),不进公开仓——
+// 本机放在 ~/.dsh/agos-private/session-memory-corpus/(或 SESSION_MEMORY_CORPUS_DIR)。
+// known-misreports(8 句探针文本)与 baseline.json 留在仓里;语料缺席时本套测试整体跳过,
+// 公开仓的克隆者据此知道:尺存在、读数可复核口径,但语料是私有数据。
+const PRIVATE_CORPUS = process.env.SESSION_MEMORY_CORPUS_DIR
+  ?? join(process.env.HOME ?? '', '.dsh', 'agos-private', 'session-memory-corpus')
 const BASELINE = join(CORPUS, 'baseline.json')
 export const BLOCKS = ['rpc', 'bare', 'known-misreports', 'assistant']
 
+function blockPath(name) {
+  const inRepo = join(CORPUS, name)
+  if (existsSync(inRepo)) return inRepo
+  return join(PRIVATE_CORPUS, name)
+}
+export function corpusAvailable() {
+  return BLOCKS.every((b) => existsSync(blockPath(`${b}.jsonl`)))
+}
+
 function readJsonl(name) {
-  return readFileSync(join(CORPUS, name), 'utf8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l))
+  return readFileSync(blockPath(name), 'utf8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l))
 }
 
 /** 一行语料 → 一组宿主事件(turn/start + 一条消息),source 形状照归档原样。 */
@@ -89,14 +104,14 @@ export function scoreAll() {
 
 function corpusSha() {
   const h = createHash('sha256')
-  for (const b of BLOCKS) h.update(readFileSync(join(CORPUS, `${b}.jsonl`)))
+  for (const b of BLOCKS) h.update(readFileSync(blockPath(`${b}.jsonl`)))
   return h.digest('hex')
 }
 
 const fmt = (s) => `${s.pass}/${s.total}`
 const pr = (v) => `P=${v.precision === null ? '-' : v.precision.toFixed(2)} R=${v.recall === null ? '-' : v.recall.toFixed(2)}`
 
-test('W20 尺:四个块各自可评分,并把指标打印出来(只看不进门)', () => {
+test('W20 尺:四个块各自可评分,并把指标打印出来(只看不进门)', { skip: corpusAvailable() ? false : '私有语料不在本机(见 fixtures/session-memory-corpus/README.md),跳过' }, () => {
   const all = scoreAll()
   for (const [name, s] of Object.entries(all)) {
     const prf = Object.entries(s.prf).filter(([, v]) => v.tp + v.fp + v.fn > 0).map(([k, v]) => `${k} ${pr(v)}`).join(' · ')
@@ -105,7 +120,7 @@ test('W20 尺:四个块各自可评分,并把指标打印出来(只看不进门)
   for (const b of BLOCKS) assert.ok(all[b].total > 0, b)
 })
 
-test('W20 acceptEdit 门:语料没动;每条原来通过的样本不得变失败;有提升须显式接受新基线', () => {
+test('W20 acceptEdit 门:语料没动;每条原来通过的样本不得变失败;有提升须显式接受新基线', { skip: corpusAvailable() ? false : '私有语料不在本机,跳过' }, () => {
   const sha = corpusSha()
   const now = scoreAll()
   const current = {

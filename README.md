@@ -44,4 +44,11 @@ zsh regression/opencli-regression.sh # 全站回归(需 OpenCLI 桥接健康,41 
 - 数据零编造:屏上断言由同屏数据算出;缺字段写「未采集」。
 - 真实模型调用要记账(cost-meter);W17 影子选择器预算 ≤10 次。
 
-旧仓 `LeoLin990405/agos-frontend`、`agos-app` 已归档;`dsh-plugins` 仍是其余 DSH 插件(vendored 上游等)的真源,AgOS 五插件已从它移出。任务书在 `~/.claude/tasks/TASK-2026-08-22-017.md` 等。
+## 许可与来源
+
+- 本仓 [MIT](LICENSE)。
+- `frontend/src/contract/`(及 `UPSTREAM.pin` 钉住的 API 契约)vendored 自 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)(MIT,Copyright DeepSeek);`npm run vendor:diff` 保证零漂移。
+- 运行需要 DSH 宿主(DSH Desktop 或 `@deepseek-ai/dsh`);插件的 `@deepseek-ai/*` 依赖由宿主 profile 提供,本仓不再分发。
+- **不在公开仓里的**:W20 记忆抽取尺的三块语料(维护者真实会话原句,私有数据;相关测试在语料缺席时自动跳过,口径与基线读数保留在仓内)、以及任何部署环境地址(唤醒网关等在 profile 层配置)。
+
+旧仓 `LeoLin990405/agos-frontend`、`agos-app` 已归档;`dsh-plugins` 仍是其余 DSH 插件(vendored 上游等)的真源,AgOS 五插件已从它移出。
