@@ -43,7 +43,10 @@ const inject = ['tools', 'systemPrompt']
 const Config = z.object({})
 
 const PY = '/usr/bin/python3'
-const VISION_DIR = '/Users/leo/Projects/dsh-vision'
+// 本机默认从 homedir 推导,跨机器部署用环境变量覆盖(不再硬编码用户名路径)。
+const VISION_DIR = process.env.DSH_CN_VISION_DIR || join(homedir(), 'Projects', 'dsh-vision')
+const OPENCLI_BIN = process.env.DSH_CN_OPENCLI_BIN || join(homedir(), '.npm-global', 'bin', 'opencli')
+const KIMI_BIN = process.env.DSH_CN_KIMI_BIN || join(homedir(), '.kimi-code', 'bin', 'kimi')
 
 const uniqueOutputPath = (prefix, extension) => join(tmpdir(), prefix + '-' + randomUUID() + extension)
 
@@ -2279,7 +2282,7 @@ const PROVIDER_DEFAULT_MODEL = {
       const sub = ctx.get('subprocess')
       if (sub === undefined) return { error: 'subprocess 服务不可用' }
       const action = String(args.action || 'open')
-      const argv = ['/Users/leo/.npm-global/bin/opencli', 'browser', 'dsh', action]
+      const argv = [OPENCLI_BIN, 'browser', 'dsh', action]
       if (action === 'open' && args.url) argv.push(String(args.url))
       if (action === 'eval' && args.js) argv.push(String(args.js))
       if (action === 'click' && args.selector) argv.push('--selector', String(args.selector))
@@ -2347,7 +2350,7 @@ const PROVIDER_DEFAULT_MODEL = {
       if (sub === undefined) return { error: 'subprocess 服务不可用' }
       const list = Array.isArray(args.args) ? args.args.map(String) : []
       if (list.length === 0) return { error: '需要 args 参数数组' }
-      const argv = ['/Users/leo/.npm-global/bin/opencli', ...list]
+      const argv = [OPENCLI_BIN, ...list]
       if (args.format && args.format !== 'auto') argv.push('-f', String(args.format))
       const spawnEnv = {}
       if (args.app) {
@@ -2532,7 +2535,7 @@ const PROVIDER_DEFAULT_MODEL = {
       const cwd = String(args.cwd || process.env.HOME)
 
       const runAcp = async (member, prompt) => {
-        const bin = member.bin === 'codex-acp' ? VISION_DIR + '/node_modules/.bin/codex-acp' : '/Users/leo/.kimi-code/bin/kimi'
+        const bin = member.bin === 'codex-acp' ? VISION_DIR + '/node_modules/.bin/codex-acp' : KIMI_BIN
         const argv = ['node', VISION_DIR + '/acp-client.mjs', prompt, '--bin', bin, '--cwd', cwd]
         const handle = sub.spawn({
           argv,
@@ -2554,7 +2557,7 @@ const PROVIDER_DEFAULT_MODEL = {
       const runApp = async (member, prompt) => {
         const name = String(member.name || 'codex')
         const port = Number(member.port) || 9229
-        const argv = ['/Users/leo/.npm-global/bin/opencli', name, 'ask', prompt]
+        const argv = [OPENCLI_BIN, name, 'ask', prompt]
         const handle = sub.spawn({
           argv,
           cwd: '/',

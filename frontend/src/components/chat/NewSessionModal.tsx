@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Chip } from '@/components/ui/Chip';
-import { createSession, fetchPresets, type PresetInfo } from '@/stores/live';
+import { agos, createSession, fetchPresets, type PresetInfo } from '@/stores/live';
 
 export interface NewSessionModalProps {
   isOpen: boolean;
@@ -23,7 +23,8 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
   initialPresetId,
 }) => {
   const [title, setTitle] = useState('');
-  const [cwd, setCwd] = useState('/Users/leo');
+  // 不写死任何用户路径:打开时向宿主要 home;要不到就留空,由用户手输(缺席≠默认值)。
+  const [cwd, setCwd] = useState('');
   const [preset, setPreset] = useState('cordis');
   const [presets, setPresets] = useState<{ id: string, name: string, desc: string }[]>([]);
   const [busy, setBusy] = useState(false);
@@ -34,6 +35,12 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
     if (!isOpen) return;
     const pinned = initialPresetId !== undefined && initialPresetId !== '' ? initialPresetId : undefined;
     if (pinned !== undefined) setPreset(pinned); // 预选立即生效,不等 list 回来
+    void agos.call('host.describe', {}).then((r) => {
+      const home = r.result.ok ? r.result.value.home : '';
+      if (typeof home === 'string' && home !== '') {
+        setCwd((prev) => (prev === '' ? home : prev)); // 只填空值,不覆盖用户已输入的
+      }
+    }).catch(() => { /* 宿主未答:输入框留空,占位符提示手输 */ });
     void fetchPresets().then((list: PresetInfo[]) => {
       if (list.length > 0) {
         setPresets(list.map((p) => ({ id: p.id, name: p.name, desc: p.description })));
@@ -49,7 +56,9 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
   const handleCreate = () => {
     if (busy) return;
     setBusy(true); setError(undefined);
-    void createSession({ cwd: cwd.trim() || '/Users/leo', agentPreset: preset }).then((sid) => {
+    const dir = cwd.trim();
+    if (dir === '') { setBusy(false); setError('工作目录未采集:宿主未返回 home,请手输绝对路径'); return; }
+    void createSession({ cwd: dir, agentPreset: preset }).then((sid) => {
       setBusy(false);
       if (sid !== undefined) { onCreated?.(sid); onClose(); }
       else setError('创建失败:检查 cwd 是否存在');
@@ -93,6 +102,7 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
             className="form-input"
             style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: '11.5px' }}
             value={cwd}
+            placeholder="宿主机上的绝对路径(打开时自动填宿主 home)"
             onChange={(e) => setCwd(e.target.value)}
           />
           <Button variant="secondary" size="sm" onClick={handlePickDirectory}>
