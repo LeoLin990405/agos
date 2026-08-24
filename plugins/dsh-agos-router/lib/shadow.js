@@ -8,7 +8,8 @@
 // 边界(017「明确不做」第 2/7 条):
 //   - 不接进真实派活路径:本模块没有任何返回值会流进 fleet-dispatch 的 assignHosts 或 DispatchModal 的勾选 state;
 //   - 不是 bandit:不看后验、不排名,只记一次选择器的判断。
-// 预算:每次「检查派发」= 一次 StepFun step-3.7-flash 调用(maxTokens 由 settings 钉 1024);
+// 预算:每次「检查派发」= 一次 StepFun step-3.7-flash 调用(maxTokens 默认 2048,settings/patch 可覆盖;
+//   低于 ~2048 时 thinking 块会吃光预算 → NO_TEXT 回落,2026-08-24 现网实测);
 //   候选为空时**不调用**;选择器未配置/失败时记 fallback 行且 pick 为 null——影子没有「静态表回落」,
 //   回落的 pick 是编造,界面必须显示「未产出建议」。
 //

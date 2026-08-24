@@ -5,7 +5,9 @@ export const DEFAULTS = {
   provider: 'stepfun',
   model: 'step-3.7-flash',
   timeoutMs: 20000,
-  maxTokens: 256,
+  // 2048 而不是 256/1024:thinking 型 provider 的 reasoning 块和正文共用这份预算,
+  // 1024 实测会被 reasoning 整份吃光(finish:max-tokens + blockTypes:[reasoning] → NO_TEXT 回落,2026-08-24 现网)。
+  maxTokens: 2048,
   concurrency: 2,
   systemPrompt: '',
 }

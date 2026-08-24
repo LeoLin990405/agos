@@ -180,7 +180,8 @@ export function createSelector({
 }) {
   const sys = typeof systemPrompt === 'string' && systemPrompt.trim() !== '' ? systemPrompt : DEFAULT_SYSTEM_PROMPT
   const ms = isPositiveInt(timeoutMs) ? timeoutMs : 20000
-  const mt = isPositiveInt(maxTokens) ? maxTokens : 256
+  // 回落值与 config.js DEFAULTS 同步:thinking 块与正文共用预算,过小会 NO_TEXT(见 config.js 注)。
+  const mt = isPositiveInt(maxTokens) ? maxTokens : 2048
   const cap = isPositiveInt(concurrency) ? concurrency : 2
   let active = 0
 
