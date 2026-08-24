@@ -674,20 +674,44 @@ export function shadowSuggestionCopy(r: ShadowResult, fallbackCopy: (reason: str
 /** 选择器只看每项前 240 字(后端同值),请求体按此预截,免得 32×8000 字的合法派发撞 64KB body 上限。 */
 export const SHADOW_ITEM_CHARS = 240;
 
+/**
+ * 前端超时兜底(2026-08-24 P1 dec-1787557992206-dffd872d):服务端 ~13s 内已发完整响应且
+ * chunked 终止块在场(curl --raw 复核),渲染器网络栈也按时收完(resource timing),但页面 JS
+ * 的 fetch 交付偶发滞留 36s~分钟级(两个不同 Chromium 实例复现,均挂着 CDP;浏览器内部,应用不可修)。
+ * 不兜底的后果:shadow 永停 calling、派发按钮永久禁用。
+ * 上限 = 后端选择器 deadline(config.js timeoutMs 默认 20s)+ 余量;后端调大要同步这里。
+ * 超时转 failed 而非重试:failed 不等于没计费——请求多半已到后端、台账已写行,
+ * runShadow 的同签名去重(DispatchModal)挡住重复烧。
+ */
+export const SHADOW_TIMEOUT_MS = 30_000;
+export const SHADOW_TIMEOUT_COPY = '影子调用超过 30 秒未返回，已按失败处理；调用可能已到后端并计费，以台账为准';
+
 export async function postShadowSelection(
   input: ShadowRequest & { confirm: boolean },
   signal?: AbortSignal,
+  timeoutMs: number = SHADOW_TIMEOUT_MS,
 ): Promise<{ ok: true; result: ShadowResult } | { ok: false; error: string }> {
   if (input.confirm !== true) return { ok: false, error: '影子调用需要确认' };
   if (input.items.length === 0) return { ok: false, error: '没有任务，不调用选择器' };
   if (input.hosts.length === 0) return { ok: false, error: '没有候选机器，不调用选择器' };
-  const response = await fetch('/api/agos/routes/shadow', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ items: input.items.map((s) => s.slice(0, SHADOW_ITEM_CHARS)), hosts: input.hosts, chosen: input.chosen, tag: input.tag, label: input.label }),
-    signal,
-  });
+  const timer = AbortSignal.timeout(timeoutMs);
+  const bounded = signal === undefined ? timer : AbortSignal.any([timer, signal]);
+  let response: Response;
+  try {
+    response = await fetch('/api/agos/routes/shadow', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ items: input.items.map((s) => s.slice(0, SHADOW_ITEM_CHARS)), hosts: input.hosts, chosen: input.chosen, tag: input.tag, label: input.label }),
+      signal: bounded,
+    });
+  } catch (cause) {
+    // 只有计时器触发的中止算超时;调用方主动中止保持抛出语义(runShadow 的 .catch 接)。
+    if (timer.aborted) return { ok: false, error: SHADOW_TIMEOUT_COPY };
+    throw cause;
+  }
   const payload = await readJson(response);
+  // body 阶段被计时器打断时,json() 的 AbortError 被 readJson 吞成 undefined:先认超时,再谈解析。
+  if (timer.aborted) return { ok: false, error: SHADOW_TIMEOUT_COPY };
   if (!response.ok) return { ok: false, error: errorOf(payload, response.status) };
   try {
     return { ok: true, result: parseShadowResponse(payload) };

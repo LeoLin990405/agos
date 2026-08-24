@@ -226,6 +226,39 @@ test('运行时锁:违约响应、200+{error}、非对象响应、非 2xx、JSON
   globalThis.fetch = hooked;
 });
 
+test('W17 超时兜底:响应头挂起/响应体挂起都在 timeoutMs 内转 failed(可能已计费文案);调用方主动中止不冒充超时', async () => {
+  // 2026-08-24 P1:服务端与渲染器网络栈都按时收发完整(curl 终止块在场、resource timing 12.7s 收完),
+  // 但页面 JS 的 fetch 交付偶发滞留 36s~分钟级 → UI 永停「调用中」且派发按钮禁用。兜底在前端定界。
+  const hooked = globalThis.fetch;
+  const host = { name: 'leo-01', kind: 'remote', model: 'm', tags: [], maxConcurrency: 1, enabled: true, ok: true, inflight: 0 };
+  const input = { items: ['x'], hosts: [host], chosen: [], tag: '', label: '', confirm: true };
+  // 头阶段挂起:fetch promise 永不落定,仅按真实 fetch 语义在 signal 中止时 reject AbortError
+  const hangHeaders = ((_input: RequestInfo | URL, init?: RequestInit) =>
+    new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true }))) as typeof fetch;
+  globalThis.fetch = hangHeaders;
+  let r = await fe.postShadowSelection(input, undefined, 25);
+  assert.deepEqual(r, { ok: false, error: fe.SHADOW_TIMEOUT_COPY });
+  // 体阶段挂起:headers 已到(200),json 永不落定;真实 fetch 在 signal 中止时 body 流报错 → json reject
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => ({
+    ok: true,
+    status: 200,
+    json: () => new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true })),
+  }) as unknown as Response) as typeof fetch;
+  r = await fe.postShadowSelection(input, undefined, 25);
+  assert.deepEqual(r, { ok: false, error: fe.SHADOW_TIMEOUT_COPY });
+  // 调用方主动中止不是超时:保持抛出语义,runShadow 的 .catch 接;不冒充超时文案
+  globalThis.fetch = hangHeaders;
+  const ac = new AbortController();
+  const pending = fe.postShadowSelection(input, ac.signal, 5000);
+  ac.abort();
+  await assert.rejects(pending, (err: unknown) => err instanceof DOMException && err.name === 'AbortError');
+  globalThis.fetch = hooked;
+  // 常量与文案互相钉住:上限 30 秒写死,文案里的秒数由常量算出,不许各改各的
+  assert.equal(fe.SHADOW_TIMEOUT_MS, 30_000);
+  assert.ok(fe.SHADOW_TIMEOUT_COPY.includes(`${fe.SHADOW_TIMEOUT_MS / 1000} 秒`), fe.SHADOW_TIMEOUT_COPY);
+  assert.match(fe.SHADOW_TIMEOUT_COPY, /计费|台账/, '超时文案必须交代「可能已计费/以台账为准」——failed 不等于没烧额度');
+});
+
 test('W17 影子响应走真实生产者:选择器成功/回落/跳过 三态解析与文案;影子行在 GET /routes 里 mode=shadow 且不进 cells', async () => {
   const { shadowPost, routesGet } = await realEnvelopes();
   const decided = fe.parseShadowResponse(shadowPost);
