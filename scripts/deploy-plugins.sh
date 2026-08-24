@@ -18,6 +18,7 @@ WEB="$HOME/.dsh/profiles/web/plugins"
 RSYNC=(rsync -a --delete --exclude node_modules --exclude .git)
 check=0; [[ "${1:-}" == "--check" ]] && check=1
 rc=0
+total_changed=0
 for p in $PLUGINS; do
 	src="$ROOT/plugins/$p/"
 	[[ -d "$src" ]] || { print "❌ 仓里没有 plugins/$p"; rc=1; continue }
@@ -30,8 +31,13 @@ for p in $PLUGINS; do
 			if [[ "$drift" == "0" ]]; then print "✅ $p ↔ ${dst/#$HOME/~} 零漂移"; else print "⚠️  $p ↔ ${dst/#$HOME/~} 漂移 $drift 项"; rc=1; fi
 		else
 			mkdir -p "$dst"
-			"${RSYNC[@]}" "$src" "$dst" && print "✅ $p → ${dst/#$HOME/~}" || { print "❌ $p → $dst"; rc=1 }
+			# 部署也按内容(--checksum)并统计真实变更数:iterate.sh 据此决定要不要重启 3091
+			out="$("${RSYNC[@]}" --checksum --itemize-changes "$src" "$dst")" || { print "❌ $p → $dst"; rc=1; continue }
+			n="$(print -r -- "$out" | /usr/bin/grep -E '^[<>]f(c|\+)|^\*deleting|^cd\+' | /usr/bin/grep -c . || true)"
+			total_changed=$((total_changed + n))
+			print "✅ $p → ${dst/#$HOME/~}（$n 项变更）"
 		fi
 	done
 done
+(( check )) || print "CHANGED=$total_changed"
 exit $rc

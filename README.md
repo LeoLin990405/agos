@@ -18,16 +18,24 @@ DSH 宿主按文件 **realpath** 向上找 `@deepseek-ai/*` / `dsh-kimicode-swar
 - `scripts/deploy-plugins.sh` 把它 rsync 到 `~/.dsh/profiles/desktop/plugins/<name>/` 与 `~/.dsh/profiles/web/plugins/<name>/`(部署副本);profile 内的 `file:./plugins/<name>`、node_modules 软链、`dsh-preflight`、headless 指向全部不变;
 - 3091(`dsh web --port 3091`)跑 web profile,部署后要重启才生效;SPA 由 dsh-agos 直接服务 `frontend/dist`(`DSH_AGOS_DIST` 可覆盖)。
 
-## 日常
+## 日常(一条命令)
+
+```bash
+scripts/iterate.sh          # 构建前端 → 部署插件 → 插件真变了才重启 3091 → 健康检查
+```
+
+- **改前端**:不用重启——serveSpa 每请求读盘,`iterate.sh`(或 `cd frontend && npm run build`)完刷新页面即可。
+- **改插件**:`iterate.sh` 会检测到变更并自动重启 3091;`--restart` 强制重启,`--no-build` 跳过前端,`--test` 先跑全闸红了不部署。
+- 3091 与 DSH Desktop 两个实例会互踩会话目录:脚本等旧进程真退了才起新的,起不来会把日志尾巴打出来。
+
+零碎命令(iterate.sh 内部就是它们):
 
 ```bash
 scripts/dev-links.sh                 # 一次性:仓内跑插件单测的软链
 scripts/test-all.sh                  # 全闸:前端 verify + 五插件 node --test + 部署漂移
-cd frontend && npm run build         # 出 dist(3091 直接服务)
-scripts/deploy-plugins.sh            # 插件 → desktop + web profile
-pkill -f 'dsh web --port 3091'; sleep 3; nohup dsh web --port 3091 --no-open >/dev/null 2>&1 &
+scripts/deploy-plugins.sh --check    # 只看 仓↔desktop↔web 漂移,不写
 ~/bin/dsh-preflight                  # 宿主侧闸(软链/语法/twin 漂移)
-zsh regression/opencli-regression.sh # 全站回归(需 OpenCLI 桥接健康)
+zsh regression/opencli-regression.sh # 全站回归(需 OpenCLI 桥接健康,41 步,零模型调用)
 ```
 
 ## 红线(来自 TASK-017/019,仍有效)
