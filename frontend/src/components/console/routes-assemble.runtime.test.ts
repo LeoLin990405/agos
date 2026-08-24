@@ -285,5 +285,5 @@ test('W17 影子响应走真实生产者:选择器成功/回落/跳过 三态解
   const shadowRow = decisions.find((d) => d.mode === 'shadow');
   assert.ok(shadowRow); assert.equal(shadowRow.pick, 'leo-01');
   const stats = routesGet.stats as { cells: number; shadow: { total: number; suggested: number; agreed: number } };
-  assert.deepEqual(stats.shadow, { total: 1, filled: 0, pending: 1, suggested: 1, agreed: 1 });
+  assert.deepEqual(stats.shadow, { total: 1, filled: 0, pending: 1, suggested: 1, agreed: 1, filledOk: 0 });
 });
