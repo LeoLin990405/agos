@@ -217,7 +217,9 @@ test('HTTP handlers enforce GET, cross-site, 404, and stream file/tgz bytes', as
 
   const manifest = await requestBody(port, `/api/fleet/artifacts?host=fake&run=${runId}`)
   assert.equal(manifest.status, 200)
-  assert.equal(JSON.parse(manifest.body).count, 2)
+  const manifestBody = JSON.parse(manifest.body)
+  assert.equal(manifestBody.count, 2)
+  assert.equal(manifestBody.host, 'fake', 'manifest host is the machine name, not a stringified host object')
   const method = await requestBody(port, `/api/fleet/artifacts?host=fake&run=${runId}`, { method: 'POST' })
   assert.equal(method.status, 405)
   assert.equal(method.headers.allow, 'GET')

@@ -146,7 +146,7 @@ const parseArtifactManifest = (output, { host, runId, runDir } = {}) => {
   return {
     ok: true,
     value: {
-      host: String(host ?? ''),
+      host: String(host?.name ?? host ?? ''),
       runId: String(runId ?? ''),
       runDir: String(runDir ?? ''),
       files: details.slice(0, ARTIFACT_MAX_FILES),
