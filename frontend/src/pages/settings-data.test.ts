@@ -89,22 +89,45 @@ test('secret-role containers remain one boolean row and never expose child field
   }).map((row) => ({ label: row.label, value: row.value })), [{ label: 'auth', value: false }])
 })
 
-test('degraded loader (DSH 0.1.2, batch B2 restores full read) issues no unary calls', async () => {
-  // 0.1.2 removed settings.describe / llm.providers / llm.models; the loader
-  // returns an empty snapshot and makes no calls until batch B2 re-aligns them.
+test('read loader (DSH 0.1.2) uses slash reads, joins providers, and never asks for a credential value', async () => {
+  const calls: Array<{ method: string, payload: unknown }> = []
+  const fake = {
+    call: async (method: string, payload: unknown) => {
+      calls.push({ method, payload })
+      const values: Record<string, unknown> = {
+        'settings/describe': { writable: false, hasDocument: true, namespaces: [namespace] },
+        'llm/listProviders': [{ id: 'example', name: 'Example' }],
+        'llm/listConfigurableProviders': [{ provider: 'example', displayName: 'Example', settingsNs: 'llm-example', settingsPath: [] }],
+        'credentials/describe': { EXAMPLE_API_KEY: { configured: true, source: 'env', writable: false } },
+      }
+      return { rpcId: 'fixture', result: { ok: true, value: values[method] } }
+    },
+  } as unknown as Pick<AgosClient, 'call'>
+
+  const snapshot = await loadSettingsSnapshot(fake)
+  assert.equal(snapshot.credentials.EXAMPLE_API_KEY?.configured, true)
+  assert.equal(snapshot.providers[0]?.active, true)
+  // parallel reads first (order within Promise.all is deterministic), then credentials.
+  assert.deepEqual(calls.map((c) => c.method), [
+    'settings/describe', 'llm/listProviders', 'llm/listConfigurableProviders', 'credentials/describe',
+  ])
+  assert.deepEqual(calls[3], { method: 'credentials/describe', payload: ['EXAMPLE_API_KEY'] })
+})
+
+test('credential read is skipped when no namespace names a reference', async () => {
   const calls: string[] = []
   const fake = {
-    call: async (method: string) => { calls.push(method); return { rpcId: 'fixture', result: { ok: true, value: undefined } } },
+    call: async (method: string) => {
+      calls.push(method)
+      const values: Record<string, unknown> = {
+        'settings/describe': { writable: true, hasDocument: false, namespaces: [] },
+        'llm/listProviders': [],
+        'llm/listConfigurableProviders': [],
+      }
+      return { rpcId: 'fixture', result: { ok: true, value: values[method] } }
+    },
   } as unknown as Pick<AgosClient, 'call'>
   const snapshot = await loadSettingsSnapshot(fake)
-  assert.deepEqual(calls, [])
-  assert.deepEqual(snapshot, {
-    writable: false,
-    hasDocument: true,
-    namespaces: [],
-    credentials: {},
-    providers: [],
-    modelGroups: [],
-    modelFailures: [],
-  })
+  assert.deepEqual(snapshot.credentials, {})
+  assert.deepEqual(calls.sort(), ['llm/listConfigurableProviders', 'llm/listProviders', 'settings/describe'])
 })

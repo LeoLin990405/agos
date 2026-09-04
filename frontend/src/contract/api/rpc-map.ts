@@ -9,6 +9,8 @@ import type { SessionsApi } from './sessions.ts'
 import type { AgentPresetsApi } from './agent-presets.ts'
 import type { SkillsApi } from './skills.ts'
 import type { SettingsApi } from './settings.ts'
+import type { CredentialsApi } from './credentials.ts'
+import type { LlmApi } from './llm.ts'
 import type { RpcResponse } from './rpc.ts'
 
 /** Method name → method signature. Signatures are the single source of truth. */
@@ -26,7 +28,11 @@ export interface RpcMethodMap {
   'session/openWorkspacePath': SessionsApi['openWorkspacePath']
   'agentPresets/list': AgentPresetsApi['list']
   'skills/list': SkillsApi['list']
+  'settings/describe': SettingsApi['describe']
   'settings/openSettingsDocument': SettingsApi['openSettingsDocument']
+  'credentials/describe': CredentialsApi['describe']
+  'llm/listProviders': LlmApi['listProviders']
+  'llm/listConfigurableProviders': LlmApi['listConfigurableProviders']
 }
 
 /** Business request payload of method K. */

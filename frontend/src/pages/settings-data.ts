@@ -1,23 +1,14 @@
 import type { AgosClient } from '../api-client/index.ts'
+import type { CredentialInfo, SettingsNamespaceView } from '../contract/api/index.ts'
 
-// DSH 0.1.2-rc.1 removed the global settings.describe / llm.providers / llm.models
-// unary reads (models went session-scoped). The full settings + credential +
-// provider/model directory re-alignment is batch B2; until then this reader
-// degrades to an empty snapshot and SettingsPage offers only the working
-// settings/openSettingsDocument action. These view types are kept locally so
-// the projection helpers below still compile.
-export interface SettingsSecretView { path: string[]; set: boolean }
-export interface SettingsNamespaceView {
-  ns: string
-  schema: unknown
-  value: unknown
-  base?: unknown
-  user?: unknown
-  applies: 'live' | 'restart'
-  secrets: SettingsSecretView[]
-  revision: number
-}
-export interface CredentialView { configured: boolean; source?: string; writable: boolean }
+export type { SettingsNamespaceView } from '../contract/api/index.ts'
+export type CredentialView = CredentialInfo
+
+/**
+ * Provider row joined client-side from the two 0.1.2 reads: the configurable
+ * directory (llm/listConfigurableProviders) plus live registration state
+ * (llm/listProviders).
+ */
 export interface ConfigurableProviderView {
   provider: string
   displayName: string
@@ -26,6 +17,9 @@ export interface ConfigurableProviderView {
   settingsPath: string[]
   declared?: boolean
 }
+// DSH 0.1.2 has no global model directory — models are session-scoped
+// (session/modelCatalog). The settings page shows providers, not a global model
+// list, so these stay empty here.
 export interface ModelProviderGroup { id: string; name: string; models: { id: string; name: string }[] }
 export interface ModelCatalogFailure { id: string; name: string; message: string }
 
@@ -61,17 +55,42 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Degraded configuration-plane read for DSH 0.1.2-rc.1 (batch B2 restores the
- * full settings/describe + llm provider directory + credentials/describe reads).
- * Returns an empty snapshot; SettingsPage still opens the settings document.
+ * Read the configuration plane without any mutation or discovery, aligned to
+ * DSH 0.1.2-rc.1: settings/describe + the two llm provider reads (joined) +
+ * credentials/describe. The Host redacts secrets before settings/describe
+ * returns; no global model list exists (models are session-scoped).
  */
-export async function loadSettingsSnapshot(_client: ReadClient, _signal?: AbortSignal): Promise<SettingsReadSnapshot> {
+export async function loadSettingsSnapshot(client: ReadClient, signal?: AbortSignal): Promise<SettingsReadSnapshot> {
+  const [settingsRes, liveRes, configurableRes] = await Promise.all([
+    client.call('settings/describe', {}, signal),
+    client.call('llm/listProviders', {}, signal),
+    client.call('llm/listConfigurableProviders', {}, signal),
+  ])
+  if (!settingsRes.result.ok) throw new Error(`settings/describe: ${settingsRes.result.error.message}`)
+  const settings = settingsRes.result.value
+  const liveIds = new Set(liveRes.result.ok ? liveRes.result.value.map((p) => p.id) : [])
+  const providers: ConfigurableProviderView[] = (configurableRes.result.ok ? configurableRes.result.value : []).map((c) => ({
+    provider: c.provider,
+    displayName: c.displayName,
+    active: liveIds.has(c.provider),
+    settingsNs: c.settingsNs,
+    settingsPath: [...c.settingsPath],
+    ...(c.declared === undefined ? {} : { declared: c.declared }),
+  }))
+
+  const refs = collectCredentialRefs(settings.namespaces)
+  let credentials: Record<string, CredentialView> = {}
+  if (refs.length > 0) {
+    const credRes = await client.call('credentials/describe', refs, signal)
+    if (credRes.result.ok) credentials = credRes.result.value
+  }
+
   return {
-    writable: false,
-    hasDocument: true,
-    namespaces: [],
-    credentials: {},
-    providers: [],
+    writable: settings.writable,
+    hasDocument: settings.hasDocument,
+    namespaces: settings.namespaces,
+    credentials,
+    providers,
     modelGroups: [],
     modelFailures: [],
   }

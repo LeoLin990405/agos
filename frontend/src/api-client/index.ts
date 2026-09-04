@@ -35,7 +35,9 @@ import {
 } from '../contract/api/sessions.schema.ts'
 import { agentPresetListValueSchema } from '../contract/api/agent-presets.schema.ts'
 import { skillListValueSchema } from '../contract/api/skills.schema.ts'
-import { settingsOpenDocumentValueSchema } from '../contract/api/settings.schema.ts'
+import { settingsDescribeValueSchema, settingsOpenDocumentValueSchema } from '../contract/api/settings.schema.ts'
+import { credentialsDescribeValueSchema } from '../contract/api/credentials.schema.ts'
+import { llmListConfigurableProvidersValueSchema, llmListProvidersValueSchema } from '../contract/api/llm.schema.ts'
 
 /** S→C second-parse table: method → response value schema. */
 const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseValue<K>>> } = {
@@ -52,7 +54,11 @@ const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseV
   'session/openWorkspacePath': sessionOpenWorkspacePathValueSchema,
   'agentPresets/list': agentPresetListValueSchema,
   'skills/list': skillListValueSchema,
+  'settings/describe': settingsDescribeValueSchema,
   'settings/openSettingsDocument': settingsOpenDocumentValueSchema,
+  'credentials/describe': credentialsDescribeValueSchema,
+  'llm/listProviders': llmListProvidersValueSchema,
+  'llm/listConfigurableProviders': llmListConfigurableProvidersValueSchema,
 }
 
 /**
@@ -75,7 +81,11 @@ const ARG_KEY: { [K in keyof RpcMethodMap]: string | null } = {
   'session/openWorkspacePath': 'request',
   'agentPresets/list': null,
   'skills/list': 'request',
+  'settings/describe': null,
   'settings/openSettingsDocument': null,
+  'credentials/describe': 'refs',
+  'llm/listProviders': null,
+  'llm/listConfigurableProviders': null,
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000

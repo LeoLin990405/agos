@@ -22,6 +22,7 @@ import type {
 } from '../contract/api/index.ts'
 import { sessionFollowFrameSchema } from '../contract/api/sessions.schema.ts'
 import { workspaceFollowFrameSchema } from '../contract/api/workspace.schema.ts'
+import { expandChunkRun } from './chunk-expand.ts'
 import { createFold, type Fold } from '../fold/fold.ts'
 import type { FoldedConversation } from '../fold/model.ts'
 import { createRefCountedPoller } from './ref-counted-polling.ts'
@@ -134,8 +135,16 @@ function publish(id: string): void {
   convoEmitter.emit()
 }
 
-/** Apply one history record to the fold; returns the record's seq. */
+/** Apply one history record to the fold; returns the highest seq applied. */
 function applyRecord(fold: Fold, record: SessionHistoryRecord): number {
+  if (record.type === 'chunks') {
+    // Packed assistant delta run: expand into the same assistant/chunk events
+    // the live stream emits so the fold renders it without any fold change.
+    const expanded = expandChunkRun(record.event)
+    let last = Number.NaN
+    for (const ev of expanded) { fold.apply(ev as unknown as Record<string, unknown>); last = ev.seq }
+    return last
+  }
   const event = record.event as unknown as Record<string, unknown>
   fold.apply(event)
   return Number(event['seq'] ?? Number.NaN)

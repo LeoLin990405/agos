@@ -16,7 +16,9 @@ export type {
 export type { WorkspaceView, WorkspaceId, WorkspaceBaseline, WorkspaceFollowFrame, WorkspaceFollowIncrement } from './workspace.ts'
 export type { SkillsApi, SkillEntry } from './skills.ts'
 export type { AgentPresetsApi, AgentPresetEntry } from './agent-presets.ts'
-export type { SettingsApi } from './settings.ts'
+export type { SettingsApi, SettingsDescribeValue, SettingsNamespaceView, SettingsSecretView } from './settings.ts'
+export type { CredentialsApi, CredentialInfo } from './credentials.ts'
+export type { LlmApi, LlmProviderInfo, LlmConfigurableProvider } from './llm.ts'
 
 // ---- Message layer: narrow forms ----
 export type { RpcRequest, RpcResponse } from './rpc.ts'
