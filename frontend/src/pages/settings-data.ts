@@ -1,12 +1,33 @@
 import type { AgosClient } from '../api-client/index.ts'
-import type {
-  ConfigurableProviderView,
-  CredentialView,
-  ModelCatalogFailure,
-  ModelProviderGroup,
-  SettingsNamespaceView,
-} from '../contract/api/index.ts'
-import type { RequestPayload, ResponseValue, RpcMethodMap } from '../contract/api/rpc-map.ts'
+
+// DSH 0.1.2-rc.1 removed the global settings.describe / llm.providers / llm.models
+// unary reads (models went session-scoped). The full settings + credential +
+// provider/model directory re-alignment is batch B2; until then this reader
+// degrades to an empty snapshot and SettingsPage offers only the working
+// settings/openSettingsDocument action. These view types are kept locally so
+// the projection helpers below still compile.
+export interface SettingsSecretView { path: string[]; set: boolean }
+export interface SettingsNamespaceView {
+  ns: string
+  schema: unknown
+  value: unknown
+  base?: unknown
+  user?: unknown
+  applies: 'live' | 'restart'
+  secrets: SettingsSecretView[]
+  revision: number
+}
+export interface CredentialView { configured: boolean; source?: string; writable: boolean }
+export interface ConfigurableProviderView {
+  provider: string
+  displayName: string
+  active: boolean
+  settingsNs: string
+  settingsPath: string[]
+  declared?: boolean
+}
+export interface ModelProviderGroup { id: string; name: string; models: { id: string; name: string }[] }
+export interface ModelCatalogFailure { id: string; name: string; message: string }
 
 type ReadClient = Pick<AgosClient, 'call'>
 
@@ -39,40 +60,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-async function readValue<K extends keyof RpcMethodMap>(
-  client: ReadClient,
-  method: K,
-  payload: RequestPayload<K>,
-  signal?: AbortSignal,
-): Promise<ResponseValue<K>> {
-  const response = await client.call(method, payload, signal)
-  if (!response.result.ok) throw new Error(`${method}: ${response.result.error.message}`)
-  return response.result.value
-}
-
 /**
- * Read the configuration plane without invoking any mutation or discovery
- * method. The Host performs secret redaction before settings.describe returns.
+ * Degraded configuration-plane read for DSH 0.1.2-rc.1 (batch B2 restores the
+ * full settings/describe + llm provider directory + credentials/describe reads).
+ * Returns an empty snapshot; SettingsPage still opens the settings document.
  */
-export async function loadSettingsSnapshot(client: ReadClient, signal?: AbortSignal): Promise<SettingsReadSnapshot> {
-  const [settings, providerDirectory, modelCatalog] = await Promise.all([
-    readValue(client, 'settings.describe', {}, signal),
-    readValue(client, 'llm.providers', {}, signal),
-    readValue(client, 'llm.models', {}, signal),
-  ])
-  const refs = collectCredentialRefs(settings.namespaces)
-  const credentials = refs.length === 0
-    ? {}
-    : (await readValue(client, 'credentials.describe', { refs }, signal)).credentials
-
+export async function loadSettingsSnapshot(_client: ReadClient, _signal?: AbortSignal): Promise<SettingsReadSnapshot> {
   return {
-    writable: settings.writable,
-    hasDocument: settings.hasDocument,
-    namespaces: settings.namespaces,
-    credentials,
-    providers: providerDirectory.providers,
-    modelGroups: modelCatalog.groups,
-    modelFailures: modelCatalog.failures,
+    writable: false,
+    hasDocument: true,
+    namespaces: [],
+    credentials: {},
+    providers: [],
+    modelGroups: [],
+    modelFailures: [],
   }
 }
 

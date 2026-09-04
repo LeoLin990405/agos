@@ -86,7 +86,7 @@ export const SettingsPage: React.FC = () => {
     setOpenState('opening')
     setOpenError(undefined)
     try {
-      const response = await agos.call('settings.openDocument', {})
+      const response = await agos.call('settings/openSettingsDocument', {})
       if (!response.result.ok) throw new Error(response.result.error.message)
     } catch (error) {
       setOpenError(messageOf(error))

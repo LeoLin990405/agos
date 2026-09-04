@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Chip } from '@/components/ui/Chip';
-import { agos, createSession, fetchPresets, type PresetInfo } from '@/stores/live';
+import { createSession, ensureLiveConnection, fetchPresets, getHostHome, type PresetInfo } from '@/stores/live';
 
 export interface NewSessionModalProps {
   isOpen: boolean;
@@ -35,12 +35,12 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
     if (!isOpen) return;
     const pinned = initialPresetId !== undefined && initialPresetId !== '' ? initialPresetId : undefined;
     if (pinned !== undefined) setPreset(pinned); // 预选立即生效,不等 list 回来
-    void agos.call('host.describe', {}).then((r) => {
-      const home = r.result.ok ? r.result.value.home : '';
-      if (typeof home === 'string' && home !== '') {
-        setCwd((prev) => (prev === '' ? home : prev)); // 只填空值,不覆盖用户已输入的
-      }
-    }).catch(() => { /* 宿主未答:输入框留空,占位符提示手输 */ });
+    // 0.1.2: host home comes from the $events ready frame, not a host.describe unary.
+    ensureLiveConnection();
+    const home = getHostHome();
+    if (typeof home === 'string' && home !== '') {
+      setCwd((prev) => (prev === '' ? home : prev)); // 只填空值,不覆盖用户已输入的
+    }
     void fetchPresets().then((list: PresetInfo[]) => {
       if (list.length > 0) {
         setPresets(list.map((p) => ({ id: p.id, name: p.name, desc: p.description })));
