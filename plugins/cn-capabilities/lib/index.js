@@ -13,6 +13,18 @@ import { buildCouncilReviewRecord, councilReviewVerdict, disagreementsFromParsed
 
 const name = 'cn-capabilities'
 
+function snapshotSessionEvents(session) {
+  if (typeof session?.snapshotEvents !== 'function') return []
+  const events = session.snapshotEvents()
+  return Array.isArray(events) ? events : []
+}
+
+function ownSessionEvents(session) {
+  if (typeof session?.ownEvents !== 'function') return []
+  const events = session.ownEvents()
+  return Array.isArray(events) ? events : []
+}
+
 // dsh-kimicode-swarm(swarm 调度器)**懒加载**,只有 plan_run 的执行阶段用得到。
 // 不写成顶层静态 import:那会把本插件 21 个工具的加载绑在一个兄弟插件的可解析性上 ——
 // 与文首 webServer 那条教训同类(附加能力不该是全体工具的启动前提)。
@@ -1302,7 +1314,7 @@ const PROVIDER_DEFAULT_MODEL = {
   // 单个评委:起一个隔离子代理,量出耗时,失败不抛(一家挂掉不该毁掉整场)
   // ── 真实 token 用量 ─────────────────────────────────────────────────
   // 子代理的结果对象只有 output/stopReason,不带用量;但 `run.localAgent` 是**进程内的
-  // 子代理实例**(服务层原样返回 run,未做包装),它的 session.events 里每条
+  // 子代理实例**(服务层原样返回 run,未做包装),它的 session.ownEvents() 里每条
   // assistant/message 都挂着真实 usage。所以不用猜 id、不用读会话文件。
   //
   // ⚠️ 必须在 dispose 之前取。spawn 出来的子代理是全新会话、零父级上下文、只跑一轮,
@@ -1312,8 +1324,8 @@ const PROVIDER_DEFAULT_MODEL = {
   // 按量计费那家的单价又不该由我写死在代码里 —— 编一个数字比不报更糟。
   const usageOf = (run) => {
     try {
-      const ev = run && run.localAgent && run.localAgent.session && run.localAgent.session.events
-      if (!Array.isArray(ev)) return null
+      const ev = ownSessionEvents(run?.localAgent?.session)
+      if (ev.length === 0) return null
       let inp = 0, out = 0, cache = 0, think = 0, n = 0
       for (const e of ev) {
         const u = e && e.data && e.data.usage
@@ -2129,7 +2141,7 @@ const PROVIDER_DEFAULT_MODEL = {
     if (pp === undefined) return
     const sid = session.id
     if (active) {
-      const cur = pp.current(session.events)
+      const cur = pp.current(session)
       if (cur === 'read-only') return
       PLAN_REMEMBER.set(sid, cur)
       deferWrite('进入计划模式切 read-only', () => pp.set(session, 'read-only'))
@@ -2141,7 +2153,7 @@ const PROVIDER_DEFAULT_MODEL = {
     if (!prev || prev === 'custom') return
     deferWrite('退出计划模式恢复 ' + prev, () => {
       // 人在计划模式里手动改过预设(不再是 read-only)→ 尊重人的选择,不覆盖
-      if (pp.current(session.events) === 'read-only') pp.set(session, prev)
+      if (pp.current(session) === 'read-only') pp.set(session, prev)
     })
   }
   const onToolCallEvent = (session, event) => {
@@ -2208,7 +2220,7 @@ const PROVIDER_DEFAULT_MODEL = {
     const off = sp.section({
       name: 'plugin:civ-plan-appendix',
       order: 51,   // 紧跟宿主 plan:policy(order 50)
-      text: (context) => (context && context.agent && planActive(context.agent.session?.events) ? PLAN_APPENDIX : ''),
+      text: (context) => (context && context.agent && planActive(snapshotSessionEvents(context.agent.session)) ? PLAN_APPENDIX : ''),
     })
     if (typeof off === 'function') disposers.push(off)
   }
@@ -2650,4 +2662,4 @@ const PROVIDER_DEFAULT_MODEL = {
   return () => { disposers.forEach((d) => d()) }
 }
 
-export { Config, apply, inject, name, resolveMediaPath, MEDIA_ROOT, objectPathForAttachmentId, isObjectStorePath, sniffMediaType }
+export { Config, apply, inject, name, resolveMediaPath, MEDIA_ROOT, objectPathForAttachmentId, isObjectStorePath, ownSessionEvents, snapshotSessionEvents, sniffMediaType }

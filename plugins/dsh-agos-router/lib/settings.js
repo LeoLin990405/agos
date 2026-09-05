@@ -1,8 +1,7 @@
-import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import z from '@deepseek-ai/schemastery'
 import { normalizeConfig } from './config.js'
 
-export const ROUTER_SETTINGS_NAMESPACE = settingsNamespace('agos-router')
+export const ROUTER_SETTINGS_NAMESPACE = 'agos-router'
 
 export const RouterSettingsSchema = z.object({
   provider: z.string(),
@@ -32,6 +31,13 @@ export function validateRouterSettings(value) {
 }
 
 export function installRouterSettings(ctx, entry, hooks) {
-  if (ctx.get('settings') === undefined) return
-  installSettingsSection(ctx, ROUTER_SETTINGS_NAMESPACE, RouterSettingsSchema, entry, hooks)
+  ctx.inject(['settings'], (settingsCtx) => {
+    settingsCtx.settings.installSection(
+      ctx,
+      ROUTER_SETTINGS_NAMESPACE,
+      RouterSettingsSchema,
+      entry,
+      hooks,
+    )
+  })
 }

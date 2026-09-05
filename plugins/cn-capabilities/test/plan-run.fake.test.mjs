@@ -15,7 +15,7 @@ process.env.DSH_CN_PLAN_DIR = join(tmp, 'plans')
 const PLAN_DIR = process.env.DSH_CN_PLAN_DIR
 
 // ⚠️ env 必须在 import 之前设好:PLAN_DIR 在 apply() 时读一次
-const { apply } = await import('../lib/index.js')
+const { apply, ownSessionEvents, snapshotSessionEvents } = await import('../lib/index.js')
 
 // ── 假子代理:swarm 调度器的 spawnOneShot 与本插件的 runPanelist 都走 subagents.start('spawn', {...}) ──
 function fakeSubagents(script) {
@@ -31,7 +31,10 @@ function fakeSubagents(script) {
       return {
         id: 'agent-' + started.length,
         result: Promise.resolve({ stopReason: 'completed', output: [{ type: 'text', text }] }),
-        localAgent: { session: { events } },
+        localAgent: { session: {
+          get events() { throw new Error('Session.events is private in DSH 0.1.2') },
+          ownEvents() { return events },
+        } },
         dispose: async () => {},
       }
     },
@@ -41,11 +44,18 @@ function fakeSubagents(script) {
 // ── 假会话 + 假 permissionPresets:append 会**同步**把 session/event 派给已注册的 handler,
 //    并且像宿主一样在派发期间禁止重入 append(dsh-session 的 "cannot reenter" 守卫)。
 function fakeSession(id, handlers) {
-  const s = { id, events: [], appending: false }
+  let events = []
+  const s = {
+    id,
+    appending: false,
+    get events() { throw new Error('Session.events is private in DSH 0.1.2') },
+    snapshotEvents() { return events },
+    ownEvents() { return events },
+  }
   s.append = (type, data) => {
     if (s.appending) throw new Error('session append cannot reenter while another append is being published')
-    const ev = { type, seq: s.events.length, time: Date.now(), data }
-    s.events = [...s.events, ev]
+    const ev = { type, seq: events.length, time: Date.now(), data }
+    events = [...events, ev]
     s.appending = true
     try { for (const h of handlers) h(s, ev) } finally { s.appending = false }
     return ev
@@ -58,14 +68,15 @@ function fakePresets(sandboxDefault = 'workspace-write') {
   const pp = {
     names,
     setCalls,
-    current: (events) => {
+    current: (session) => {
+      const events = session.snapshotEvents()
       for (let i = events.length - 1; i >= 0; i--) if (events[i].type === 'permission/preset') return events[i].data.preset
       return sandboxDefault
     },
     set: (session, name) => {
       if (!names.includes(name)) throw new Error('permission: unknown preset "' + name + '"')
       setCalls.push(name)
-      if (pp.current(session.events) !== name) session.append('permission/preset', { preset: name })
+      if (pp.current(session) !== name) session.append('permission/preset', { preset: name })
       session.append('sandbox/mode', { mode: name === 'read-only' ? 'read-only' : 'workspace-write' })
     },
   }
@@ -113,6 +124,17 @@ const STEPS = [
 ]
 const PLAN_MD = '# 迁移配置系统\n\n步骤见下。\n\n```dsh-plan\n' + JSON.stringify({ steps: STEPS }) + '\n```\n'
 
+test('0.1.2 session helpers use public snapshotEvents/ownEvents only', () => {
+  const events = [{ type: 'plan/mode', seq: 0, data: { active: true } }]
+  const session = {
+    get events() { throw new Error('private') },
+    snapshotEvents() { return events },
+    ownEvents() { return events.slice(0, 1) },
+  }
+  assert.equal(snapshotSessionEvents(session), events)
+  assert.deepEqual(ownSessionEvents(session), events)
+})
+
 test('A2: plan/mode active → read-only(记住原预设);inactive → 恢复;写操作不在 append 边界内重入', async () => {
   const presets = fakePresets()
   const { ctx, handlers } = fakeCtx({ presets })
@@ -126,7 +148,7 @@ test('A2: plan/mode active → read-only(记住原预设);inactive → 恢复;�
   assert.deepEqual(presets.setCalls, [])
   await tick()
   assert.deepEqual(presets.setCalls, ['read-only'])
-  assert.equal(presets.current(session.events), 'read-only')
+  assert.equal(presets.current(session), 'read-only')
 
   // 已经是 read-only 时再进一次:不重复记、不重复切
   session.append('plan/mode', { active: true })
@@ -136,7 +158,7 @@ test('A2: plan/mode active → read-only(记住原预设);inactive → 恢复;�
   session.append('plan/mode', { active: false })
   await tick()
   assert.deepEqual(presets.setCalls, ['read-only', 'workspace-write'])
-  assert.equal(presets.current(session.events), 'workspace-write')
+  assert.equal(presets.current(session), 'workspace-write')
 
   // 人在计划模式里手动改了预设 → 退出时不覆盖人的选择
   session.append('plan/mode', { active: true })
@@ -144,7 +166,7 @@ test('A2: plan/mode active → read-only(记住原预设);inactive → 恢复;�
   session.append('permission/preset', { preset: 'yolo-auto' })
   session.append('plan/mode', { active: false })
   await tick()
-  assert.equal(presets.current(session.events), 'yolo-auto')
+  assert.equal(presets.current(session), 'yolo-auto')
   assert.deepEqual(presets.setCalls, ['read-only', 'workspace-write', 'read-only'])
 
   // 进入前就是 custom:退出时不尝试 set('custom')(会抛)
@@ -167,7 +189,7 @@ test('A2: 没有 permissionPresets 服务时安静跳过', async () => {
   await tick()
   session.append('plan/mode', { active: false })
   await tick()
-  assert.equal(session.events.filter((e) => e.type === 'permission/preset').length, 0)
+  assert.equal(session.snapshotEvents().filter((e) => e.type === 'permission/preset').length, 0)
 })
 
 // tool/call + tool/result 的形状照抄宿主(dsh-agent-loop appendToolCall/appendToolResult + dsh-llm createToolResultMessage)
@@ -181,7 +203,7 @@ test('A3: exit_plan_mode 批准 → dsh-plan 块落盘;拒绝 / 无块 / 重复�
   const { ctx, handlers } = fakeCtx({})
   apply(ctx)
   const fire = (session, ev) => { for (const h of handlers) h(session, ev) }
-  const session = { id: 's-a3', events: [] }
+  const session = { id: 's-a3', snapshotEvents: () => [] }
   const before = listPlans().length
 
   // 拒绝(Keep planning → execute 抛错 → isError:true)

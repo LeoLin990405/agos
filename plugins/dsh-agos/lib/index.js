@@ -134,17 +134,24 @@ async function skillsPayload(force) {
 }
 
 // ── overview 各源(每个都 try/catch,失败即缺席)─────────────────────────
-function projectionCacheOverview(path = join(homedir(), '.dsh', 'storages', 'session_projcache.json')) {
+const PROJCACHE_VERSIONS = new Set([3, 4, 5])
+
+function projectionCacheOverview(path = join(homedir(), '.dsh', 'storages', 'session_projcache', 'sessions')) {
   try {
-    const root = JSON.parse(readFileSync(path, 'utf8'))
-    const sessions = (root && root.tables && root.tables.sessions) || {}
-    const ids = Object.keys(sessions)
+    const files = readdirSync(path).filter((name) => name.endsWith('.json'))
+    let total = 0
     let latestAt = 0
-    for (const v of Object.values(sessions)) {
-      const at = Number(v && v.identity && v.identity.createdAt) || 0
-      if (at > latestAt) latestAt = at
+    for (const name of files) {
+      try {
+        const document = JSON.parse(readFileSync(join(path, name), 'utf8'))
+        if (!document || !PROJCACHE_VERSIONS.has(document.version)
+          || !document.record || typeof document.record !== 'object') continue
+        total += 1
+        const at = Number(document.record.identity && document.record.identity.createdAt) || 0
+        if (at > latestAt) latestAt = at
+      } catch {}
     }
-    return { total: ids.length, latestAt, source: 'projcache' }
+    return { total, latestAt, source: 'projcache' }
   } catch { return undefined }
 }
 
