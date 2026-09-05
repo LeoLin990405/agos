@@ -26,10 +26,12 @@ const flush = (): void => {
   renameSync(tmp, OUT)
 }
 
+// 0.1.2: the two SSE streams collapsed to one WebSocket mux; this probe now
+// counts $events downlink frame types (ready/emit/waterfall/cancel). No rpcId
+// on stream frames, so the reducer's no-rpcId (no-dedup) path always applies.
 const stop = watchStream(
-  (signal, onOpen) => client.mux(signal, () => { opened += 1; state = recordOpen(state, Date.now()); onOpen?.() }),
-  // rpcId 只在是字符串时才传:缺席就让 reducer 走「无 rpcId 不去重」。
-  (frame) => { state = recordFrame(state, { type: frame.payload.type, rpcId: typeof frame.rpcId === 'string' ? frame.rpcId : undefined }, Date.now()) },
+  (signal, onOpen) => client.events(signal, () => { opened += 1; state = recordOpen(state, Date.now()); onOpen?.() }),
+  (frame) => { state = recordFrame(state, { type: frame.type }, Date.now()) },
   () => { state = recordReconnect(state) },
 )
 
@@ -37,4 +39,4 @@ const timer = setInterval(flush, FLUSH_MS)
 const bye = (): void => { clearInterval(timer); stop(); flush(); console.log(`[mux-probe] 已落盘 ${OUT}`); process.exit(0) }
 process.on('SIGINT', bye)
 process.on('SIGTERM', bye)
-console.log(`[mux-probe] 监听 ${BASE} 的 events.mux,每 ${FLUSH_MS / 1000}s 写 ${OUT}`)
+console.log(`[mux-probe] 监听 ${BASE} 的 remote.mux $events,每 ${FLUSH_MS / 1000}s 写 ${OUT}`)

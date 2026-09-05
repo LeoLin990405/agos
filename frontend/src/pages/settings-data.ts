@@ -1,12 +1,27 @@
 import type { AgosClient } from '../api-client/index.ts'
-import type {
-  ConfigurableProviderView,
-  CredentialView,
-  ModelCatalogFailure,
-  ModelProviderGroup,
-  SettingsNamespaceView,
-} from '../contract/api/index.ts'
-import type { RequestPayload, ResponseValue, RpcMethodMap } from '../contract/api/rpc-map.ts'
+import type { CredentialInfo, SettingsNamespaceView } from '../contract/api/index.ts'
+
+export type { SettingsNamespaceView } from '../contract/api/index.ts'
+export type CredentialView = CredentialInfo
+
+/**
+ * Provider row joined client-side from the two 0.1.2 reads: the configurable
+ * directory (llm/listConfigurableProviders) plus live registration state
+ * (llm/listProviders).
+ */
+export interface ConfigurableProviderView {
+  provider: string
+  displayName: string
+  active: boolean
+  settingsNs: string
+  settingsPath: string[]
+  declared?: boolean
+}
+// DSH 0.1.2 has no global model directory — models are session-scoped
+// (session/modelCatalog). The settings page shows providers, not a global model
+// list, so these stay empty here.
+export interface ModelProviderGroup { id: string; name: string; models: { id: string; name: string }[] }
+export interface ModelCatalogFailure { id: string; name: string; message: string }
 
 type ReadClient = Pick<AgosClient, 'call'>
 
@@ -39,40 +54,45 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-async function readValue<K extends keyof RpcMethodMap>(
-  client: ReadClient,
-  method: K,
-  payload: RequestPayload<K>,
-  signal?: AbortSignal,
-): Promise<ResponseValue<K>> {
-  const response = await client.call(method, payload, signal)
-  if (!response.result.ok) throw new Error(`${method}: ${response.result.error.message}`)
-  return response.result.value
-}
-
 /**
- * Read the configuration plane without invoking any mutation or discovery
- * method. The Host performs secret redaction before settings.describe returns.
+ * Read the configuration plane without any mutation or discovery, aligned to
+ * DSH 0.1.2-rc.1: settings/describe + the two llm provider reads (joined) +
+ * credentials/describe. The Host redacts secrets before settings/describe
+ * returns; no global model list exists (models are session-scoped).
  */
 export async function loadSettingsSnapshot(client: ReadClient, signal?: AbortSignal): Promise<SettingsReadSnapshot> {
-  const [settings, providerDirectory, modelCatalog] = await Promise.all([
-    readValue(client, 'settings.describe', {}, signal),
-    readValue(client, 'llm.providers', {}, signal),
-    readValue(client, 'llm.models', {}, signal),
+  const [settingsRes, liveRes, configurableRes] = await Promise.all([
+    client.call('settings/describe', {}, signal),
+    client.call('llm/listProviders', {}, signal),
+    client.call('llm/listConfigurableProviders', {}, signal),
   ])
+  if (!settingsRes.result.ok) throw new Error(`settings/describe: ${settingsRes.result.error.message}`)
+  const settings = settingsRes.result.value
+  const liveIds = new Set(liveRes.result.ok ? liveRes.result.value.map((p) => p.id) : [])
+  const providers: ConfigurableProviderView[] = (configurableRes.result.ok ? configurableRes.result.value : []).map((c) => ({
+    provider: c.provider,
+    displayName: c.displayName,
+    active: liveIds.has(c.provider),
+    settingsNs: c.settingsNs,
+    settingsPath: [...c.settingsPath],
+    ...(c.declared === undefined ? {} : { declared: c.declared }),
+  }))
+
   const refs = collectCredentialRefs(settings.namespaces)
-  const credentials = refs.length === 0
-    ? {}
-    : (await readValue(client, 'credentials.describe', { refs }, signal)).credentials
+  let credentials: Record<string, CredentialView> = {}
+  if (refs.length > 0) {
+    const credRes = await client.call('credentials/describe', refs, signal)
+    if (credRes.result.ok) credentials = credRes.result.value
+  }
 
   return {
     writable: settings.writable,
     hasDocument: settings.hasDocument,
     namespaces: settings.namespaces,
     credentials,
-    providers: providerDirectory.providers,
-    modelGroups: modelCatalog.groups,
-    modelFailures: modelCatalog.failures,
+    providers,
+    modelGroups: [],
+    modelFailures: [],
   }
 }
 

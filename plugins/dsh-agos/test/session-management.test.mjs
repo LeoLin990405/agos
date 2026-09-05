@@ -699,13 +699,17 @@ test('overview sessions prefers persistence and labels the projcache fallback', 
   const root = await mkdtemp(join(tmpdir(), 'dsh-agos-overview-test-'))
   assert.ok(root.startsWith(tmpdir()))
   t.after(async () => { await rm(root, { recursive: true, force: true }) })
-  const projcachePath = join(root, 'session_projcache.json')
-  await writeFile(projcachePath, JSON.stringify({
-    tables: { sessions: {
-      stale: { identity: { createdAt: 5 } },
-      older: { identity: { createdAt: 2 } },
-    } },
+  const projcachePath = join(root, 'session_projcache', 'sessions')
+  await mkdir(projcachePath, { recursive: true })
+  await writeFile(join(projcachePath, 'stale.json'), JSON.stringify({
+    version: 5,
+    record: { identity: { createdAt: 5, isSeeded: false, inheritedEventCount: 0 }, rows: {} },
   }))
+  await writeFile(join(projcachePath, 'older.json'), JSON.stringify({
+    version: 4,
+    record: { identity: { createdAt: 2 }, rows: {} },
+  }))
+  await writeFile(join(projcachePath, 'malformed.json'), '{bad')
 
   assert.deepEqual(await overviewSessions({
     sessionPersistence: { list: async () => [{ id: 'real-a', createdAt: 10 }, { id: 'real-b', createdAt: 20 }] },

@@ -1,20 +1,28 @@
 /**
- * live stores —— SPA 的真实数据层(P1 stores)。
+ * live stores — SPA real-data layer, aligned to DSH 0.1.2-rc.1.
  *
- * 三个 store,全部 useSyncExternalStore 风格(subscribe + getSnapshot):
- * - sessions:session.list 轮询(15s)+ 手动 refresh。
- * - conversation:每会话一个 fold。顺序纪律(修正 P0 时记下的空窗问题):
- *   **流先行**——mux 常开(watchStream 自动重连);会话打开或流重开(onOpen)时,
- *   先进入 buffering(live 帧入缓冲),再拉 session.history 重建 fold,
- *   然后按 seq 排掉重叠(仅 apply seq > lastSeq 的缓冲帧)转 live。
- * - telemetry:/api/agos/overview + /api/swarm/progress 轮询(10s,页面可见才轮)。
+ * 0.1.2 transport: one WebSocket /api/remote.mux multiplexes logical streams.
+ * - conversation: per-session `session/follow` stream. The stream is ordered —
+ *   one opening `snapshot` (header + first records + cursor + projections) then
+ *   `event` frames — so the fold rebuilds from the snapshot and applies live
+ *   events by seq, with none of the old mux+history race.
+ * - live connection: the `$events` stream carries the `ready` frame (clientId +
+ *   host home, the host.describe replacement), forwarded `emit` notifications,
+ *   and `waterfall` asks (approval / user-question) answered via $events/result.
+ * - archives: `workspace/follow` baseline replaces the removed workspace.list.
  *
- * 审批 respond 需要 mux 帧的 rpcId:approvalRpc 表记录 approval/requested 的
- * (approvalId → rpcId),ChatPage 的审批按钮据此回 POST /api/respond。
+ * The fold is untouched; it is fed the same SessionWireEvent objects. Packed
+ * `chunks` history records are applied best-effort (see NOTES: full chunkrow
+ * expansion is a later batch).
  */
 import { createAgosClient, watchStream } from '../api-client/index.ts'
-import type { MuxFrame } from '../contract/api/index.ts'
-import type { PromptContentPart, RpcRequest } from '../contract/api/index.ts'
+import type {
+  PromptContentPart, RemoteEventDownlinkFrame, SessionFollowFrame, SessionHistoryRecord,
+  SessionWireEvent, WorkspaceFollowFrame,
+} from '../contract/api/index.ts'
+import { sessionFollowFrameSchema } from '../contract/api/sessions.schema.ts'
+import { workspaceFollowFrameSchema } from '../contract/api/workspace.schema.ts'
+import { expandChunkRun } from './chunk-expand.ts'
 import { createFold, type Fold } from '../fold/fold.ts'
 import type { FoldedConversation } from '../fold/model.ts'
 import { createRefCountedPoller } from './ref-counted-polling.ts'
@@ -52,7 +60,7 @@ let sessionsTimer: ReturnType<typeof setInterval> | undefined
 
 export async function refreshSessions(): Promise<void> {
   try {
-    const res = await agos.call('session.list', {})
+    const res = await agos.call('session/list', {})
     if (!res.result.ok) throw new Error(JSON.stringify(res.result.error))
     const rows = res.result.value.items.map((it) => {
       const item = it as unknown as Record<string, unknown>
@@ -89,7 +97,7 @@ export const sessionsStore = {
   getSnapshot(): SessionsState { return sessionsState },
 }
 
-// ── conversation ────────────────────────────────────────────────────────────
+// ── conversation (session/follow) ─────────────────────────────────────────────
 export interface ConversationState {
   snapshot: FoldedConversation | undefined
   phase: 'idle' | 'loading' | 'live' | 'error'
@@ -100,9 +108,8 @@ export interface ConversationState {
 interface ConvoEntry {
   fold: Fold
   lastSeq: number
-  buffering: boolean
-  buffer: { seq: number, event: Record<string, unknown> }[]
   state: ConversationState
+  stop: (() => void) | undefined
 }
 
 const convoEmitter = createEmitter()
@@ -111,123 +118,143 @@ let activeSessionId: string | undefined
 let streamOnline = false
 export type LiveConnectionPhase = 'idle' | 'connecting' | 'online' | 'offline'
 let liveConnectionPhase: LiveConnectionPhase = 'idle'
-let muxStarted = false
-let stopMux: (() => void) | undefined
-/** approvalId → 该 approval/requested 帧的 rpcId(respond 用)。 */
-export const approvalRpc = new Map<string, string>()
 
 const IDLE_STATE: ConversationState = { snapshot: undefined, phase: 'idle', error: undefined, streamOnline: false }
-function emptyState(): ConversationState { return IDLE_STATE } // 稳定引用:useSyncExternalStore 需要
+function emptyState(): ConversationState { return IDLE_STATE }
 
 function publish(id: string): void {
   const entry = conversations.get(id)
   if (entry !== undefined) {
     entry.state = {
       snapshot: entry.fold.snapshot(),
-      phase: entry.buffering ? 'loading' : 'live',
-      error: undefined,
+      phase: entry.state.phase === 'error' ? 'error' : 'live',
+      error: entry.state.error,
       streamOnline,
     }
   }
   convoEmitter.emit()
 }
 
-function applyLive(entry: ConvoEntry, id: string, seq: number, event: Record<string, unknown>): void {
-  if (entry.buffering) { entry.buffer.push({ seq, event }); return }
-  if (seq <= entry.lastSeq) return
-  entry.fold.apply(event)
-  entry.lastSeq = seq
-  publish(id)
-}
-
-function onMuxFrame(frame: RpcRequest<MuxFrame>): void {
-  const payload = frame.payload as unknown as Record<string, unknown>
-  const type = String(payload['type'] ?? '')
-  if (type === 'approval/requested') {
-    const inner = (payload['payload'] ?? payload) as Record<string, unknown>
-    const approvalId = String(inner['id'] ?? (inner['data'] as Record<string, unknown> | undefined)?.['id'] ?? '')
-    if (approvalId !== '') approvalRpc.set(approvalId, String(frame.rpcId))
-    return
+/** Apply one history record to the fold; returns the highest seq applied. */
+function applyRecord(fold: Fold, record: SessionHistoryRecord): number {
+  if (record.type === 'chunks') {
+    // Packed assistant delta run: expand into the same assistant/chunk events
+    // the live stream emits so the fold renders it without any fold change.
+    const expanded = expandChunkRun(record.event)
+    let last = Number.NaN
+    for (const ev of expanded) { fold.apply(ev as unknown as Record<string, unknown>); last = ev.seq }
+    return last
   }
-  if (type !== 'session/event') return
-  const sessionId = String(payload['sessionId'] ?? '')
-  const entry = conversations.get(sessionId)
-  if (entry === undefined) return
-  const event = payload['event'] as Record<string, unknown> | undefined
-  if (event === undefined) return
-  const seq = Number(event['seq'] ?? Number.NaN)
-  applyLive(entry, sessionId, Number.isFinite(seq) ? seq : entry.lastSeq + 1, event)
+  const event = record.event as unknown as Record<string, unknown>
+  fold.apply(event)
+  return Number(event['seq'] ?? Number.NaN)
 }
 
-async function rebuildFromHistory(id: string): Promise<void> {
+function onFollowValue(id: string, value: unknown): void {
   const entry = conversations.get(id)
   if (entry === undefined) return
-  entry.buffering = true
-  entry.buffer = []
-  try {
-    const res = await agos.call('session.history', { sessionId: id as never })
-    if (!res.result.ok) throw new Error(JSON.stringify(res.result.error))
-    const value = res.result.value as unknown as Record<string, unknown>
-    const entries = (value['events'] ?? []) as Record<string, unknown>[]
+  let frame: SessionFollowFrame
+  try { frame = sessionFollowFrameSchema.parse(value) as SessionFollowFrame } catch { return }
+  if (frame.type === 'snapshot') {
     const fold = createFold()
-    let lastSeq = -1
-    for (const wrapper of entries) {
-      // history 条目形状 {event: SessionEvent, …}(实测);容忍裸事件形态
-      const event = (wrapper['event'] ?? wrapper) as Record<string, unknown>
-      fold.apply(event)
-      const seq = Number(event['seq'] ?? Number.NaN)
+    let lastSeq = frame.cursor
+    for (const record of frame.records) {
+      const seq = applyRecord(fold, record)
       if (Number.isFinite(seq)) lastSeq = Math.max(lastSeq, seq)
     }
     entry.fold = fold
     entry.lastSeq = lastSeq
-    const drained = entry.buffer
-    entry.buffer = []
-    entry.buffering = false
-    for (const { seq, event } of drained) {
-      if (seq > entry.lastSeq) { entry.fold.apply(event); entry.lastSeq = seq }
-    }
-    publish(id)
-  } catch (error) {
-    entry.buffering = false
-    entry.state = { snapshot: entry.state.snapshot, phase: 'error', error: String((error as Error)?.message ?? error), streamOnline }
+    entry.state = { snapshot: fold.snapshot(), phase: 'live', error: undefined, streamOnline }
     convoEmitter.emit()
+    return
+  }
+  // event frame
+  const event = frame.event as unknown as SessionWireEvent
+  const seq = Number(event.seq ?? Number.NaN)
+  if (Number.isFinite(seq) && seq <= entry.lastSeq) return
+  entry.fold.apply(event as unknown as Record<string, unknown>)
+  if (Number.isFinite(seq)) entry.lastSeq = seq
+  publish(id)
+}
+
+function startFollow(id: string): () => void {
+  return watchStream(
+    // Stream open args are keyed by the Host follow(request) parameter name.
+    (signal, onOpen) => agos.stream('session/follow', { request: { address: { kind: 'session', sessionId: id } } }, signal, onOpen),
+    (value) => onFollowValue(id, value),
+    () => { /* reconnect: the next snapshot rebuilds the fold */ },
+  )
+}
+
+// ── live connection ($events: ready / emit / waterfall) ───────────────────────
+let eventsStarted = false
+let stopEvents: (() => void) | undefined
+let eventClientId: string | undefined
+let hostHome: string | undefined
+/** callId → waterfall eventId, for answering approval/request asks. */
+const approvalEvents = new Map<string, string>()
+
+function onEventFrame(frame: RemoteEventDownlinkFrame): void {
+  switch (frame.type) {
+    case 'ready':
+      eventClientId = frame.clientId
+      hostHome = frame.host.home
+      convoEmitter.emit()
+      return
+    case 'waterfall': {
+      if (frame.event !== 'approval/request') return
+      const callId = String(frame.request['callId'] ?? '')
+      if (callId !== '') approvalEvents.set(callId, frame.eventId)
+      return
+    }
+    case 'cancel':
+      // Withdraw a pending waterfall; drop any callId mapping pointing at it.
+      for (const [callId, eventId] of approvalEvents) if (eventId === frame.eventId) approvalEvents.delete(callId)
+      return
+    case 'emit':
+      // Forwarded host notifications: refresh the session list on activity/roster changes.
+      if (frame.event.startsWith('api-session/')) void refreshSessions()
+      return
+    default:
+      return
   }
 }
 
-function ensureMux(): void {
-  if (muxStarted) return
-  muxStarted = true
+function ensureEvents(): void {
+  if (eventsStarted) return
+  eventsStarted = true
   liveConnectionPhase = 'connecting'
   convoEmitter.emit()
-  stopMux = watchStream(
-    (signal) => agos.mux(signal, () => {
-      // 流开通(首连或重连):流先行已就绪,现在才安全重拉 history。
-      streamOnline = true
-      liveConnectionPhase = 'online'
-      for (const id of conversations.keys()) void rebuildFromHistory(id)
-      convoEmitter.emit()
-    }),
-    onMuxFrame,
+  stopEvents = watchStream(
+    (signal, onOpen) => agos.events(signal, () => { streamOnline = true; liveConnectionPhase = 'online'; convoEmitter.emit(); onOpen?.() }),
+    onEventFrame,
     () => { streamOnline = false; liveConnectionPhase = 'offline'; convoEmitter.emit() },
   )
 }
 
-/** Start the shared events.mux even before a first session exists. */
-export function ensureLiveConnection(): void { ensureMux() }
+/** Start the shared $events stream even before a first session exists. */
+export function ensureLiveConnection(): void { ensureEvents() }
+
+/** Host account home from the $events ready frame (host.describe replacement); undefined until connected. */
+export function getHostHome(): string | undefined { return hostHome }
 
 export function openConversation(id: string): void {
-  ensureMux()
+  ensureEvents()
   activeSessionId = id
   if (!conversations.has(id)) {
-    conversations.set(id, { fold: createFold(), lastSeq: -1, buffering: true, buffer: [], state: emptyState() })
-    void rebuildFromHistory(id)
+    const entry: ConvoEntry = { fold: createFold(), lastSeq: -1, state: emptyState(), stop: undefined }
+    conversations.set(id, entry)
+    entry.state = { snapshot: undefined, phase: 'loading', error: undefined, streamOnline }
+    entry.stop = startFollow(id)
   }
   convoEmitter.emit()
 }
 
 export function closeMux(): void {
-  stopMux?.()
-  muxStarted = false
+  for (const entry of conversations.values()) entry.stop?.()
+  conversations.clear()
+  stopEvents?.()
+  eventsStarted = false
   streamOnline = false
   liveConnectionPhase = 'idle'
   convoEmitter.emit()
@@ -242,50 +269,61 @@ export const conversationStore = {
   activeSessionId: () => activeSessionId,
 }
 
-/** 流在线状态(布尔快照,给 topbar 的 RPC 徽章)。 */
 export const streamStore = {
   subscribe(l: Listener): () => void { return convoEmitter.subscribe(l) },
   getSnapshot(): boolean { return streamOnline },
 }
 
-/** Deterministic events.mux connection phase for honest loading/error UI. */
 export const liveConnectionStore = {
   subscribe(l: Listener): () => void { return convoEmitter.subscribe(l) },
   getSnapshot(): LiveConnectionPhase { return liveConnectionPhase },
 }
 
+/** Answer a live approval waterfall by the tool callId the ApprovalItem carries. */
+export function respondApproval(callId: string | undefined, outcome: 'allowed-once' | 'rejected'): boolean {
+  if (callId === undefined || eventClientId === undefined) return false
+  const eventId = approvalEvents.get(callId)
+  if (eventId === undefined) return false
+  void agos.postEventResult({
+    clientId: eventClientId as never,
+    eventId: eventId as never,
+    outcome: { kind: 'result', value: outcome },
+  })
+  approvalEvents.delete(callId)
+  return true
+}
+
+/** Whether a live approval waterfall exists for this callId (respond button enable). */
+export function hasApprovalWaterfall(callId: string | undefined): boolean {
+  return callId !== undefined && eventClientId !== undefined && approvalEvents.has(callId)
+}
+
+async function sendContent(sessionId: string, content: PromptContentPart[]): Promise<{ ok: boolean, error?: string }> {
+  try {
+    const res = await agos.call('session/prompt', {
+      requestId: crypto.randomUUID() as never,
+      sessionId: sessionId as never,
+      mode: 'steer',
+      content,
+      clientTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    })
+    if (!res.result.ok) return { ok: false, error: JSON.stringify(res.result.error) }
+    return { ok: true }
+  } catch (error) {
+    return { ok: false, error: String((error as Error)?.message ?? error) }
+  }
+}
+
 export async function sendPrompt(sessionId: string, text: string): Promise<{ ok: boolean, error?: string }> {
-  try {
-    const res = await agos.call('session.prompt', {
-      sessionId: sessionId as never,
-      mode: 'steer',
-      content: [{ type: 'text', text }],
-      clientTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    })
-    if (!res.result.ok) return { ok: false, error: JSON.stringify(res.result.error) }
-    return { ok: true }
-  } catch (error) {
-    return { ok: false, error: String((error as Error)?.message ?? error) }
-  }
+  return sendContent(sessionId, [{ type: 'text', text }])
 }
 
-/** 发送已经组装好的多模态 prompt；调用语义与 sendPrompt 完全一致。 */
+/** Send an already-assembled multimodal prompt; identical call semantics to sendPrompt. */
 export async function sendPromptParts(sessionId: string, parts: PromptContentPart[]): Promise<{ ok: boolean, error?: string }> {
-  try {
-    const res = await agos.call('session.prompt', {
-      sessionId: sessionId as never,
-      mode: 'steer',
-      content: parts,
-      clientTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    })
-    if (!res.result.ok) return { ok: false, error: JSON.stringify(res.result.error) }
-    return { ok: true }
-  } catch (error) {
-    return { ok: false, error: String((error as Error)?.message ?? error) }
-  }
+  return sendContent(sessionId, parts)
 }
 
-// ── telemetry(agos overview + swarm progress,插件路由,同源直 fetch)──────
+// ── telemetry (agos overview + swarm progress, plugin routes, same-origin) ────
 export interface TelemetryState {
   overview: Record<string, unknown> | undefined
   progress: { calls: Record<string, unknown>[] } | undefined
@@ -300,7 +338,7 @@ async function refreshTelemetry(): Promise<void> {
   try {
     const r = await fetch('/api/agos/overview')
     if (r.ok) next.overview = await r.json() as Record<string, unknown>
-  } catch { /* 软依赖:插件缺席则该组缺席 */ }
+  } catch { /* soft dependency: absent plugin → absent group */ }
   try {
     const r = await fetch('/api/swarm/progress')
     if (r.ok) {
@@ -310,7 +348,7 @@ async function refreshTelemetry(): Promise<void> {
         .map(([callId, v]) => ({ callId, ...(v as Record<string, unknown>) }))
       next.progress = { calls }
     }
-  } catch { /* 同上 */ }
+  } catch { /* same */ }
   telemetryState = next
   telemetryEmitter.emit()
 }
@@ -327,19 +365,15 @@ export const telemetryStore = {
   subscribe(l: Listener): () => void {
     const unsubscribe = telemetryEmitter.subscribe(l)
     const stopPolling = telemetryPolling.acquire()
-    return () => {
-      unsubscribe()
-      stopPolling()
-    }
+    return () => { unsubscribe(); stopPolling() }
   },
   getSnapshot(): TelemetryState { return telemetryState },
 }
 
-
-// ── 模式 / 模型 / 建会话 / 记忆图谱(V5 接线)────────────────────────────
+// ── modes / models / new session / memory graph ───────────────────────────────
 export interface PresetInfo { id: string, name: string, description: string, isDefault: boolean }
 export async function fetchPresets(): Promise<PresetInfo[]> {
-  const res = await agos.call('agentPreset.list', {})
+  const res = await agos.call('agentPresets/list', {})
   if (!res.result.ok) return []
   const v = res.result.value as unknown as Record<string, unknown>
   const list = (v['presets'] ?? []) as Record<string, unknown>[]
@@ -356,11 +390,10 @@ export interface SkillListEntry {
   modelInvocable: boolean
 }
 
-/** skill.list RPC — session-scoped catalog; empty on failure (console falls back to FS audit). */
 export async function fetchSkillList(sessionId: string): Promise<SkillListEntry[]> {
   if (!sessionId) return []
   try {
-    const res = await agos.call('skill.list', { sessionId: sessionId as never })
+    const res = await agos.call('skills/list', { sessionId: sessionId as never })
     if (!res.result.ok) return []
     const v = res.result.value as unknown as Record<string, unknown>
     const list = (v['skills'] ?? []) as Record<string, unknown>[]
@@ -378,38 +411,39 @@ export async function fetchSkillList(sessionId: string): Promise<SkillListEntry[
 export interface ModelGroup { provider: string, models: { id: string, name: string }[] }
 export interface SessionModels { current: { provider: string, model: string } | undefined, groups: ModelGroup[] }
 export async function fetchSessionModels(sessionId: string): Promise<SessionModels> {
-  const res = await agos.call('session.models', { sessionId: sessionId as never })
+  const res = await agos.call('session/modelCatalog', { sessionId: sessionId as never })
   if (!res.result.ok) return { current: undefined, groups: [] }
   const v = res.result.value as unknown as Record<string, unknown>
-  const cur = v['current'] as Record<string, unknown> | undefined
+  // rc.1: no per-session `current`; the deployment default stands in until the
+  // modelSelection projection is wired (NOTES: later batch surfaces the session's own pick).
+  const def = v['default'] as Record<string, unknown> | undefined
   const groups = ((v['groups'] ?? []) as Record<string, unknown>[]).map((g) => ({
-    provider: String(g['provider'] ?? g['id'] ?? ''),
+    provider: String(g['id'] ?? g['provider'] ?? ''),
     models: ((g['models'] ?? []) as Record<string, unknown>[]).map((m) => ({
       id: String(m['id'] ?? ''), name: String(m['name'] ?? m['id'] ?? ''),
     })),
   })).filter((g) => g.provider !== '' && g.models.length > 0)
   return {
-    current: cur !== undefined ? { provider: String(cur['provider'] ?? ''), model: String(cur['model'] ?? '') } : undefined,
+    current: def !== undefined ? { provider: String(def['provider'] ?? ''), model: String(def['model'] ?? '') } : undefined,
     groups,
   }
 }
 export async function selectSessionModel(sessionId: string, provider: string, model: string): Promise<boolean> {
-  const res = await agos.call('session.selectModel', { sessionId: sessionId as never, provider, model })
+  const res = await agos.call('session/selectModel', { sessionId: sessionId as never, provider, model })
   return res.result.ok
 }
 
 export async function createSession(params: { cwd: string, agentPreset?: string }): Promise<string | undefined> {
   const payload: Record<string, unknown> = { cwd: params.cwd }
   if (params.agentPreset !== undefined) payload['agentPreset'] = params.agentPreset
-  const res = await agos.call('session.create', payload as never)
+  const res = await agos.call('session/create', payload as never)
   if (!res.result.ok) return undefined
   const sid = String((res.result.value as unknown as Record<string, unknown>)['sessionId'] ?? '')
   if (sid !== '') { void refreshSessions(); openConversation(sid) }
   return sid !== '' ? sid : undefined
 }
 
-// ── P0-2 ProgressDock 派生 selector(仅新增导出,不改任何既有函数与字段)──
-/** 单个 swarm 批次的进度汇总(来自 /api/swarm/progress 的 calls[n].rows)。 */
+// ── ProgressDock derived selector ──────────────────────────────────────────────
 export interface SwarmBatchProgress {
   callId: string
   label: string
@@ -418,7 +452,6 @@ export interface SwarmBatchProgress {
   total: number
 }
 
-/** 全局运行中批次汇总;无运行中批次时 selector 返回 undefined。 */
 export interface SwarmProgressSummary {
   batches: SwarmBatchProgress[]
   done: number
@@ -434,7 +467,6 @@ function deriveSwarmProgress(state: TelemetryState): SwarmProgressSummary | unde
     if (rows.length === 0) continue
     const done = rows.filter((r) => r['status'] === 'completed').length
     const failed = rows.filter((r) => r['status'] === 'failed').length
-    // 已结清(完成+失败=全部)的批次不算运行中,不进坞
     if (done + failed >= rows.length) continue
     batches.push({
       callId: String(call['callId'] ?? ''),
@@ -454,10 +486,6 @@ function deriveSwarmProgress(state: TelemetryState): SwarmProgressSummary | unde
 let swarmProgressCacheSrc: TelemetryState | undefined
 let swarmProgressCacheValue: SwarmProgressSummary | undefined
 
-/**
- * ProgressDock 专用 store 视图:复用 telemetryStore 的订阅(含 10s 轮询启动),
- * 快照按 telemetryState 引用缓存,保证 useSyncExternalStore 引用稳定不空转。
- */
 export const swarmProgressStore = {
   subscribe(l: Listener): () => void { return telemetryStore.subscribe(l) },
   getSnapshot(): SwarmProgressSummary | undefined {
@@ -487,13 +515,12 @@ export async function fetchMemoryGraph(): Promise<MemoryGraphData | undefined> {
   } catch { return undefined }
 }
 
-// ── 会话侧栏管理（仅新增导出；不改变既有 store / RPC 语义）──────────────
+// ── session sidebar management ─────────────────────────────────────────────────
 export interface SessionSearchResult {
   sessionIds: string[]
   hasMore: boolean
 }
 
-/** 真正搜索会话正文；undefined 表示能力不可用，调用方应降级为标题/id 本地过滤。 */
 export async function searchSessions(
   query: string,
   signal?: AbortSignal,
@@ -501,7 +528,7 @@ export async function searchSessions(
   const normalized = query.trim()
   if (normalized === '') return { sessionIds: [], hasMore: false }
   try {
-    const response = await agos.call('session.search', { query: normalized }, signal)
+    const response = await agos.call('session/search', { query: normalized }, signal)
     if (!response.result.ok) return undefined
     return {
       sessionIds: response.result.value.items.map((item) => String(item.sessionId)),
@@ -513,13 +540,12 @@ export async function searchSessions(
   }
 }
 
-/** 重命名并返回宿主最终接受的规范化标题。 */
 export async function renameSession(
   sessionId: string,
   title: string,
 ): Promise<{ ok: true, title: string } | { ok: false, error: string }> {
   try {
-    const response = await agos.call('session.rename', { sessionId: sessionId as never, title })
+    const response = await agos.call('session/rename', { sessionId: sessionId as never, title })
     if (!response.result.ok) return { ok: false, error: JSON.stringify(response.result.error) }
     void refreshSessions()
     return { ok: true, title: response.result.value.title }
@@ -528,13 +554,11 @@ export async function renameSession(
   }
 }
 
-/** 宿主原生「在访达中显示」；只有 describe.canOpenPath 为真时调用。 */
+/** Host-native "reveal in file manager"; only call when canHostOpenPath is true. */
 export async function openHostPath(path: string): Promise<{ ok: boolean, error?: string }> {
   try {
-    const response = await agos.call('host.openPath', { path })
-    return response.result.ok
-      ? { ok: true }
-      : { ok: false, error: JSON.stringify(response.result.error) }
+    const response = await agos.call('session/openWorkspacePath', { path })
+    return response.result.ok ? { ok: true } : { ok: false, error: JSON.stringify(response.result.error) }
   } catch (error) {
     return { ok: false, error: String((error as Error)?.message ?? error) }
   }
@@ -542,8 +566,8 @@ export async function openHostPath(path: string): Promise<{ ok: boolean, error?:
 
 export async function canHostOpenPath(): Promise<boolean> {
   try {
-    const response = await agos.call('host.describe', {})
-    return response.result.ok && response.result.value.canOpenPath
+    const response = await agos.call('session/canOpenWorkspacePath', {})
+    return response.result.ok && response.result.value === true
   } catch {
     return false
   }
@@ -556,61 +580,31 @@ export interface HostArchivedSessionsSnapshot {
 }
 
 /**
- * 宿主归档只读观察器：workspace.list 给重连基线，host stream 推全量变更。
- * 先开流再拉基线；若基线在更新帧之后返回，丢弃旧基线，避免反向覆盖。
+ * Archived-session observer over the workspace/follow stream: the opening
+ * baseline carries the full archived set; `archived` increments replace it.
  */
 export function watchHostArchivedSessions(
   listener: (snapshot: HostArchivedSessionsSnapshot) => void,
 ): () => void {
-  let disposed = false
-  let changeVersion = 0
-  let baselineGeneration = 0
-
-  const loadBaseline = async (): Promise<void> => {
-    const generation = ++baselineGeneration
-    const requestedAtVersion = changeVersion
-    try {
-      const response = await agos.call('workspace.list', {})
-      if (disposed || generation !== baselineGeneration || requestedAtVersion !== changeVersion) return
-      if (!response.result.ok) {
-        listener({ sessionIds: [], available: false, error: JSON.stringify(response.result.error) })
-        return
+  return watchStream(
+    (signal, onOpen) => agos.stream('workspace/follow', {}, signal, onOpen),
+    (value) => {
+      let frame: WorkspaceFollowFrame
+      try { frame = workspaceFollowFrameSchema.parse(value) as WorkspaceFollowFrame } catch { return }
+      if (frame.type === 'baseline') {
+        listener({ sessionIds: frame.value.archivedSessionIds.map(String), available: true })
+      } else if (frame.type === 'archived') {
+        listener({ sessionIds: frame.archivedSessionIds.map(String), available: true })
       }
-      listener({
-        sessionIds: response.result.value.archivedSessionIds.map(String),
-        available: true,
-      })
-    } catch (error) {
-      if (!disposed && generation === baselineGeneration && requestedAtVersion === changeVersion) {
-        listener({ sessionIds: [], available: false, error: String((error as Error)?.message ?? error) })
-      }
-    }
-  }
-
-  const stop = watchStream(
-    (signal, onOpen) => agos.host(signal, onOpen),
-    (frame) => {
-      const payload = frame.payload
-      if (payload.type !== 'host/archived-sessions-changed') return
-      changeVersion += 1
-      listener({ sessionIds: payload.archivedSessionIds.map(String), available: true })
     },
-    () => { void loadBaseline() },
+    () => { /* reconnect: the next baseline reseeds the archived set */ },
   )
-  void loadBaseline()
-
-  return () => {
-    disposed = true
-    stop()
-  }
 }
 
 // Pure selector export for the unified node:test suite.
 export { deriveSwarmProgress }
 
-// Homelab fleet live data is isolated from local session/mux state. Keep this
-// file additive-only: consumers retain one public store entry point while the
-// implementation and its offline test seams live in dedicated modules.
+// Homelab fleet live data is isolated from local session/mux state.
 export {
   cancelFleetRun,
   closeRemoteRun,

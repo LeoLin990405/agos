@@ -60,8 +60,16 @@ async function fixture(t, options = {}) {
   return { dshRoot, store }
 }
 
-function agent(id, events, status = 'idle') {
-  return { id, status, session: { events } }
+function agent(id, events, status = 'idle', header) {
+  return {
+    id,
+    status,
+    session: {
+      get events() { throw new Error('Session.events is private in DSH 0.1.2') },
+      snapshotEvents() { return events },
+      ...(header === undefined ? {} : { header }),
+    },
+  }
 }
 
 async function invoke(routes, path, method, body) {
@@ -362,8 +370,8 @@ test('W20 来源门:裸 {kind:user} 不收;带 rpcId 收;子代理会话头(orig
 test('W20 来源门走生产链路:capture→drain→processSnapshot 带会话头,子代理会话整个不抽;深度 0 会话抽得到', async (t) => {
   const { store } = await fixture(t)
   const events = eventsWithTurns(user(0, 1, '不要在记忆库里写任何凭据。'))
-  const sub = { id: 'session-sub-1', status: 'idle', session: { events, header: { delegationDepth: 1, origin: 'subagent', parentSession: 'session-main-1' } } }
-  const main = { id: 'session-main-1', status: 'idle', session: { events, header: { delegationDepth: 0 } } }
+  const sub = agent('session-sub-1', events, 'idle', { delegationDepth: 1, origin: 'subagent', parentSession: 'session-main-1' })
+  const main = agent('session-main-1', events, 'idle', { delegationDepth: 0 })
   assert.equal(store.capture(sub), true)
   assert.equal(store.capture(main), true)
   await store.whenIdle('session-sub-1')

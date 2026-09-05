@@ -1,187 +1,188 @@
 /**
- * Four-quadrant RPC message model. Channels and messages are decoupled: HTTP,
- * WebSocket, and in-process SSE are physical carriers, while logical messages
- * are channel-independent and form a four-member discriminated union.
+ * Connection RPC primitives — AgOS membrane, aligned to DSH 0.1.2-rc.1.
+ *
+ * 0.1.2 collapsed the four-quadrant envelope model to two:
+ *  - unary: POST /api/<ns>/<method>, body = ClientRequest, response = ServerResponse.
+ *  - streams: ONE WebSocket /api/remote.mux multiplexes every logical Remote
+ *    stream (session/follow, session/control, workspace/follow, $events) via
+ *    {open,streamId,endpoint,payload}/{cancel} up and {item,error,end} down.
+ *  - Host→Client asks (approval, user-question) ride the $events stream as
+ *    `waterfall` frames and are answered by a normal unary POST to $events/result.
+ *
+ * The old server-request/client-response envelopes and the carrier RpcReceipt
+ * are gone (envelope forms 4→2). Errors are now open namespaced strings
+ * {code,message,details} — no closed union — so newer Host codes still surface.
+ *
  * api/ contract layer: zero Node dependencies, importable from the browser.
  */
 
-import type { z as zCore } from 'zod'
-type ZodIssue = zCore.core.$ZodIssue
 import type { Branded } from '@deepseek-ai/dsh-brand'
-import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
 
 /**
- * Message correlation id: the initiator mints it on a request; a response
- * echoes the matching request's rpcId and never mints a new one.
+ * Transport correlation id: the caller mints it per unary call and the
+ * Connection response echoes it. Pure transport — business idempotency moved
+ * into explicit request fields (session/prompt.requestId).
  */
 export type RpcId = Branded<'rpc-id'>
 
 /**
- * Brands a string as RpcId (same precedent as core `SessionId()`). Minted by the initiator:
- * client-request → client mints; server-request → host mints (answerable frames get a stable
- * logical id, pure pushes mint a fresh one each time).
- * @param id - Raw id string (implementations mint UUIDs; tests may pass fixtures).
- * @returns The same string, branded (compile-time cast, zero runtime cost).
+ * Brand a validated string as a Connection correlation id.
+ * @param id - raw id string (the client mints UUIDs; tests may pass fixtures).
+ * @returns the same string, branded (compile-time cast, zero runtime cost).
  */
 export function RpcId(id: string): RpcId {
   return id as RpcId
 }
 
-/** Error code → details type map (a second table isomorphic to RpcMethodMap). New code = one row here + one branch in the error schema. */
-export interface RpcErrorDetailsMap {
-  'bad-request': { issues: ZodIssue[] }
-  'cancelled': {}
-  'session-not-found': { sessionId: SessionId }
-  'model-unavailable': { provider: string; model: string }
-  'session-conflict': { sessionId: SessionId; requestedCwd: string; existingCwd?: string }
-  'invalid-time-zone': { value: string }
-  'workspace-attach-failed': { sessionId: SessionId; workspaceId: string }
-  'workspace-not-found': { workspaceId: string }
-  'workspace-invalid-path': { path: string }
-  'workspace-name-conflict': { name: string }
-  'workspace-move-invalid': { workspaceId: string; sessionId: SessionId; beforeSessionId?: SessionId }
-  'directory-unreadable': { path: string }
-  'directory-exists': { path: string }
-  'directory-create-failed': { path: string }
-  'directory-picker-unavailable': { capability: string }
-  'agent-preset-read-only': { agentPreset: string; reason: string }
-  'agent-preset-locked': { sessionId: SessionId; agentPreset: string }
-  'agent-preset-conflict': { sessionId: SessionId; requestedPreset: string; existingPreset?: string }
-  'agent-preset-not-found': { agentPreset: string; available: string[] }
-  'agent-preset-invalid': { agentPreset: string; reason: string }
-  'agent-busy': { reason: string }
-  'attachment-error': { reason: string }
-  'queue-item-not-found': { itemId: MessageId }
-  'steer-unavailable': { itemId: MessageId }
-  /** A known slash command reported a usage/state error; the message is the command's own text. */
-  'command-error': {}
-  /** A leading-/ prompt named no registered command; the message names the token. */
-  'unknown-command': {}
-  /**
-   * A settings write was refused (schema validation, unknown namespace,
-   * read-only provider, or storage failure); the message is the seam's text.
-   */
-  'settings-rejected': { ns: string }
-  /**
-   * A settings write carried an `expectedRevision` the namespace has already
-   * moved past: another writer (tab, editor, or an external file edit) landed
-   * first. The details carry both revisions so a client can re-read and retry.
-   */
-  'settings-conflict': { ns: string; expected: number; actual: number }
-  /** A credential write was refused (read-only shadowing layer or storage failure); the message is the seam's own text. */
-  'credential-rejected': { ref: string }
-  /**
-   * Interrogating a draft provider endpoint did not produce a model listing:
-   * no adapter family serves the namespace, the protocol has no listing this
-   * build can read, or the endpoint was unreachable, refused the credential,
-   * or answered with something else. The message is the adapter's own text —
-   * it is what the form shows before falling back to hand-entry — and the
-   * details name the endpoint asked, never the credential offered.
-   */
-  'model-discovery-failed': { settingsNs: string; baseURL?: string }
-  'title-invalid': { sessionId: SessionId }
-  'fork-unavailable': { sessionId: SessionId }
-  'subagent-parent-unavailable': { parentSessionId: SessionId }
-  'subagent-not-found': { parentSessionId: SessionId; childSessionId: SessionId }
-  'subagent-catalog-diagnostic': {
-    parentSessionId: SessionId
-    childSessionId: SessionId
-    reason: 'corrupt' | 'unsupported' | 'unavailable'
-  }
-  'subagent-not-resumable': { childSessionId: SessionId }
-  'subagent-unauthorized': { childSessionId: SessionId }
-  'subagent-delivery-unavailable': { childSessionId: SessionId }
-  'internal': {}
+/**
+ * Carrier-neutral endpoint failure. 0.1.2 codes are open namespaced strings
+ * (gateway/*, session/*, settings/*, credential/*, workspace/*, agent-preset/*,
+ * subagent/*, directory-picker/*, llm/*); details is an arbitrary JSON object.
+ */
+export interface RpcError {
+  readonly code: string
+  readonly message: string
+  readonly details: object
 }
 
-/** Closed error-code union (the keys of RpcErrorDetailsMap). */
-export type RpcErrorCode = keyof RpcErrorDetailsMap
-
-/**
- * Distributive union expanded from the map: code is the discriminant, so
- * `switch (error.code)` narrows details. details is required (internal uses an explicit {}).
- */
-export type RpcError = {
-  [C in RpcErrorCode]: { code: C; message: string; details: RpcErrorDetailsMap[C] }
-}[RpcErrorCode]
-
-/** Business success/failure result: the result slot of a unary response; methods never throw business errors. */
-export type RpcResult<T> = { ok: true; value: T } | { ok: false; error: RpcError }
+/** Business success/failure result: the result slot of a unary response. */
+export type RpcResult<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: RpcError }
 
 /**
  * Fold a transport exception into the RpcResult error branch (unified error
- * API; 'internal' as the catch-all code). Lives with RpcResult so every
- * carrier consumer folds the same way.
+ * API; gateway/internal as the catch-all code, matching the Host vocabulary).
  * @param error - the thrown value from the carrier.
  * @returns the error branch of an RpcResult.
  */
 export function transportError<T>(error: unknown): RpcResult<T> {
   return {
     ok: false,
-    error: { code: 'internal', message: error instanceof Error ? error.message : String(error), details: {} },
+    error: { code: 'gateway/internal', message: error instanceof Error ? error.message : String(error), details: {} },
   }
 }
 
-/**
- * Signature-layer narrow form, request side (domain-interface view, shared by
- * both directions): rpcId is explicit in the signature, never mixed into the
- * business payload; the type tag and method are filled in by the carrier layer.
- */
+/** Signature-layer narrow request form: rpcId explicit, never mixed into payload. */
 export interface RpcRequest<P> {
-  rpcId: RpcId
-  payload: P
+  readonly rpcId: RpcId
+  readonly payload: P
 }
 
-/** Signature-layer narrow form, response side: rpcId always echoes the matching request. */
+/** Signature-layer narrow response form: rpcId always echoes the matching request. */
 export interface RpcResponse<T> {
-  rpcId: RpcId
-  result: RpcResult<T>
+  readonly rpcId: RpcId
+  readonly result: RpcResult<T>
 }
 
-// ---- Wire full forms: four named members of a discriminated union (discriminant = the four `type` literals) ----
+// ---- Wire envelopes: two named members (discriminant = the two `type` literals) ----
 
-/** Call initiated by the client (wire carrier: POST /api/<method> body). */
+/**
+ * Call initiated by the client (wire carrier: POST /api/<ns>/<method> body).
+ * For Typert endpoints `payload` MUST be exactly `{ args: {...plain object} }`
+ * — one key, plain objects only; the Gateway rejects anything else.
+ */
 export interface ClientRequest {
-  type: 'client-request'
-  rpcId: RpcId
-  method: string
-  payload: unknown
+  readonly type: 'client-request'
+  readonly rpcId: RpcId
+  readonly method: string
+  readonly payload: unknown
 }
 
-/** Response to a ClientRequest (wire carrier: the HTTP response body of that POST); rpcId echoed. */
+/** Response to a ClientRequest (wire carrier: that POST's HTTP response body); rpcId echoed. */
 export interface ServerResponse {
-  type: 'server-response'
-  rpcId: RpcId
-  result: RpcResult<unknown>
+  readonly type: 'server-response'
+  readonly rpcId: RpcId
+  readonly result: RpcResult<unknown>
 }
 
-/**
- * Message initiated by the server (wire carrier: downstream stream frame). Answerable interactions
- * (approval/question requested — stable rpcId, reused on replay) and pure pushes
- * (session/event etc. — rpcId identifies that one push) share this shape; whether a
- * response is expected is determined statically by method (a strict dichotomy, no third kind).
- */
-export interface ServerRequest {
-  type: 'server-request'
-  rpcId: RpcId
-  method: string
-  payload: unknown
+/** Authoritative wire envelope union; narrow via `switch (message.type)`. */
+export type RpcMessage = ClientRequest | ServerResponse
+
+// ---- Logical stream multiplexing over the single /api/remote.mux WebSocket ----
+
+/** Exact WebSocket route carrying every Typert Remote stream. */
+export const REMOTE_STREAM_MUX_PATH = '/api/remote.mux'
+
+/** One logical stream request sent from the browser over the mux. */
+export type RemoteStreamClientMessage =
+  | { readonly type: 'open'; readonly streamId: string; readonly endpoint: string; readonly payload: unknown }
+  | { readonly type: 'cancel'; readonly streamId: string }
+
+/** One logical stream frame sent from the Host over the mux. */
+export type RemoteStreamServerMessage =
+  | { readonly type: 'item'; readonly streamId: string; readonly value?: unknown }
+  | { readonly type: 'error'; readonly streamId: string; readonly error: RpcError }
+  | { readonly type: 'end'; readonly streamId: string }
+
+// ---- $events stream: forwarded Host events + Host→Client waterfall asks ----
+
+/** Gateway-internal logical stream carrying application-selected Cordis events. */
+export const REMOTE_EVENT_STREAM_ENDPOINT = '$events'
+
+/** Gateway-internal unary endpoint returning one Client Remote Event outcome. */
+export const REMOTE_EVENT_RESULT_ENDPOINT = '$events/result'
+
+/** Empty standard Remote payload used to open the forwarded-event stream. */
+export const REMOTE_EVENT_STREAM_PAYLOAD = { args: {} } as const
+
+/** Opaque identity for one active Client Remote Event generation. */
+export type RemoteEventClientId = Branded<'RemoteEventClientId'>
+
+/** Opaque correlation id for one pending Host-to-Client Remote Event. */
+export type RemoteEventId = Branded<'RemoteEventId'>
+
+/** Opaque Agent identity carried by one scoped Remote Event. */
+export type RemoteEventAgentId = Branded<'RemoteEventAgentId'>
+
+/** Opening item that binds later HTTP results to this active event stream; also the host.describe replacement. */
+export interface RemoteEventReadyFrame {
+  readonly type: 'ready'
+  readonly clientId: RemoteEventClientId
+  readonly host: { readonly home: string }
 }
 
-/** Response to a ServerRequest (wire carrier: POST /api/respond body); rpcId echoed, never minted anew. */
-export interface ClientResponse {
-  type: 'client-response'
-  rpcId: RpcId
-  result: RpcResult<unknown>
+/** One Host notification delivered to a Client generation. */
+export interface RemoteEventEmitFrame {
+  readonly type: 'emit'
+  readonly event: string
+  readonly args: readonly unknown[]
 }
 
-/** Authoritative wire full-form union; narrow via `switch (message.type)`. */
-export type RpcMessage = ClientRequest | ServerResponse | ServerRequest | ClientResponse
+/** One pending Agent-scoped waterfall (approval/request, user-questions/request). */
+export interface RemoteEventInvocationFrame {
+  readonly type: 'waterfall'
+  readonly event: string
+  readonly eventId: RemoteEventId
+  readonly agentId: RemoteEventAgentId
+  readonly request: Readonly<Record<string, unknown>>
+}
 
-/**
- * Carrier receipt (not an RpcMessage — it belongs to the carrier layer, same
- * discipline as "HTTP status describes only the carrier"): the HTTP response
- * body of the POST carrying a client-response. Late/duplicate responses yield not-pending.
- */
-export type RpcReceipt = { accepted: true } | { accepted: false; reason: 'not-pending' | 'bad-response' }
+/** Cancellation of a pending waterfall previously delivered under the same id. */
+export interface RemoteEventCancellationFrame {
+  readonly type: 'cancel'
+  readonly eventId: RemoteEventId
+}
+
+/** Every item carried by the Gateway-internal forwarded-event stream. */
+export type RemoteEventDownlinkFrame =
+  | RemoteEventReadyFrame
+  | RemoteEventEmitFrame
+  | RemoteEventInvocationFrame
+  | RemoteEventCancellationFrame
+
+/** JSON-safe error fields retained when a Client listener rejects a Host waterfall. */
+export interface RemoteEventRejection {
+  readonly name: string
+  readonly message: string
+  readonly code?: string
+  readonly details?: unknown
+}
+
+/** Client response to one scoped Remote Event delivery, posted to $events/result. */
+export interface RemoteEventResult {
+  readonly clientId: RemoteEventClientId
+  readonly eventId: RemoteEventId
+  readonly outcome:
+    | { readonly kind: 'next' }
+    | { readonly kind: 'result'; readonly value?: unknown }
+    | { readonly kind: 'rejected'; readonly error: RemoteEventRejection }
+}

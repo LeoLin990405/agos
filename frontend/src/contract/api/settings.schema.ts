@@ -1,12 +1,9 @@
-/**
- * settings domain zod schemas (names derived from map keys: settingsDescribeRequestSchema /
- * settingsDescribeValueSchema / settingsUpdate* / settingsReplace*).
- */
+/** settings domain zod schemas — AgOS membrane, aligned to DSH 0.1.2-rc.1. */
 
 import { z } from 'zod'
 import type { RequestPayload, ResponseValue } from './rpc-map.ts'
 import type { Wire } from './rpc.schema.ts'
-import type { SettingsNamespaceView, SettingsPathOpView, SettingsSecretView } from './settings.ts'
+import type { SettingsNamespaceView, SettingsSecretView } from './settings.ts'
 
 /** One redacted secret slot. */
 export const settingsSecretViewSchema = z.object({
@@ -14,7 +11,7 @@ export const settingsSecretViewSchema = z.object({
   set: z.boolean(),
 }) satisfies z.ZodType<Wire<SettingsSecretView>>
 
-/** SettingsNamespaceView row of settings.describe and the write responses. */
+/** SettingsNamespaceView row (schema/value/base/user stay wide JSON). */
 export const settingsNamespaceViewSchema = z.object({
   ns: z.string().min(1),
   schema: z.unknown(),
@@ -26,56 +23,20 @@ export const settingsNamespaceViewSchema = z.object({
   revision: z.number(),
 }) satisfies z.ZodType<Wire<SettingsNamespaceView>>
 
-/** settings.describe request payload. */
-export const settingsDescribeRequestSchema = z.object({}) satisfies z.ZodType<Wire<RequestPayload<'settings.describe'>>>
+/** settings/describe request payload (empty args). */
+export const settingsDescribeRequestSchema = z.object({}) satisfies z.ZodType<Wire<RequestPayload<'settings/describe'>>>
 
-/** settings.describe response value. */
+/** settings/describe response value. */
 export const settingsDescribeValueSchema = z.object({
   writable: z.boolean(),
   hasDocument: z.boolean(),
   namespaces: z.array(settingsNamespaceViewSchema),
-}) satisfies z.ZodType<Wire<ResponseValue<'settings.describe'>>>
+}) satisfies z.ZodType<Wire<ResponseValue<'settings/describe'>>>
 
-/** settings.openDocument request payload. */
-export const settingsOpenDocumentRequestSchema = z.object({}) satisfies z.ZodType<Wire<RequestPayload<'settings.openDocument'>>>
+/** settings/openSettingsDocument request payload (empty args). */
+export const settingsOpenDocumentRequestSchema = z.object({}) satisfies z.ZodType<Wire<RequestPayload<'settings/openSettingsDocument'>>>
 
-/** settings.openDocument response value. */
+/** settings/openSettingsDocument response value. */
 export const settingsOpenDocumentValueSchema = z.object({
   opened: z.literal(true),
-}) satisfies z.ZodType<Wire<ResponseValue<'settings.openDocument'>>>
-
-/** settings.update request payload. */
-export const settingsUpdateRequestSchema = z.object({
-  ns: z.string().min(1),
-  patch: z.record(z.string(), z.unknown()),
-  expectedRevision: z.number().optional(),
-}) satisfies z.ZodType<Wire<RequestPayload<'settings.update'>>>
-
-/** settings.update response value: the namespace's new redacted view. */
-export const settingsUpdateValueSchema = settingsNamespaceViewSchema satisfies z.ZodType<Wire<ResponseValue<'settings.update'>>>
-
-/** settings.replace request payload. */
-export const settingsReplaceRequestSchema = z.object({
-  ns: z.string().min(1),
-  section: z.record(z.string(), z.unknown()),
-  expectedRevision: z.number().optional(),
-}) satisfies z.ZodType<Wire<RequestPayload<'settings.replace'>>>
-
-/** One path-addressed edit of settings.mutate. */
-export const settingsPathOpSchema = z.discriminatedUnion('op', [
-  z.object({ op: z.literal('set'), path: z.array(z.string()), value: z.unknown() }),
-  z.object({ op: z.literal('unset'), path: z.array(z.string()) }),
-]) as unknown as z.ZodType<Wire<SettingsPathOpView>>
-
-/** settings.mutate request payload. */
-export const settingsMutateRequestSchema = z.object({
-  ns: z.string().min(1),
-  ops: z.array(settingsPathOpSchema),
-  expectedRevision: z.number().optional(),
-}) satisfies z.ZodType<Wire<RequestPayload<'settings.mutate'>>>
-
-/** settings.mutate response value: the namespace's new redacted view. */
-export const settingsMutateValueSchema = settingsNamespaceViewSchema satisfies z.ZodType<Wire<ResponseValue<'settings.mutate'>>>
-
-/** settings.replace response value. */
-export const settingsReplaceValueSchema = settingsNamespaceViewSchema satisfies z.ZodType<Wire<ResponseValue<'settings.replace'>>>
+}) satisfies z.ZodType<Wire<ResponseValue<'settings/openSettingsDocument'>>>

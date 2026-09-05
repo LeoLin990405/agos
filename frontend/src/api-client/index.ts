@@ -1,154 +1,116 @@
 /**
- * AgOS api-client —— 对齐膜的消费侧(自写,非 vendor)。
+ * AgOS api-client — the membrane's consumer side (self-written), aligned to
+ * DSH 0.1.2-rc.1.
  *
- * 协议事实(实证自上游 packages/host/apiproxy/src/fetch/client.ts):
- * - unary:POST /api/<method>,body = ClientRequest 全形式
- *   { type:'client-request', rpcId, method, payload };响应 = ServerResponse
- *   { type:'server-response', rpcId, result:{ ok, value|error } },rpcId 必须回显。
- * - 两条事件流是 **流式 fetch 上的 SSE 帧**(`\n\n` 分帧、`data: ` 行),
- *   不是 WebSocket:GET /api/events.mux / /api/events.host;
- *   帧 = ServerRequest 信封 { type:'server-request', rpcId, method, payload },
- *   payload 再过 muxFrameSchema / hostFrameSchema。
- * - respond:POST /api/respond,body = ClientResponse { type:'client-response',
- *   rpcId(回显 server-request 的 id),result }。
- * - 断线重连 = 重开两条流 + 全量重拉 session.history(since 游标未实现)。
+ * Protocol facts (from packages/client/connection + packages/api/gateway @ rc.1):
+ * - unary: POST /api/<ns>/<method>, body = ClientRequest whose payload is
+ *   EXACTLY { args: {...} }; response = ServerResponse { rpcId(echo), result }.
+ *   Errors are open namespaced {code,message,details}.
+ * - streams: ONE WebSocket route /api/remote.mux multiplexes logical streams by
+ *   streamId. AgOS opens one logical stream per socket (the simplest valid
+ *   subset): send {open,streamId,endpoint,payload:{args}}, consume
+ *   {item,streamId,value}/{error}/{end}. Endpoints: session/follow,
+ *   workspace/follow, and the internal $events downlink.
+ * - Host→Client asks (approval, user-question) ride $events as `waterfall`
+ *   frames; the client answers with a normal unary POST to $events/result.
  *
- * 两级 zod 校验:信封(serverResponseSchema/serverRequestSchema)+ 业务值
- * (每方法的 value schema,表在本文件,与上游 fetch/client.ts 同构)。
+ * Two-level zod: envelope (serverResponseSchema) + per-method value schema.
  */
+
 import type { z } from 'zod'
 import type {
-  ClientResponse, HostFrame, MuxFrame, RpcReceipt, RpcRequest, RpcResponse,
+  RemoteEventDownlinkFrame, RemoteEventResult, RpcResponse,
 } from '../contract/api/index.ts'
-import { RpcId } from '../contract/api/rpc.ts'
+import { RpcId, REMOTE_STREAM_MUX_PATH, REMOTE_EVENT_STREAM_ENDPOINT } from '../contract/api/rpc.ts'
 import type { RequestPayload, ResponseValue, RpcMethodMap } from '../contract/api/rpc-map.ts'
 import type { Wire } from '../contract/api/rpc.schema.ts'
 import {
-  rpcReceiptSchema, serverRequestSchema, serverResponseSchema,
+  remoteEventDownlinkFrameSchema, remoteStreamServerMessageSchema, serverResponseSchema,
 } from '../contract/api/rpc.schema.ts'
-import { hostFrameSchema, muxFrameSchema } from '../contract/api/events.schema.ts'
 import {
-  hostCreateDirectoryValueSchema, hostDescribeValueSchema,
-  hostListDirectoryValueSchema, hostOpenPathValueSchema, hostPickDirectoryValueSchema,
-} from '../contract/api/host.schema.ts'
-import {
-  sessionAttachmentValueSchema, sessionCancelValueSchema, sessionCreateValueSchema,
-  sessionForkValueSchema, sessionHistoryValueSchema, sessionListValueSchema,
-  sessionModelsValueSchema, sessionPromptValueSchema, sessionRenameValueSchema,
-  sessionSearchValueSchema, sessionSelectModelValueSchema, sessionUpdateQueueValueSchema,
+  sessionAttachmentValueSchema, sessionCanOpenWorkspacePathValueSchema, sessionCreateValueSchema,
+  sessionListValueSchema, sessionModelCatalogValueSchema, sessionOpenWorkspacePathValueSchema,
+  sessionPageValueSchema, sessionPromptValueSchema, sessionRenameValueSchema, sessionSearchValueSchema,
+  sessionSelectModelValueSchema,
 } from '../contract/api/sessions.schema.ts'
-import {
-  workspaceArchiveSessionValueSchema, workspaceCreateValueSchema, workspaceDeleteValueSchema,
-  workspaceInsertBeforeValueSchema, workspaceInsertSessionBeforeValueSchema,
-  workspaceListValueSchema, workspaceRenameValueSchema,
-} from '../contract/api/workspace.schema.ts'
+import { agentPresetListValueSchema } from '../contract/api/agent-presets.schema.ts'
 import { skillListValueSchema } from '../contract/api/skills.schema.ts'
-import {
-  agentPresetCopyValueSchema, agentPresetListValueSchema, agentPresetOpenDocumentValueSchema,
-  agentPresetReadValueSchema, agentPresetRemoveValueSchema, agentPresetSelectValueSchema,
-} from '../contract/api/agent-presets.schema.ts'
-import {
-  goalClearValueSchema, goalCompleteValueSchema, goalCreateValueSchema,
-  goalEditValueSchema, goalPauseValueSchema, goalResumeValueSchema,
-} from '../contract/api/goals.schema.ts'
-import {
-  settingsDescribeValueSchema, settingsMutateValueSchema, settingsOpenDocumentValueSchema,
-  settingsReplaceValueSchema, settingsUpdateValueSchema,
-} from '../contract/api/settings.schema.ts'
-import {
-  credentialsDescribeValueSchema, credentialsSetValueSchema, credentialsUnsetValueSchema,
-} from '../contract/api/credentials.schema.ts'
-import {
-  llmDiscoverModelsValueSchema, llmModelsValueSchema, llmProvidersValueSchema,
-} from '../contract/api/llm.schema.ts'
-import {
-  subagentHistoryValueSchema, subagentInterruptValueSchema,
-  subagentListValueSchema, subagentPromptValueSchema,
-} from '../contract/api/subagents.schema.ts'
+import { settingsDescribeValueSchema, settingsOpenDocumentValueSchema } from '../contract/api/settings.schema.ts'
+import { credentialsDescribeValueSchema } from '../contract/api/credentials.schema.ts'
+import { llmListConfigurableProvidersValueSchema, llmListProvidersValueSchema } from '../contract/api/llm.schema.ts'
 
-/** S→C 二级解析表:方法 → 响应 value schema(与上游 fetch/carrier 同构)。 */
+/** S→C second-parse table: method → response value schema. */
 const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseValue<K>>> } = {
-  'session.list': sessionListValueSchema,
-  'session.search': sessionSearchValueSchema,
-  'session.create': sessionCreateValueSchema,
-  'session.history': sessionHistoryValueSchema,
-  'session.models': sessionModelsValueSchema,
-  'session.selectModel': sessionSelectModelValueSchema,
-  'session.rename': sessionRenameValueSchema,
-  'session.fork': sessionForkValueSchema,
-  'session.prompt': sessionPromptValueSchema,
-  'session.attachment': sessionAttachmentValueSchema,
-  'session.updateQueue': sessionUpdateQueueValueSchema,
-  'session.cancel': sessionCancelValueSchema,
-  'subagent.list': subagentListValueSchema,
-  'subagent.history': subagentHistoryValueSchema,
-  'subagent.prompt': subagentPromptValueSchema,
-  'subagent.interrupt': subagentInterruptValueSchema,
-  'host.describe': hostDescribeValueSchema,
-  'host.pickDirectory': hostPickDirectoryValueSchema,
-  'host.listDirectory': hostListDirectoryValueSchema,
-  'host.createDirectory': hostCreateDirectoryValueSchema,
-  'host.openPath': hostOpenPathValueSchema,
-  'workspace.list': workspaceListValueSchema,
-  'workspace.create': workspaceCreateValueSchema,
-  'workspace.rename': workspaceRenameValueSchema,
-  'workspace.delete': workspaceDeleteValueSchema,
-  'workspace.insertBefore': workspaceInsertBeforeValueSchema,
-  'workspace.insertSessionBefore': workspaceInsertSessionBeforeValueSchema,
-  'workspace.archiveSession': workspaceArchiveSessionValueSchema,
-  'skill.list': skillListValueSchema,
-  'agentPreset.list': agentPresetListValueSchema,
-  'agentPreset.select': agentPresetSelectValueSchema,
-  'agentPreset.read': agentPresetReadValueSchema,
-  'agentPreset.copy': agentPresetCopyValueSchema,
-  'agentPreset.openDocument': agentPresetOpenDocumentValueSchema,
-  'agentPreset.remove': agentPresetRemoveValueSchema,
-  'goal.create': goalCreateValueSchema,
-  'goal.edit': goalEditValueSchema,
-  'goal.pause': goalPauseValueSchema,
-  'goal.resume': goalResumeValueSchema,
-  'goal.complete': goalCompleteValueSchema,
-  'goal.clear': goalClearValueSchema,
-  'settings.describe': settingsDescribeValueSchema,
-  'settings.openDocument': settingsOpenDocumentValueSchema,
-  'settings.update': settingsUpdateValueSchema,
-  'settings.replace': settingsReplaceValueSchema,
-  'settings.mutate': settingsMutateValueSchema,
-  'credentials.describe': credentialsDescribeValueSchema,
-  'credentials.set': credentialsSetValueSchema,
-  'credentials.unset': credentialsUnsetValueSchema,
-  'llm.providers': llmProvidersValueSchema,
-  'llm.models': llmModelsValueSchema,
-  'llm.discoverModels': llmDiscoverModelsValueSchema,
+  'session/list': sessionListValueSchema,
+  'session/search': sessionSearchValueSchema,
+  'session/create': sessionCreateValueSchema,
+  'session/page': sessionPageValueSchema,
+  'session/modelCatalog': sessionModelCatalogValueSchema,
+  'session/selectModel': sessionSelectModelValueSchema,
+  'session/rename': sessionRenameValueSchema,
+  'session/prompt': sessionPromptValueSchema,
+  'session/attachment': sessionAttachmentValueSchema,
+  'session/canOpenWorkspacePath': sessionCanOpenWorkspacePathValueSchema,
+  'session/openWorkspacePath': sessionOpenWorkspacePathValueSchema,
+  'agentPresets/list': agentPresetListValueSchema,
+  'skills/list': skillListValueSchema,
+  'settings/describe': settingsDescribeValueSchema,
+  'settings/openSettingsDocument': settingsOpenDocumentValueSchema,
+  'credentials/describe': credentialsDescribeValueSchema,
+  'llm/listProviders': llmListProvidersValueSchema,
+  'llm/listConfigurableProviders': llmListConfigurableProvidersValueSchema,
+}
+
+/**
+ * Wire arg key per method: 0.1.2 keys the `args` object by the Host Remote
+ * method's parameter name. null = a no-parameter method (args stays `{}`).
+ * (session/list's param is `_request`; most are `request`; the catalog and
+ * capability probes and the preset roster take none.)
+ */
+const ARG_KEY: { [K in keyof RpcMethodMap]: string | null } = {
+  'session/list': '_request',
+  'session/search': 'request',
+  'session/create': 'request',
+  'session/page': 'request',
+  'session/modelCatalog': null,
+  'session/selectModel': 'request',
+  'session/rename': 'request',
+  'session/prompt': 'request',
+  'session/attachment': 'request',
+  'session/canOpenWorkspacePath': null,
+  'session/openWorkspacePath': 'request',
+  'agentPresets/list': null,
+  'skills/list': 'request',
+  'settings/describe': null,
+  'settings/openSettingsDocument': null,
+  'credentials/describe': 'refs',
+  'llm/listProviders': null,
+  'llm/listConfigurableProviders': null,
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000
 
 export interface AgosClientOptions {
-  /** 显式 base(Node/冒烟脚本用);浏览器默认同源 location.origin。 */
+  /** Explicit base (Node/smoke); browsers default to location.origin (same-origin). */
   baseUrl?: string
-  /** 有界 unary 的传输健康超时(用户节奏的调用与流不受其管)。 */
+  /** Transport-health timeout for bounded unary calls (streams are unbounded). */
   timeoutMs?: number
-  /** 传输注入点(测试/宿主内进程)。 */
+  /** Transport injection point (tests / in-process host). */
   doFetch?: (input: URL, init?: RequestInit) => Promise<Response>
-  /** 帧观察 tap(诊断;抛错被隔离,绝不断流)。 */
-  onFrame?: (frame: MuxFrame | HostFrame) => void
-  /**
-   * 事件流物理通道。上游 apiproxy→gateway 迁移期两种都在:'sse'(老,pin 克隆的
-   * fetch carrier 面)/ 'ws'(新,rc 部署面对 GET 回 426 upgrade: websocket)。
-   * 默认 'auto':有 WebSocket 用 WS,否则 SSE。
-   */
-  streamTransport?: 'ws' | 'sse' | 'auto'
+  /** Frame observation tap (diagnostics; throwing is isolated, never breaks a stream). */
+  onEventFrame?: (frame: RemoteEventDownlinkFrame) => void
 }
 
 export interface AgosClient {
   call<K extends keyof RpcMethodMap>(
     method: K, payload: RequestPayload<K>, signal?: AbortSignal,
   ): Promise<RpcResponse<ResponseValue<K>>>
-  respond(message: ClientResponse, signal?: AbortSignal): Promise<RpcReceipt>
-  /** mux 流;onOpen 在响应头到达、首帧之前触发(连接就绪握手)。 */
-  mux(signal: AbortSignal, onOpen?: () => void): AsyncIterable<RpcRequest<MuxFrame>>
-  host(signal: AbortSignal, onOpen?: () => void): AsyncIterable<RpcRequest<HostFrame>>
+  /** Open one logical Remote stream over its own /api/remote.mux socket; yields raw item values. */
+  stream(endpoint: string, args: object, signal: AbortSignal, onOpen?: () => void): AsyncIterable<unknown>
+  /** Convenience over stream('$events'): parsed downlink frames (ready/emit/waterfall/cancel). */
+  events(signal: AbortSignal, onOpen?: () => void): AsyncIterable<RemoteEventDownlinkFrame>
+  /** Answer one Host→Client waterfall (approval / user-question) via $events/result. */
+  postEventResult(result: RemoteEventResult, signal?: AbortSignal): Promise<void>
 }
 
 export function createAgosClient(options: AgosClientOptions = {}): AgosClient {
@@ -161,164 +123,137 @@ export function createAgosClient(options: AgosClientOptions = {}): AgosClient {
   }
   const mintRpcId = (): ReturnType<typeof RpcId> => RpcId(crypto.randomUUID())
 
-  async function postJson(path: string, body: unknown, signal: AbortSignal | undefined, bounded: boolean): Promise<Response> {
-    const requestSignal = bounded
-      ? signal === undefined
-        ? AbortSignal.timeout(timeoutMs)
-        : AbortSignal.any([AbortSignal.timeout(timeoutMs), signal])
-      : signal
-    const response = await doFetch(new URL(path, resolveBase()), {
+  async function postEnvelope(method: string, args: object, signal: AbortSignal | undefined): Promise<unknown> {
+    const requestSignal = signal === undefined
+      ? AbortSignal.timeout(timeoutMs)
+      : AbortSignal.any([AbortSignal.timeout(timeoutMs), signal])
+    // `args` is already the wire args object ({} or {<paramName>: value}).
+    const message = { type: 'client-request' as const, rpcId: mintRpcId(), method, payload: { args } }
+    const response = await doFetch(new URL(`/api/${method}`, resolveBase()), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-      ...(requestSignal === undefined ? {} : { signal: requestSignal }),
+      body: JSON.stringify(message),
+      signal: requestSignal,
     })
-    if (!response.ok) throw new Error(`transport failure for ${path}: HTTP ${response.status}`)
-    return response
+    if (!response.ok) throw new Error(`transport failure for ${method}: HTTP ${response.status}`)
+    const full = serverResponseSchema.parse(await response.json())
+    if (full.rpcId !== message.rpcId) {
+      throw new Error(`rpcId mismatch for ${method}: sent ${message.rpcId}, got ${full.rpcId}`)
+    }
+    if (!full.result.ok) throw new AgosRemoteError(full.result.error.code, full.result.error.message, full.result.error.details)
+    return full.result.value
   }
 
   async function call<K extends keyof RpcMethodMap>(
     method: K, payload: RequestPayload<K>, signal?: AbortSignal,
   ): Promise<RpcResponse<ResponseValue<K>>> {
-    const message = { type: 'client-request' as const, rpcId: mintRpcId(), method, payload }
-    const response = await postJson(`/api/${method}`, message, signal, true)
-    const full = serverResponseSchema.parse(await response.json())
-    if (full.rpcId !== message.rpcId) {
-      throw new Error(`rpcId mismatch for ${method}: sent ${message.rpcId}, got ${full.rpcId}`)
-    }
-    if (!full.result.ok) return { rpcId: full.rpcId, result: full.result }
-    const value = UNARY_VALUE_SCHEMAS[method].parse(full.result.value) as ResponseValue<K>
-    return { rpcId: full.rpcId, result: { ok: true, value } }
-  }
-
-  /** SSE 协议路径:流式 fetch(非 EventSource),'\n\n' 分帧;坏帧报掉跳过,不断流。 */
-  async function* readSse<F extends MuxFrame | HostFrame>(
-    path: string, signal: AbortSignal, frameSchema: z.ZodType<F>, onOpen?: () => void,
-  ): AsyncGenerator<RpcRequest<F>> {
-    const response = await doFetch(new URL(path, resolveBase()), { signal })
-    if (!response.ok || response.body === null) {
-      throw new Error(`transport failure for ${path}: HTTP ${response.status}`)
-    }
-    onOpen?.()
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
+    const rpcId = mintRpcId()
+    const key = ARG_KEY[method]
+    const args = key === null ? {} : { [key]: payload }
     try {
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) return
-        buffer += decoder.decode(value, { stream: true })
-        let boundary: number
-        while ((boundary = buffer.indexOf('\n\n')) !== -1) {
-          const chunk = buffer.slice(0, boundary)
-          buffer = buffer.slice(boundary + 2)
-          const data = chunk.split('\n')
-            .filter((line) => line.startsWith('data: '))
-            .map((line) => line.slice(6))
-            .join('')
-          if (data === '') continue
-          let full
-          let frame: F
-          try {
-            full = serverRequestSchema.parse(JSON.parse(data))
-            frame = frameSchema.parse(full.payload)
-          } catch (error) {
-            console.error(`[agos-client] dropping malformed SSE frame on ${path}:`, error)
-            continue
-          }
-          try { options.onFrame?.(frame) } catch (tapError) { console.error('[agos-client] onFrame tap threw (isolated):', tapError) }
-          yield { rpcId: full.rpcId, payload: frame }
-        }
+      const value = await postEnvelope(method, args, signal)
+      const parsed = UNARY_VALUE_SCHEMAS[method].parse(value) as ResponseValue<K>
+      return { rpcId, result: { ok: true, value: parsed } }
+    } catch (error) {
+      if (error instanceof AgosRemoteError) {
+        return { rpcId, result: { ok: false, error: { code: error.code, message: error.message, details: error.details } } }
       }
-    } finally {
-      await reader.cancel().catch(() => undefined)
+      throw error
     }
   }
 
-  /** WS 协议路径(rc 部署面):同一 ServerRequest 信封,JSON 文本帧,开连即推。 */
-  async function* readWs<F extends MuxFrame | HostFrame>(
-    path: string, signal: AbortSignal, frameSchema: z.ZodType<F>, onOpen?: () => void,
-  ): AsyncGenerator<RpcRequest<F>> {
+  /** One logical Remote stream over its own WebSocket; yields each item's raw value. */
+  async function* stream(endpoint: string, args: object, signal: AbortSignal, onOpen?: () => void): AsyncGenerator<unknown> {
     const WsImpl = (globalThis as { WebSocket?: typeof WebSocket }).WebSocket
     if (WsImpl === undefined) throw new Error('WebSocket unavailable in this runtime')
-    const url = new URL(path, resolveBase())
+    const url = new URL(REMOTE_STREAM_MUX_PATH, resolveBase())
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+    const streamId = crypto.randomUUID()
     const ws = new WsImpl(url)
-    // 队列化异步迭代:消息先入队,消费者按序取;close/error 终结迭代。
     const queue: (string | null)[] = []
     let wake: (() => void) | undefined
     let failed: unknown = null
     const push = (item: string | null): void => { queue.push(item); wake?.() }
     const take = (): Promise<string | null> => {
       if (queue.length > 0) return Promise.resolve(queue.shift() ?? null)
-      return new Promise((resolve) => {
-        wake = () => { wake = undefined; resolve(queue.shift() ?? null) }
-      })
+      return new Promise((resolve) => { wake = () => { wake = undefined; resolve(queue.shift() ?? null) } })
     }
-    const onAbort = (): void => { try { ws.close() } catch { /* 已关 */ } }
+    const onAbort = (): void => { try { ws.close() } catch { /* already closed */ } }
     signal.addEventListener('abort', onAbort, { once: true })
     ws.onmessage = (event) => push(typeof event.data === 'string' ? event.data : String(event.data))
     ws.onerror = (event) => { failed = failed ?? (event as { message?: string }).message ?? 'websocket error' }
     ws.onclose = () => push(null)
     try {
-      // 等开连(或失败)
       await new Promise<void>((resolve, reject) => {
-        const bad = (): void => reject(new Error(`websocket connect failed for ${path}: ${String(failed ?? 'closed before open')}`))
         if (ws.readyState === ws.OPEN) { resolve(); return }
         ws.onopen = () => resolve()
         const prevClose = ws.onclose
-        ws.onclose = (ev) => { if (ws.readyState !== ws.OPEN && queue.length === 0) bad(); prevClose?.call(ws, ev) }
+        ws.onclose = (ev) => {
+          if (ws.readyState !== ws.OPEN && queue.length === 0) reject(new Error(`mux connect failed for ${endpoint}: ${String(failed ?? 'closed before open')}`))
+          prevClose?.call(ws, ev)
+        }
       })
       if (signal.aborted) return
+      ws.send(JSON.stringify({ type: 'open', streamId, endpoint, payload: { args } }))
       onOpen?.()
       while (true) {
         const data = await take()
         if (data === null) return
         if (signal.aborted) return
-        let full
-        let frame: F
-        try {
-          full = serverRequestSchema.parse(JSON.parse(data))
-          frame = frameSchema.parse(full.payload)
-        } catch (error) {
-          console.error(`[agos-client] dropping malformed WS frame on ${path}:`, error)
+        let msg
+        try { msg = remoteStreamServerMessageSchema.parse(JSON.parse(data)) } catch (error) {
+          console.error(`[agos-client] dropping malformed mux frame on ${endpoint}:`, error)
           continue
         }
-        try { options.onFrame?.(frame) } catch (tapError) { console.error('[agos-client] onFrame tap threw (isolated):', tapError) }
-        yield { rpcId: full.rpcId, payload: frame }
+        if (msg.streamId !== streamId) continue
+        if (msg.type === 'end') return
+        if (msg.type === 'error') throw new AgosRemoteError(msg.error.code, msg.error.message, msg.error.details)
+        yield msg.value
       }
     } finally {
       signal.removeEventListener('abort', onAbort)
-      try { ws.close() } catch { /* 已关 */ }
+      try { ws.close() } catch { /* already closed */ }
     }
   }
 
-  const useWs = options.streamTransport !== 'sse'
-    && (options.streamTransport === 'ws'
-      || (globalThis as { WebSocket?: unknown }).WebSocket !== undefined)
+  async function* events(signal: AbortSignal, onOpen?: () => void): AsyncGenerator<RemoteEventDownlinkFrame> {
+    for await (const value of stream(REMOTE_EVENT_STREAM_ENDPOINT, {}, signal, onOpen)) {
+      let frame: RemoteEventDownlinkFrame
+      try { frame = remoteEventDownlinkFrameSchema.parse(value) } catch (error) {
+        console.error('[agos-client] dropping malformed $events frame:', error)
+        continue
+      }
+      try { options.onEventFrame?.(frame) } catch (tapError) { console.error('[agos-client] onEventFrame tap threw (isolated):', tapError) }
+      yield frame
+    }
+  }
 
   return {
     call,
-    async respond(message: ClientResponse, signal?: AbortSignal): Promise<RpcReceipt> {
-      const response = await postJson('/api/respond', message, signal, true)
-      return rpcReceiptSchema.parse(await response.json())
+    stream,
+    events,
+    async postEventResult(result: RemoteEventResult, signal?: AbortSignal): Promise<void> {
+      await postEnvelope('$events/result', result as unknown as object, signal)
     },
-    mux: (signal, onOpen) => useWs
-      ? readWs('/api/events.mux', signal, muxFrameSchema, onOpen)
-      : readSse('/api/events.mux', signal, muxFrameSchema, onOpen),
-    host: (signal, onOpen) => useWs
-      ? readWs('/api/events.host', signal, hostFrameSchema, onOpen)
-      : readSse('/api/events.host', signal, hostFrameSchema, onOpen),
+  }
+}
+
+/** Remote endpoint failure carrying the open namespaced code. */
+export class AgosRemoteError extends Error {
+  constructor(readonly code: string, message: string, readonly details: object) {
+    super(message)
+    this.name = 'AgosRemoteError'
   }
 }
 
 /**
- * 断线重连助手:流死了就重开(指数退避,上限 8s);调用方负责在 onReconnect
- * 里全量重拉 session.history(since 游标上游未实现)。
+ * Reconnect helper: reopen a logical stream when it drops (exponential backoff,
+ * cap 8s). The caller reseeds state in onReconnect (session/follow reopens with
+ * a fresh snapshot, so no since-cursor is needed).
  */
-export function watchStream<F extends MuxFrame | HostFrame>(
-  open: (signal: AbortSignal, onOpen?: () => void) => AsyncIterable<RpcRequest<F>>,
-  consume: (frame: RpcRequest<F>) => void,
+export function watchStream<T>(
+  open: (signal: AbortSignal, onOpen?: () => void) => AsyncIterable<T>,
+  consume: (frame: T) => void,
   onReconnect?: () => void,
 ): () => void {
   let stopped = false
@@ -334,9 +269,7 @@ export function watchStream<F extends MuxFrame | HostFrame>(
       try {
         for await (const frame of open(ac.signal)) consume(frame)
       } catch (error) {
-        if (!stopped && !ac.signal.aborted) {
-          console.error('[agos-client] stream dropped, reconnecting:', error)
-        }
+        if (!stopped && !ac.signal.aborted) console.error('[agos-client] stream dropped, reconnecting:', error)
       }
       if (stopped || gen !== generation) break
       attempt += 1

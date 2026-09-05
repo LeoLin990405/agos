@@ -36,7 +36,7 @@ function useAttachmentDataUrl(
     if (sessionId === undefined) { setState(fallback('无会话上下文')); return undefined; }
     let alive = true;
     setState({ url: undefined, error: undefined, loading: true, via: undefined, rpcError: undefined });
-    agos.call('session.attachment', { sessionId: sessionId as never, attachmentId: attachmentId as never })
+    agos.call('session/attachment', { sessionId: sessionId as never, attachmentId: attachmentId as never })
       .then((res) => {
         if (!alive) return;
         if (!res.result.ok) { setState(fallback(res.result.error.message)); return; }

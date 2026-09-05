@@ -490,14 +490,17 @@ export function createSessionMemoryStore(options = {}) {
   }
 
   const capture = (agent) => {
-    if (disposed || !agent || typeof agent.id !== 'string' || !Array.isArray(agent.session?.events)) return false
+    if (disposed || !agent || typeof agent.id !== 'string'
+      || typeof agent.session?.snapshotEvents !== 'function') return false
+    const events = agent.session.snapshotEvents()
+    if (!Array.isArray(events)) return false
     const sessionId = agent.id
     encodeSessionMemorySegment(sessionId)
     if (tombstones.has(sessionId)) return false
     // Session events are JSON values, so structuredClone severs every nested
     // alias synchronously at the idle transition. Deep-freezing the detached
     // copy documents and enforces the background worker's read-only contract.
-    const snapshot = deepFreeze(structuredClone(agent.session.events))
+    const snapshot = deepFreeze(structuredClone(events))
     // W20:会话头随快照走(子代理会话整个不抽);header 不是事件,单独克隆。
     const header = agent.session.header && typeof agent.session.header === 'object' ? deepFreeze(structuredClone(agent.session.header)) : undefined
     const state = stateFor(sessionId)

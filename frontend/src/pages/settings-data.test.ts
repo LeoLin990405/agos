@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { AgosClient } from '../api-client/index.ts'
-import type { SettingsNamespaceView } from '../contract/api/index.ts'
 import {
   collectCredentialRefs,
   deriveSettingRows,
   formatSettingValue,
   loadSettingsSnapshot,
+  type SettingsNamespaceView,
 } from './settings-data.ts'
 
 const schema = {
@@ -89,16 +89,16 @@ test('secret-role containers remain one boolean row and never expose child field
   }).map((row) => ({ label: row.label, value: row.value })), [{ label: 'auth', value: false }])
 })
 
-test('read loader uses only exact read payloads and never asks for a credential value', async () => {
+test('read loader (DSH 0.1.2) uses slash reads, joins providers, and never asks for a credential value', async () => {
   const calls: Array<{ method: string, payload: unknown }> = []
   const fake = {
     call: async (method: string, payload: unknown) => {
       calls.push({ method, payload })
       const values: Record<string, unknown> = {
-        'settings.describe': { writable: false, hasDocument: true, namespaces: [namespace] },
-        'llm.providers': { providers: [{ provider: 'example', displayName: 'Example', settingsNs: 'llm-example', settingsPath: [], active: true }] },
-        'llm.models': { groups: [{ id: 'example', name: 'Example', models: [] }], failures: [] },
-        'credentials.describe': { credentials: { EXAMPLE_API_KEY: { configured: true, source: 'env', writable: false } } },
+        'settings/describe': { writable: false, hasDocument: true, namespaces: [namespace] },
+        'llm/listProviders': [{ id: 'example', name: 'Example' }],
+        'llm/listConfigurableProviders': [{ provider: 'example', displayName: 'Example', settingsNs: 'llm-example', settingsPath: [] }],
+        'credentials/describe': { EXAMPLE_API_KEY: { configured: true, source: 'env', writable: false } },
       }
       return { rpcId: 'fixture', result: { ok: true, value: values[method] } }
     },
@@ -106,12 +106,12 @@ test('read loader uses only exact read payloads and never asks for a credential 
 
   const snapshot = await loadSettingsSnapshot(fake)
   assert.equal(snapshot.credentials.EXAMPLE_API_KEY?.configured, true)
-  assert.deepEqual(calls, [
-    { method: 'settings.describe', payload: {} },
-    { method: 'llm.providers', payload: {} },
-    { method: 'llm.models', payload: {} },
-    { method: 'credentials.describe', payload: { refs: ['EXAMPLE_API_KEY'] } },
+  assert.equal(snapshot.providers[0]?.active, true)
+  // parallel reads first (order within Promise.all is deterministic), then credentials.
+  assert.deepEqual(calls.map((c) => c.method), [
+    'settings/describe', 'llm/listProviders', 'llm/listConfigurableProviders', 'credentials/describe',
   ])
+  assert.deepEqual(calls[3], { method: 'credentials/describe', payload: ['EXAMPLE_API_KEY'] })
 })
 
 test('credential read is skipped when no namespace names a reference', async () => {
@@ -119,12 +119,15 @@ test('credential read is skipped when no namespace names a reference', async () 
   const fake = {
     call: async (method: string) => {
       calls.push(method)
-      if (method === 'settings.describe') return { rpcId: 'fixture', result: { ok: true, value: { writable: true, hasDocument: false, namespaces: [] } } }
-      if (method === 'llm.providers') return { rpcId: 'fixture', result: { ok: true, value: { providers: [] } } }
-      return { rpcId: 'fixture', result: { ok: true, value: { groups: [], failures: [] } } }
+      const values: Record<string, unknown> = {
+        'settings/describe': { writable: true, hasDocument: false, namespaces: [] },
+        'llm/listProviders': [],
+        'llm/listConfigurableProviders': [],
+      }
+      return { rpcId: 'fixture', result: { ok: true, value: values[method] } }
     },
   } as unknown as Pick<AgosClient, 'call'>
   const snapshot = await loadSettingsSnapshot(fake)
   assert.deepEqual(snapshot.credentials, {})
-  assert.deepEqual(calls, ['settings.describe', 'llm.providers', 'llm.models'])
+  assert.deepEqual(calls.sort(), ['llm/listConfigurableProviders', 'llm/listProviders', 'settings/describe'])
 })

@@ -20,9 +20,8 @@ import { SwarmBatchCard } from '@/components/chat/SwarmBatchCard';
 import { ApprovalPanel } from '@/components/chat/ApprovalPanel';
 import { TodoBar } from '@/components/chat/TodoBar';
 import type { StateLamp } from '@/design-system/tokens';
-import { agos, approvalRpc, conversationStore } from '@/stores/live';
+import { conversationStore, respondApproval } from '@/stores/live';
 import type { ConversationItem, FoldedConversation, ToolItem } from '@/fold/model';
-import { RpcId } from '@/contract/api/rpc';
 import type { OptimisticImageAttachment } from '@/components/chat/ImageAttachments';
 import { extractMultimodalMessageId, stripImagePlaceholder, stripMultimodalMessageMarker } from '@/components/chat/CommandDeck';
 import { MediaBlocks } from '@/components/chat/MediaBlocks';
@@ -639,13 +638,8 @@ function renderItem(
     );
   }
   const respond = (outcome: 'allowed-once' | 'rejected') => {
-    const rpcId = approvalRpc.get(item.id);
-    if (rpcId === undefined) return; // 冷历史悬挂审批:无活跃帧可回
-    void agos.respond({
-      type: 'client-response',
-      rpcId: RpcId(rpcId),
-      result: { ok: true, value: { sessionId, approvalId: item.id, outcome } },
-    });
+    // 0.1.2: answer the live $events waterfall keyed by the tool callId.
+    respondApproval(item.callId ?? item.id, outcome);
   };
   return (
     <div className="message-wrap tl-enter" key={key}>
