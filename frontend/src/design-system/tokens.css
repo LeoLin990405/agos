@@ -8,15 +8,22 @@
      1. 动效 Tokens (Transform / Opacity Only)
      -------------------------------------------------------------------------- */
   --u-dur-tick: 90ms;
-  --u-dur-fast: 140ms;
-  --u-dur-base: 220ms;
-  --u-dur-slow: 360ms;
-  --u-dur-scan: 2400ms;
+  --u-dur-fast: 140ms;        /* hover/press —— Kimi .12–.15s */
+  --u-dur-base: 220ms;        /* 标准过渡(默认)—— Kimi .2s */
+  --u-dur-slow: 360ms;        /* 抽屉/侧栏 —— Kimi .3s */
+  --u-dur-xslow: 460ms;       /* 大转场(慎用)—— Manus .4–.5s */
+  --u-dur-scan: 2400ms;       /* 环境呼吸/渐变漂移 */
+  --u-dur-loop: 1000ms;       /* spinner */
+  --u-dur-shimmer: 1400ms;    /* 骨架扫光 */
   --u-stagger: 24ms;
 
-  --u-ease-swift: cubic-bezier(0.16, 1, 0.3, 1);
+  /* 缓动:主曲线取 Kimi 签名 .2,0,0,1(app.asar 实测命中最高);Manus 顺滑/回弹用于强调 */
+  --u-ease-out: cubic-bezier(0.2, 0, 0, 1);          /* AgOS 主曲线:入场/显隐/移动默认(Kimi 签名) */
+  --u-ease-swift: cubic-bezier(0.16, 1, 0.3, 1);     /* 戏剧化揭示(ease-out-quint,≈Kimi .23,1,.32,1) */
+  --u-ease-smooth: cubic-bezier(0.26, 0.86, 0.44, 0.985); /* 大转场顺滑(Manus 高级感减速) */
+  --u-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);   /* 双向对称:展开+收起同用 */
   --u-ease-latch: cubic-bezier(0.2, 0.9, 0.1, 1);
-  --u-ease-pop: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --u-ease-pop: cubic-bezier(0.34, 1.56, 0.64, 1);   /* 回弹过冲:仅成功/徽章(Manus ap-pop) */
 
   /* --------------------------------------------------------------------------
      2. 字体栈
@@ -212,6 +219,25 @@ html, body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--border-bold);
 }
+
+/* ==========================================================================
+   签名关键帧(从 Kimi/Manus app.asar 提取,折中为 AgOS 语汇)。见 MOTION-SPEC.md。
+   用法:入场 `animation: agos-rise-in var(--u-dur-base) var(--u-ease-out) both`;
+        加载扫光 `agos-shimmer var(--u-dur-shimmer) linear infinite`;
+        成功/徽章 `agos-pop 320ms var(--u-ease-pop)`;在跑态背景 `agos-breathe var(--u-dur-scan) ease-in-out infinite`。
+   ========================================================================== */
+/* 上浮+落定(Kimi rise-enter × Manus 含蓄位移的折中):卡片/浮层/消息入场 */
+@keyframes agos-rise-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }
+/* 纯淡入(消息级,克制):Kimi fade-in */
+@keyframes agos-fade-in { from { opacity: 0.6; } to { opacity: 1; } }
+/* 骨架扫光:Kimi shimmer(需 background:linear-gradient + background-size:200%) */
+@keyframes agos-shimmer { from { background-position: 100%; } to { background-position: -100%; } }
+/* 成功/徽章过冲弹出(唯一 back 用处):Manus ap-pop */
+@keyframes agos-pop { 0% { transform: scale(0); } 70% { transform: scale(1.2); } 100% { transform: scale(1); } }
+/* 环境呼吸(背景/在跑态,极淡):Manus breathe */
+@keyframes agos-breathe { 0%, 100% { opacity: 0; } 50% { opacity: 0.06; } }
+/* tooltip 入场:Manus tipIn */
+@keyframes agos-tip-in { from { opacity: 0; transform: translateY(6px) scale(0.96); } to { opacity: 1; transform: none; } }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
