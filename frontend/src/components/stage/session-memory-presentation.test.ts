@@ -5,8 +5,14 @@ import {
   compactSessionMemoryItems,
   filterSessionMemoryByQuery,
   importanceUnit,
+  INJECT_EMPTY_COPY,
+  INJECT_ENABLED_COPY,
+  INJECT_OFF_COPY,
+  PIN_EMPTY_COPY,
+  PIN_METHOD_COPY,
   sessionMemoryByKind,
   sessionMemoryByTurn,
+  sessionMemoryInjectCopy,
 } from './session-memory-presentation';
 
 const item = (
@@ -48,9 +54,21 @@ test('query filter is a case-insensitive text contains and does not invent rows'
   assert.deepEqual(filterSessionMemoryByQuery(items, '图谱'), []);
 });
 
+test('inject copy does not invent a closed loop', () => {
+  assert.equal(sessionMemoryInjectCopy(undefined, 3), '回注状态未采集');
+  assert.equal(sessionMemoryInjectCopy(false, 3), INJECT_OFF_COPY);
+  assert.equal(sessionMemoryInjectCopy(true, 0), INJECT_EMPTY_COPY);
+  assert.equal(sessionMemoryInjectCopy(true, 2), INJECT_ENABLED_COPY);
+});
+
 test('compact session memory keeps the first three and reports the hidden remainder', () => {
   const items = [item('a', 'fact', 1), item('b', 'fact', 2), item('c', 'fact', 3), item('d', 'fact', 4)];
   assert.deepEqual(compactSessionMemoryItems(items).items.map((row) => row.id), ['a', 'b', 'c']);
   assert.equal(compactSessionMemoryItems(items).hidden, 1);
   assert.equal(compactSessionMemoryItems(items.slice(0, 2)).hidden, 0);
+});
+
+test('pin copy does not claim extract or Fleet Memory', () => {
+  assert.match(PIN_EMPTY_COPY, /确认后/);
+  assert.match(PIN_METHOD_COPY, /不是 Fleet Memory/);
 });

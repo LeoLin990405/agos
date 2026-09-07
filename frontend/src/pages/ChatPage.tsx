@@ -4,7 +4,8 @@ import { Dot } from '@/components/ui/Dot';
 import { Chip } from '@/components/ui/Chip';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
-import { CommandDeck, type CommandDeckMessage } from '@/components/chat/CommandDeck';
+import { CommandDeck, CONTINUE_PROMPT, canEmptySubmitContinue, type CommandDeckMessage } from '@/components/chat/CommandDeck';
+import { TurnEvidenceStrip } from '@/components/chat/TurnEvidenceStrip';
 import type { ImageAttachmentDraft } from '@/components/chat/ImageAttachments';
 import { VisionArbiterCard, type VisionArbiterCardState } from '@/components/chat/VisionArbiterCard';
 import {
@@ -269,6 +270,13 @@ export const ChatPage: React.FC<{
     !hasActiveLiveSession
     || (convo.phase === 'live' && (convo.snapshot?.items.length ?? 0) === 0)
   );
+  const activeRunning = liveSessions.rows.find((row) => row.sessionId === activeSessionId)?.running === true;
+  const canContinue = canEmptySubmitContinue({
+    hasActiveSession: liveMode && hasActiveLiveSession,
+    historyReady: convo.phase === 'live',
+    historyCount: convo.snapshot?.items.length ?? 0,
+    running: activeRunning,
+  });
 
   // 回放:总项数来自 fold 快照;换会话时把回卷位置清掉,否则会把上一个会话的位置带过来
   const replayTotal = useTranscriptItemCount(activeSessionId);
@@ -913,6 +921,14 @@ export const ChatPage: React.FC<{
               sessionId={activeSessionId}
               optimisticImageMessages={optimisticImageMessages}
               replayLimit={replayValue}
+              sessionRunning={activeRunning}
+              onContinue={canContinue ? () => {
+                void handleSend({
+                  text: CONTINUE_PROMPT,
+                  parts: [{ type: 'text', text: CONTINUE_PROMPT }],
+                  images: [],
+                });
+              } : undefined}
             />
           )}
           {liveMode && visionCards.filter((card) => card.sessionId === activeSessionId).map((card) => (
@@ -959,11 +975,15 @@ export const ChatPage: React.FC<{
         )}
 
         {liveMode && hasActiveLiveSession ? (
+          <>
+          <TurnEvidenceStrip sessionId={activeSessionId} />
           <CommandDeck sessionId={activeSessionId}
             onSend={handleSend}
             onAnalyzeImage={handleAnalyzeImage}
             onFocusApproval={handleFocusApproval}
+            canContinue={canContinue}
           />
+          </>
         ) : (
           <div className="session-no-active" role="status">
             <span>

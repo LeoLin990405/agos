@@ -6,6 +6,7 @@
 //   POST /api/agos/skills/description —— 只改模型根 description，需 confirm
 //   GET  /api/agos/skills/evolve      —— 词面短名单 + 经验后验（不跑小模型）
 //   POST /api/agos/skills/evolve      —— record 胜负 / propose+可选小模型（失败回退）
+//   GET/POST /api/agos/session-memory/relevance —— 词面短名单 + 操作员有用/误召回（不跑模型）
 //   GET /api/agos/overview  —— 控制台仪表盘一次取数:会话/计划/技能/活跃派单 四组 KPI。
 //     全部**软依赖**:某个源不可用就缺那一组字段,绝不 500(仪表盘按有无渲染)。
 //     - sessions:优先 sessionPersistence 权威列表,仅在服务不可用时回落 projcache
@@ -28,15 +29,32 @@ import {
   loadSkillUsageCached,
 } from './skills-console.js'
 import { createSessionMemoryStore } from './session-memory.mjs'
+import {
+  bindSessionMemoryInject,
+  describeSessionMemoryInject,
+  writeSessionMemoryInjectConfig,
+} from './session-memory-inject.js'
 import { createYoloDecisionsRoute, defaultYoloAuditFile } from './yolo-decisions.mjs'
 import { createSessionTrashRoute, defaultDeleteLogFile, defaultDshRoot } from './session-trash.mjs'
 import { createSkillDraft, patchSkillDescription, readStudioSkill } from './skills-studio.js'
 import {
   applyOptionalRerank,
   bindCatalogTrim,
+  catalogTrimConfig,
+  CATALOG_TRIM_OFF_COPY,
+  CATALOG_TRIM_ON_COPY,
   createSkillEvolveStore,
+  writeCatalogTrimConfig,
   SKILL_RERANK_SYSTEM,
 } from './skills-evolve.js'
+import { listMemoryDesk, resolveMemorySubmitInvoker, writeMemoryDesk } from './memory-desk.js'
+import { buildPluginsInventory } from './plugins-inventory.js'
+import { createTurnEvidenceStore, describeTurnEvidence } from './turn-evidence.js'
+import {
+  createSessionMemoryRelevanceStore,
+  describeSessionMemoryRelevance,
+  describeUnreadSessionMemory,
+} from './session-memory-rank.js'
 
 export {
   analyzeShadowing,
@@ -47,15 +65,29 @@ export {
   skillNamesFromEvent,
   categoryOf,
 } from './skills-console.js'
-export { createSessionMemoryStore, extractSessionMemory } from './session-memory.mjs'
+export { isSensitiveText, classifySecret, scrubSecrets } from './secrets-gate.js'
+export { betaPrior, posteriorMean, ALLOCATE_KAPPA } from './allocate-kernel.js'
+export { AGENT_HONESTY_PREAMBLE, composeSelectorSystemPrompt } from './agent-prompts.js'
+export { createSessionMemoryStore, extractSessionMemory, pinSessionMemoryItem } from './session-memory.mjs'
+export { bindSessionMemoryInject, describeSessionMemoryInject } from './session-memory-inject.js'
 export { createYoloDecisionsRoute, selectYoloDecisions, readYoloRows, defaultYoloAuditFile } from './yolo-decisions.mjs'
 export { createSessionTrashRoute, buildSessionTrashPayload, describeTrashEntry, splitTrashedTo, summarizeUnloggedRoots, readDeleteLogRows } from './session-trash.mjs'
 export {
   applyOptionalRerank,
   bindCatalogTrim,
+  catalogTrimConfig,
   createSkillEvolveStore,
   proposeSkillEvolve,
+  writeCatalogTrimConfig,
 } from './skills-evolve.js'
+export { listMemoryDesk, writeMemoryDesk, submitDeskToCiv, resolveMemorySubmitInvoker } from './memory-desk.js'
+export { buildPluginsInventory, detectCurrentProfile } from './plugins-inventory.js'
+export { createTurnEvidenceStore, describeTurnEvidence } from './turn-evidence.js'
+export {
+  createSessionMemoryRelevanceStore,
+  describeSessionMemoryRelevance,
+  proposeSessionMemory,
+} from './session-memory-rank.js'
 
 export const name = '@dsh-local/agos'
 
@@ -442,6 +474,10 @@ function normalizeAttachedStatus(value) {
     available: value && value.available === true,
     attached: value && value.attached === true,
   }
+}
+
+function memorySubmitInvokerFromCtx(ctx) {
+  return resolveMemorySubmitInvoker(contextService(ctx, 'tools'))
 }
 
 function contextService(ctx, key) {
@@ -1334,9 +1370,13 @@ export function bindSessionMemoryObserver(ctx, sessionMemory) {
 
 export function apply(ctx) {
   const evolveStore = createSkillEvolveStore()
+  const sessionMemory = createSessionMemoryStore()
+  const turnEvidence = createTurnEvidenceStore({ home: homedir() })
+  const memoryRelevance = createSessionMemoryRelevanceStore()
   if (typeof ctx.on === 'function') {
     bindCatalogTrim(ctx, {
       store: evolveStore,
+      evidence: turnEvidence,
       catalog: async () => {
         const cached = SKILLS_CACHE && SKILLS_CACHE.data && Array.isArray(SKILLS_CACHE.data.catalog)
           ? SKILLS_CACHE.data.catalog
@@ -1344,6 +1384,7 @@ export function apply(ctx) {
         return cached.filter((row) => row.servedToModel !== false)
       },
     })
+    bindSessionMemoryInject(ctx, { store: sessionMemory, rank: memoryRelevance, evidence: turnEvidence })
   }
   return ctx.inject(['webServer'], (c) => {
     const disposers = []
@@ -1356,7 +1397,6 @@ export function apply(ctx) {
     // 下面那个 inject(['sessionPersistence','storageDomain']) 的 ctx 才看得见它,
     // 把它捕获下来给剪枝闭包用。
     let domainCtx
-    const sessionMemory = createSessionMemoryStore()
     const sessionManager = createAgosSessionManager({
       readHostArchived: () => hostArchivedFromContext(c),
       readRunning: (sessionId) => runningFromContext(c, sessionId),
@@ -1444,6 +1484,111 @@ export function apply(ctx) {
         }
         const recorded = await evolveStore.recordOutcome(body)
         sendJson(res, recorded.ok ? 200 : recorded.status, recorded)
+      }],
+      ['/api/agos/skills/trim', async (req, res) => {
+        if (req.method === 'GET') {
+          const trim = catalogTrimConfig()
+          sendJson(res, 200, {
+            enabled: trim.enabled,
+            maxEntries: trim.maxEntries,
+            copy: trim.enabled ? CATALOG_TRIM_ON_COPY : CATALOG_TRIM_OFF_COPY,
+          })
+          return
+        }
+        if (req.method !== 'POST') {
+          sendJson(res, 405, { error: 'GET or POST' }, { allow: 'GET, POST' })
+          return
+        }
+        const result = await writeCatalogTrimConfig(await readJsonBody(req))
+        sendJson(res, result.ok ? 200 : result.status, result)
+      }],
+      ['/api/agos/session-memory/relevance', async (req, res) => {
+        if (req.method === 'GET') {
+          const url = new URL(req.url, 'http://x')
+          const sessionId = url.searchParams.get('sessionId') ?? ''
+          let items = []
+          if (sessionId !== '') {
+            try {
+              const document = await sessionMemory.get(sessionId)
+              items = Array.isArray(document?.items) ? document.items : []
+            } catch {
+              sendJson(res, 200, describeUnreadSessionMemory(sessionId))
+              return
+            }
+          }
+          const report = await memoryRelevance.propose({
+            sessionId,
+            items,
+            query: url.searchParams.get('query') ?? '',
+            label: url.searchParams.get('label') ?? '',
+          })
+          sendJson(res, 200, describeSessionMemoryRelevance(sessionId, report))
+          return
+        }
+        if (req.method !== 'POST') {
+          sendJson(res, 405, { error: 'GET or POST' }, { allow: 'GET, POST' })
+          return
+        }
+        const recorded = await memoryRelevance.recordOutcome(await readJsonBody(req))
+        sendJson(res, recorded.ok ? 200 : recorded.status, recorded)
+      }],
+      ['/api/agos/session-memory/pin', async (req, res) => {
+        if (req.method !== 'POST') {
+          sendJson(res, 405, { error: 'POST only' }, { allow: 'POST' })
+          return
+        }
+        const body = await readJsonBody(req)
+        const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : ''
+        if (sessionId === '') {
+          sendJson(res, 400, { ok: false, code: 'INVALID_SESSION', error: 'sessionId 未采集' })
+          return
+        }
+        const result = await sessionMemory.pin(sessionId, body)
+        sendJson(res, result.ok ? 200 : result.status, result)
+      }],
+      ['/api/agos/session-memory/inject', async (req, res) => {
+        if (req.method === 'GET') {
+          const sessionId = new URL(req.url, 'http://x').searchParams.get('sessionId') ?? ''
+          let itemCount = 0
+          if (sessionId !== '') {
+            try {
+              const document = await sessionMemory.get(sessionId)
+              itemCount = Array.isArray(document?.items) ? document.items.length : 0
+            } catch { itemCount = null }
+          }
+          sendJson(res, 200, describeSessionMemoryInject(homedir(), itemCount))
+          return
+        }
+        if (req.method !== 'POST') {
+          sendJson(res, 405, { error: 'GET or POST' }, { allow: 'GET, POST' })
+          return
+        }
+        const result = await writeSessionMemoryInjectConfig(await readJsonBody(req))
+        sendJson(res, result.ok ? 200 : result.status, result)
+      }],
+      ['/api/agos/memory/desk', async (req, res) => {
+        const invokeMemorySubmit = memorySubmitInvokerFromCtx(ctx)
+        if (req.method === 'GET') {
+          sendJson(res, 200, await listMemoryDesk({ civAvailable: typeof invokeMemorySubmit === 'function' }))
+          return
+        }
+        if (req.method !== 'POST') {
+          sendJson(res, 405, { error: 'GET or POST' }, { allow: 'GET, POST' })
+          return
+        }
+        const result = await writeMemoryDesk(await readJsonBody(req), {
+          invokeMemorySubmit,
+        })
+        sendJson(res, result.ok ? 200 : result.status, result)
+      }],
+      ['/api/agos/plugins', async (req, res) => {
+        if (req.method !== 'GET') { sendJson(res, 405, { error: 'GET only' }, { allow: 'GET' }); return }
+        sendJson(res, 200, buildPluginsInventory())
+      }],
+      ['/api/agos/turn-evidence', async (req, res) => {
+        if (req.method !== 'GET') { sendJson(res, 405, { error: 'GET only' }, { allow: 'GET' }); return }
+        const sessionId = new URL(req.url, 'http://x').searchParams.get('sessionId') ?? ''
+        sendJson(res, 200, describeTurnEvidence(sessionId, turnEvidence, buildPluginsInventory()))
       }],
       ['/api/agos/overview', async (req, res) => {
         if (req.method !== 'GET') { sendJson(res, 405, { error: 'GET only' }, { allow: 'GET' }); return }

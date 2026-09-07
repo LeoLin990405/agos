@@ -39,7 +39,7 @@
   text-decoration: none;
   border: 0;
   box-shadow: none;
-  transition: transform var(--u-dur-tick) var(--u-ease-swift), opacity var(--u-dur-fast) ease;
+  transition: transform var(--u-dur-fast) var(--u-ease-out), opacity var(--u-dur-fast) var(--u-ease-out);
 }
 
 .app-rail-logo:active {
@@ -58,7 +58,7 @@
   color: var(--text-tertiary);
   cursor: pointer;
   text-decoration: none;
-  transition: transform var(--u-dur-tick) var(--u-ease-swift), opacity var(--u-dur-fast) ease;
+  transition: transform var(--u-dur-fast) var(--u-ease-out), opacity var(--u-dur-fast) var(--u-ease-out);
 }
 
 .rail-btn:hover:not(:disabled) {
@@ -207,7 +207,7 @@
   background-color: var(--bg-layer-1);
   color: var(--text-primary);
   user-select: none;
-  transition: transform var(--u-dur-tick) var(--u-ease-swift), opacity var(--u-dur-fast) ease;
+  transition: transform var(--u-dur-fast) var(--u-ease-out), opacity var(--u-dur-fast) var(--u-ease-out);
 }
 
 .btn:hover:not(:disabled) {
@@ -366,7 +366,7 @@
   background: transparent;
   border: none;
   cursor: pointer;
-  transition: transform var(--u-dur-tick) ease, opacity var(--u-dur-fast) ease;
+  transition: transform var(--u-dur-fast) var(--u-ease-out), opacity var(--u-dur-fast) var(--u-ease-out);
 }
 
 .seg-item:hover {
@@ -411,7 +411,7 @@
   text-decoration: none;
   cursor: pointer;
   border: 0;
-  transition: transform var(--u-dur-tick) ease, opacity var(--u-dur-fast) ease;
+  transition: transform var(--u-dur-fast) var(--u-ease-out), opacity var(--u-dur-fast) var(--u-ease-out);
 }
 
 .console-nav-item:hover {
@@ -446,6 +446,7 @@
   justify-content: center;
   z-index: 100;
   padding: 20px;
+  animation: agos-scrim-in var(--u-dur-base) var(--u-ease-out) both;
 }
 
 .modal-card {
@@ -458,6 +459,7 @@
   flex-direction: column;
   overflow: hidden;
   position: relative;
+  animation: agos-rise-in var(--u-dur-base) var(--u-ease-out) both;
 }
 
 .modal-header {
@@ -482,6 +484,11 @@
   justify-content: flex-end;
   gap: 10px;
   background-color: var(--bg-layer-1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-overlay,
+  .modal-card { animation: none; }
 }
 
 .form-group {

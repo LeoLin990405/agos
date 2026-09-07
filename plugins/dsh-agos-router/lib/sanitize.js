@@ -1,5 +1,5 @@
 // Reuse AgOS session-memory secret/entropy gates. Do not fork a weaker regex.
-import { isSensitiveMemoryText } from '../../dsh-agos/lib/session-memory.mjs'
+import { isSensitiveText } from '../../dsh-agos/lib/secrets-gate.js'
 
 export const TASK_PREVIEW_LIMIT = 80
 export const REASON_LIMIT = 160
@@ -8,7 +8,7 @@ export function sanitizePreview(text, limit = TASK_PREVIEW_LIMIT) {
   if (typeof text !== 'string') return undefined
   const trimmed = text.replace(/\s+/gu, ' ').trim()
   if (!trimmed) return undefined
-  if (isSensitiveMemoryText(trimmed)) return undefined
+  if (isSensitiveText(trimmed)) return undefined
   const chars = [...trimmed]
   return chars.length <= limit ? trimmed : chars.slice(0, limit).join('')
 }

@@ -6,6 +6,12 @@
 // RSI(FuguNano 评审飞轮):评审若给出结构化判定,且过三重门(实现终稿在场·判定可解析·该决策尚无胜负),
 // 则追加一条 source:'reviewer-verdict' 的 outcome 行喂后验——除此之外仍不写任何 outcome。
 // 「调用成功≠好答案」:turns 的 ok 只是流成功,永不直接喂后验;喂的只有评审的判定。
+import {
+  IMPLEMENTER_RETRY_COPY,
+  IMPLEMENTER_RETRY_SYSTEM,
+  REVIEWER_SEES_FINAL_COPY,
+  composeAssembleRolePrompt,
+} from '../../dsh-agos/lib/agent-prompts.js'
 import { ASSEMBLE_EMPTY_COPY, LIVE_DISPATCH_OFF_COPY } from './assemble.js'
 import { sanitizePreview } from './sanitize.js'
 import { classifyStream, streamError } from './stream-outcome.js'
@@ -16,7 +22,7 @@ export const DISPATCH_NO_TOOLS_COPY = '三角色只出文本，不改仓库'
 export const DISPATCH_CONFIRM_COPY = '三角色试跑需要 confirm:true'
 export const ASSEMBLE_MISMATCH_COPY = '请求指定的提案不是台账最新一条，拒绝试跑'
 export const MODEL_UNRESOLVED_COPY = '宿主未配置该模型'
-export const REVIEWER_SEES_FINAL_COPY = '评审只看实现终稿'
+export { IMPLEMENTER_RETRY_COPY, REVIEWER_SEES_FINAL_COPY }
 export const DISPATCH_EMPTY_COPY = '还没有试跑记录'
 export const DEFAULT_DISPATCH_TASK = '三角色试跑。各角色只回不超过 80 字中文。planner：列出三步、每步一个文件名。implementer：只写将改的文件和一句话做法，不要补丁。reviewer：首行只写「判定：通过」或「判定：驳回」，第二行一句理由。禁止改仓库，禁止声称已经接入会话或开了子代理。'
 
@@ -38,16 +44,7 @@ export function resolveModelRoute(id) {
 }
 
 export function roleSystemPrompt(role) {
-  if (role === 'planner') {
-    return '你是规划角色。只出计划，不要实现，不要评审。不要调用工具。'
-  }
-  if (role === 'implementer') {
-    return '你是实现角色。只出终稿说明，不要补丁，不要改仓库，不要调用工具。'
-  }
-  if (role === 'reviewer') {
-    return `${REVIEWER_SEES_FINAL_COPY}。看不到规划稿。不要调用工具。首行必须是「判定：通过」或「判定：驳回」，不许别的开头；第二行一句理由。`
-  }
-  return '只出一段短文本。不要调用工具。'
+  return composeAssembleRolePrompt(role)
 }
 
 export function roleUserPrompt(role, task, turns) {
@@ -86,6 +83,27 @@ function lastTurnText(turns, role) {
   const row = [...(Array.isArray(turns) ? turns : [])].reverse().find((item) => item && item.role === role)
   if (!row || row.ok !== true || typeof row.text !== 'string' || !row.text.trim()) return ''
   return row.text
+}
+
+function failedRoleTurn(role, model, route, err, extra = {}) {
+  const detail = err && err.detail && typeof err.detail === 'object' ? err.detail : undefined
+  return {
+    role,
+    model,
+    provider: route.provider,
+    hostModel: route.model,
+    ok: false,
+    error: err && typeof err.code === 'string' && err.code ? err.code : 'STREAM_ERROR',
+    text: '',
+    ...extra,
+    ...(detail ? {
+      finish: detail.finish,
+      blockTypes: detail.blockTypes,
+      ...(detail.providerCode ? { providerCode: detail.providerCode } : {}),
+      ...(detail.providerStatus !== undefined ? { providerStatus: detail.providerStatus } : {}),
+      ...(detail.usage ? { usage: detail.usage } : {}),
+    } : {}),
+  }
 }
 
 export function buildDispatchRecord(assemble, turns, task) {
@@ -196,47 +214,52 @@ export async function dispatchTeam(assemble, input, deps = {}) {
       })
       continue
     }
+    const user = roleUserPrompt(role, task, turns)
+    let streamed
+    let retried = false
     try {
-      const streamed = await deps.streamRole({
+      streamed = await deps.streamRole({
         role,
         provider: route.provider,
         model: route.model,
         system: roleSystemPrompt(role),
-        user: roleUserPrompt(role, task, turns),
-      })
-      // streamRole 可返回裸字符串(测试替身)或 {text, detail}(streamRoleText)。
-      const text = typeof streamed === 'string' ? streamed : streamed && typeof streamed.text === 'string' ? streamed.text : ''
-      const detail = streamed && typeof streamed === 'object' && streamed.detail ? streamed.detail : undefined
-      if (role === 'reviewer') reviewerRawText = text
-      turns.push({
-        role,
-        model,
-        provider: route.provider,
-        hostModel: route.model,
-        ok: true,
-        text: sanitizePreview(text, TURN_TEXT_LIMIT) || '',
-        // 成功行也记 finish/usage:回答「256 的上限为什么 output 334」要靠它。不带 error(前端契约:ok 行无 error)。
-        ...(detail ? { finish: detail.finish, blockTypes: detail.blockTypes, ...(detail.usage ? { usage: detail.usage } : {}) } : {}),
+        user,
       })
     } catch (err) {
-      const detail = err && err.detail && typeof err.detail === 'object' ? err.detail : undefined
-      turns.push({
-        role,
-        model,
-        provider: route.provider,
-        hostModel: route.model,
-        ok: false,
-        error: err && typeof err.code === 'string' && err.code ? err.code : 'STREAM_ERROR',
-        text: '',
-        ...(detail ? {
-          finish: detail.finish,
-          blockTypes: detail.blockTypes,
-          ...(detail.providerCode ? { providerCode: detail.providerCode } : {}),
-          ...(detail.providerStatus !== undefined ? { providerStatus: detail.providerStatus } : {}),
-          ...(detail.usage ? { usage: detail.usage } : {}),
-        } : {}),
-      })
+      if (role === 'implementer' && err && err.code === 'TOOL_CALL') {
+        retried = true
+        try {
+          streamed = await deps.streamRole({
+            role,
+            provider: route.provider,
+            model: route.model,
+            system: IMPLEMENTER_RETRY_SYSTEM,
+            user,
+          })
+        } catch (retryErr) {
+          turns.push(failedRoleTurn(role, model, route, retryErr, { retried: true, note: IMPLEMENTER_RETRY_COPY }))
+          continue
+        }
+      } else {
+        turns.push(failedRoleTurn(role, model, route, err))
+        continue
+      }
     }
+    // streamRole 可返回裸字符串(测试替身)或 {text, detail}(streamRoleText)。
+    const text = typeof streamed === 'string' ? streamed : streamed && typeof streamed.text === 'string' ? streamed.text : ''
+    const detail = streamed && typeof streamed === 'object' && streamed.detail ? streamed.detail : undefined
+    if (role === 'reviewer') reviewerRawText = text
+    turns.push({
+      role,
+      model,
+      provider: route.provider,
+      hostModel: route.model,
+      ok: true,
+      text: sanitizePreview(text, TURN_TEXT_LIMIT) || '',
+      // 成功行也记 finish/usage:回答「256 的上限为什么 output 334」要靠它。不带 error(前端契约:ok 行无 error)。
+      ...(retried ? { retried: true, note: IMPLEMENTER_RETRY_COPY } : {}),
+      ...(detail ? { finish: detail.finish, blockTypes: detail.blockTypes, ...(detail.usage ? { usage: detail.usage } : {}) } : {}),
+    })
   }
   const record = buildDispatchRecord(assemble, turns, task)
   // RSI 评审飞轮:判定与入账与否都如实记在 dispatch 行上,门没过也要写明是哪道门。

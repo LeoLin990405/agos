@@ -5,30 +5,13 @@ import {
 } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
+import { isSensitiveText, SECRET_REFUSE_COPY } from './secrets-gate.js'
 
 const VERSION = 1
 const MAX_ITEMS = 30
 const MAX_TEXT_CODEPOINTS = 200
 const KINDS = new Set(['fact', 'constraint', 'preference', 'rejected'])
-
-// Deliberately biased towards false positives: session memory is a convenience
-// projection, never the authority, so dropping a whole candidate is safer than
-// persisting even a fragment of a credential.
-const SECRET_PATTERNS = [
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----/i,
-  // 分隔符不能只认 : = is 是 为。实测「密码用 Tr0ub4dor&3」「uses password X」
-  // 「NAS 登录是 leo / Gen8Nas2026!」全部从这里漏过去,然后被 classifyUserText
-  // 的 fact 分支原样收进会话记忆并进响应体(2026-08-21 验收 P0)。
-  // 本表按文件顶部声明的口径「宁可误杀整条候选」放宽:关键词后允许任意短分隔。
-  /(?:[A-Z0-9_]*(?:API_KEY|ACCESS_KEY|SECRET|TOKEN|PASSWORD|PASSWD|COOKIE|AUTHORIZATION)|api[ -]?key|access[ -]?key|secret|token|password|passwd|cookie|authorization|auth|credential|login|密码|口令|密钥|令牌|凭据|登录|账号)[\s:=/,，、是为用（(]{0,8}\S{3,}/iu,
-  // 连接串:口令夹在 :…@ 之间,既没有关键词,: @ 又把 highEntropyToken 的
-  // token run 切断,原来两条路都扫不到。
-  /\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/]*:[^\s@/]{3,}@/iu,
-  /\bbearer\s+[A-Za-z0-9._~+/=-]{12,}/iu,
-  /\b(?:sk|gh[opusr]|xox[baprs])-?[A-Za-z0-9_-]{16,}\b/u,
-  /\bAKIA[0-9A-Z]{16}\b/u,
-  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/u,
-]
+const EXTRACT_FAILED_COPY = '抽取失败，显示上次确认内容'
 
 function isDirectChild(parent, child) {
   const rel = relative(parent, child)
@@ -60,26 +43,6 @@ function normalizedText(value) {
   return unicodeSlice(String(value).replace(/\s+/gu, ' ').trim())
 }
 
-function highEntropyToken(value) {
-  const tokens = String(value).match(/[A-Za-z0-9+/_=-]{24,}/gu) ?? []
-  return tokens.some((token) => {
-    const sample = token.replace(/[=_-]+$/u, '')
-    if (sample.length < 24) return false
-    const classes = [/[a-z]/u, /[A-Z]/u, /[0-9]/u, /[+/_=-]/u]
-      .reduce((sum, pattern) => sum + Number(pattern.test(sample)), 0)
-    const uniqueRatio = new Set(sample).size / sample.length
-    const frequencies = new Map()
-    for (const ch of sample) frequencies.set(ch, (frequencies.get(ch) ?? 0) + 1)
-    let entropy = 0
-    for (const count of frequencies.values()) {
-      const probability = count / sample.length
-      entropy -= probability * Math.log2(probability)
-    }
-    return (classes >= 3 && uniqueRatio >= 0.35)
-      || (sample.length >= 24 && entropy >= 3.5)
-  })
-}
-
 function deepFreeze(value, seen = new Set()) {
   if (!value || typeof value !== 'object' || seen.has(value)) return value
   seen.add(value)
@@ -88,8 +51,7 @@ function deepFreeze(value, seen = new Set()) {
 }
 
 export function isSensitiveMemoryText(value) {
-  const text = String(value)
-  return SECRET_PATTERNS.some((pattern) => pattern.test(text)) || highEntropyToken(text)
+  return isSensitiveText(value)
 }
 
 function splitCandidates(text) {
@@ -178,6 +140,44 @@ function isoTime(value, now) {
 
 function itemId(kind, text) {
   return createHash('sha256').update(kind + '\0' + text).digest('hex').slice(0, 24)
+}
+
+const PIN_IMPORTANCE = Object.freeze({
+  fact: 3,
+  constraint: 5,
+  preference: 4,
+  rejected: 5,
+})
+
+/** Operator pin. Confirm-gated. Does not invent text or loosen extract rules. */
+export function pinSessionMemoryItem(input, options = {}) {
+  if (!input || input.confirm !== true) {
+    return { ok: false, status: 400, code: 'CONFIRM_REQUIRED', error: '收进会话记忆需要 confirm:true' }
+  }
+  const kind = String(input.kind ?? '')
+  if (!KINDS.has(kind)) {
+    return { ok: false, status: 400, code: 'INVALID_KIND', error: 'kind 必须是 fact、constraint、preference 或 rejected' }
+  }
+  const text = normalizedText(input.text ?? '')
+  if (text === '' || [...text].length > MAX_TEXT_CODEPOINTS) {
+    return { ok: false, status: 400, code: 'INVALID_TEXT', error: '正文未采集或超过 200 码点' }
+  }
+  if (isSensitiveMemoryText(text)) {
+    return { ok: false, status: 400, code: 'SENSITIVE', error: SECRET_REFUSE_COPY }
+  }
+  const sourceTurn = Number.isSafeInteger(input.sourceTurn) && input.sourceTurn >= 0 ? input.sourceTurn : 0
+  const now = typeof options.now === 'function' ? options.now() : new Date()
+  return {
+    ok: true,
+    item: {
+      id: itemId(kind, text),
+      kind,
+      text,
+      importance: PIN_IMPORTANCE[kind],
+      sourceTurn,
+      createdAt: now.toISOString(),
+    },
+  }
 }
 
 /** W20 来源门(纯函数,可单测)。 */
@@ -343,7 +343,7 @@ export function createSessionMemoryStore(options = {}) {
   const stateFor = (sessionId) => {
     let state = states.get(sessionId)
     if (!state) {
-      state = { generation: 0, pending: undefined, scheduled: undefined, running: undefined, deleting: false }
+      state = { generation: 0, pending: undefined, scheduled: undefined, running: undefined, deleting: false, lastExtractError: undefined }
       states.set(sessionId, state)
     }
     return state
@@ -478,10 +478,13 @@ export function createSessionMemoryStore(options = {}) {
         const pending = state.pending
         state.pending = undefined
         await processSnapshot(sessionId, pending.snapshot, pending.generation, pending.header)
+        state.lastExtractError = undefined
       }
     })()
     state.running = operation
-    void operation.catch(() => undefined).finally(() => {
+    void operation.catch(() => {
+      state.lastExtractError = EXTRACT_FAILED_COPY
+    }).finally(() => {
       if (state.running === operation) state.running = undefined
       if (state.pending && !state.scheduled && !disposed && !tombstones.has(sessionId)) {
         state.scheduled = setImmediate(() => drain(sessionId))
@@ -527,8 +530,39 @@ export function createSessionMemoryStore(options = {}) {
     const document = await readDocument(sessionId)
     const state = states.get(sessionId)
     const extracting = Boolean(state && (state.pending || state.scheduled || state.running))
-    const status = extracting ? 'extracting' : (document.updatedAt === null ? 'empty' : 'ready')
+    const failed = Boolean(state && state.lastExtractError)
+    const status = extracting
+      ? 'extracting'
+      : failed
+        ? 'degraded'
+        : (document.updatedAt === null ? 'empty' : 'ready')
     return publicPayload(document, status)
+  }
+
+  const pin = async (sessionId, input) => {
+    const prepared = pinSessionMemoryItem(input, { now })
+    if (!prepared.ok) return prepared
+    encodeSessionMemorySegment(sessionId)
+    const state = stateFor(sessionId)
+    if (tombstones.has(sessionId) || state.deleting) {
+      return { ok: false, status: 409, code: 'SESSION_BUSY', error: '会话记忆正在删除' }
+    }
+    await whenIdle(sessionId)
+    if (tombstones.has(sessionId) || state.deleting) {
+      return { ok: false, status: 409, code: 'SESSION_BUSY', error: '会话记忆正在删除' }
+    }
+    const previous = await readDocument(sessionId)
+    const next = {
+      version: VERSION,
+      sessionId,
+      generation: previous.generation,
+      watermark: previous.watermark,
+      items: mergeItems(previous.items, [prepared.item]),
+      skippedSensitive: previous.skippedSensitive,
+      updatedAt: now().toISOString(),
+    }
+    await atomicWrite(sessionId, next, () => !disposed && !tombstones.has(sessionId) && !state.deleting)
+    return { ok: true, item: prepared.item, itemCount: next.items.length }
   }
 
   const beginDelete = async (sessionId) => {
@@ -628,6 +662,7 @@ export function createSessionMemoryStore(options = {}) {
     capture,
     activate,
     get,
+    pin,
     beginDelete,
     whenIdle,
     dispose,

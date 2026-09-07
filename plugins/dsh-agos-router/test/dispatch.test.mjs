@@ -11,6 +11,7 @@ import {
   DISPATCH_CONFIRM_COPY,
   DISPATCH_COPY,
   DISPATCH_NO_TOOLS_COPY,
+  IMPLEMENTER_RETRY_COPY,
   MODEL_UNRESOLVED_COPY,
   REVIEWER_SEES_FINAL_COPY,
   dispatchTeam,
@@ -208,4 +209,43 @@ test('dispatchTeam:失败行平铺 finish/blockTypes/providerCode/usage,成功�
   // 旧替身返回裸字符串仍可用。
   const plain = await dispatchTeam(TEAM, { confirm: true, task: 'x' }, { streamRole: async () => 'ok' })
   assert.equal(plain.dispatch.turns[0].text, 'ok'); assert.equal('finish' in plain.dispatch.turns[0], false)
+})
+
+test('implementer TOOL_CALL retries once without tools and does not invent a final draft on second failure', async () => {
+  const systems = []
+  const result = await dispatchTeam(TEAM, { confirm: true, task: 'x' }, {
+    streamRole: async (input) => {
+      systems.push({ role: input.role, system: input.system })
+      if (input.role === 'implementer' && !input.system.includes('上一跳被工具块挡下')) {
+        const err = new Error('tool')
+        err.code = 'TOOL_CALL'
+        err.detail = { blockTypes: ['tool-call'], finish: 'tool-calls' }
+        throw err
+      }
+      return `${input.role}-ok`
+    },
+  })
+  const implementer = result.dispatch.turns.find((row) => row.role === 'implementer')
+  assert.equal(implementer.ok, true)
+  assert.equal(implementer.retried, true)
+  assert.equal(implementer.note, IMPLEMENTER_RETRY_COPY)
+  assert.equal(implementer.text, 'implementer-ok')
+  assert.equal(systems.filter((row) => row.role === 'implementer').length, 2)
+
+  const failed = await dispatchTeam(TEAM, { confirm: true, task: 'x' }, {
+    streamRole: async (input) => {
+      if (input.role === 'implementer') {
+        const err = new Error('tool')
+        err.code = 'TOOL_CALL'
+        throw err
+      }
+      return `${input.role}-ok`
+    },
+  })
+  const retryFail = failed.dispatch.turns.find((row) => row.role === 'implementer')
+  assert.equal(retryFail.ok, false)
+  assert.equal(retryFail.error, 'TOOL_CALL')
+  assert.equal(retryFail.retried, true)
+  assert.equal(retryFail.text, '')
+  assert.equal(failed.dispatch.turns.find((row) => row.role === 'reviewer').ok, true)
 })

@@ -33,6 +33,7 @@ import {
 } from './fleet-artifacts.mjs'
 import { createFleetPower } from './fleet-power.mjs'
 import { DEFAULT_CODEX_WORKSPACE, createCodexHostRunner } from './fleet-codex.mjs'
+import { FLEET_GUIDANCE } from '../../dsh-agos/lib/agent-prompts.js'
 
 const name = '@dsh-local/fleet'
 const inject = ['tools', 'subagents', 'commands', 'systemPrompt']
@@ -92,7 +93,7 @@ const Config = z.object({
 
 const SECTION_ORDER = 206
 const HEALTH_TTL_MS = 60_000
-const GUIDANCE = '本机装了 @dsh-local/fleet(homelab 多机并发)。工具 `fleet_run` 把若干**自包含**子任务派到 worker 并行执行；remote 经 ssh 跑 DSH，codex 经本机 Codex SDK（必须显式 hosts:[codex] 或 tag:codex 才会使用）。`fleet_hosts` 看有哪些机、健康与在飞数。适合 **工具重 / 需要隔离** 的批量任务；任务必须自包含，产出以文本或工作区文件交回。'
+const GUIDANCE = FLEET_GUIDANCE
 
 const clip = (s, n) => { const t = String(s ?? ''); return t.length > n ? t.slice(0, n) + '…' : t }
 

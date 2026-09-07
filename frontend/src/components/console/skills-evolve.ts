@@ -225,7 +225,7 @@ export function lastUserQuery(messages: readonly unknown[]): string {
       content?: unknown;
     };
     const kind = record.source?.kind;
-    if (kind === 'skill-catalog' || kind === 'skill-invocation') continue;
+    if (kind === 'skill-catalog' || kind === 'skill-invocation' || kind === 'session-memory') continue;
     if (record.role !== undefined && record.role !== 'user') continue;
     const text = flattenMessageText(record.content).replace(/\s+/g, ' ').trim();
     if (text !== '') return text;

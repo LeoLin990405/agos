@@ -9,7 +9,7 @@
   color: var(--text-secondary);
   box-shadow: none;
   letter-spacing: normal;
-  transition: transform var(--u-dur-tick) var(--u-ease-swift), opacity var(--u-dur-fast) ease;
+  transition: transform var(--u-dur-fast) var(--u-ease-out), opacity var(--u-dur-fast) var(--u-ease-out);
 }
 
 .app-rail-logo:hover,
@@ -34,7 +34,7 @@
 .rail-btn.rail-new-session {
   color: var(--text-primary);
   background-color: var(--bg-layer-1);
-  transition: transform var(--u-dur-tick) var(--u-ease-swift), opacity var(--u-dur-fast) ease;
+  transition: transform var(--u-dur-fast) var(--u-ease-out), opacity var(--u-dur-fast) var(--u-ease-out);
 }
 
 .rail-btn.rail-new-session:hover:not(:disabled) {

@@ -285,7 +285,7 @@
   background-color: var(--bg-layer-2);
   box-shadow: var(--shadow-panel);
   transform-origin: top left;
-  animation: session-menu-enter var(--u-dur-fast) var(--u-ease-swift);
+  animation: agos-tip-in var(--u-dur-fast) var(--u-ease-out);
 }
 
 .session-menu-group {
@@ -347,10 +347,6 @@
   box-shadow: var(--shadow-panel);
 }
 
-@keyframes session-menu-enter {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: none; }
-}
 
 @media (prefers-reduced-motion: reduce) {
   .session-archive-chevron,

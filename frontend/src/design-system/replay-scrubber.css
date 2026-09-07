@@ -23,7 +23,7 @@
   background: var(--bg-layer-1);
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
-  animation: rs-fade-in var(--u-dur-base) var(--u-ease-swift) both;
+  animation: agos-fade-in var(--u-dur-base) var(--u-ease-out) both;
 }
 
 /* ── 逐步按钮:复用 .btn/.btn-ghost,只把尺寸收成 24px 方钮 ──────────── */
@@ -190,7 +190,7 @@
    ========================================================================== */
 
 .dl-block {
-  animation: rs-fade-in var(--u-dur-base) var(--u-ease-swift) both;
+  animation: agos-fade-in var(--u-dur-base) var(--u-ease-out) both;
 }
 
 .dl-done {

@@ -191,7 +191,7 @@
 
 /* ── 统一入场:特化卡与时间线组共用 ─────────────────────────────── */
 .tl-enter {
-  animation: tl-fade-in var(--u-dur-base) var(--u-ease-swift) both;
+  animation: agos-fade-in var(--u-dur-base) var(--u-ease-out) both;
 }
 
 @keyframes tl-fade-in {

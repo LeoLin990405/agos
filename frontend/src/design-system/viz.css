@@ -47,7 +47,7 @@
 .viz-seg.is-queued { background: var(--state-queued); }
 
 .viz-enter {
-  animation: surface-enter var(--u-dur-base) var(--u-ease-swift) both;
+  animation: agos-rise-in var(--u-dur-base) var(--u-ease-out) both;
   animation-delay: calc(var(--i, 0) * var(--u-stagger));
 }
 
@@ -56,7 +56,7 @@
 }
 
 .surface-list > .surface-row {
-  animation: surface-enter var(--u-dur-base) var(--u-ease-swift) both;
+  animation: agos-rise-in var(--u-dur-base) var(--u-ease-out) both;
 }
 
 .surface-list > .surface-row:nth-child(1) { animation-delay: calc(0 * var(--u-stagger)); }

@@ -135,7 +135,7 @@
 }
 
 .es-anim {
-  animation: es-fade-in var(--u-dur-base) var(--u-ease-swift) both;
+  animation: agos-rise-in var(--u-dur-base) var(--u-ease-out) both;
   animation-delay: calc(var(--es-i, 0) * var(--u-stagger));
 }
 

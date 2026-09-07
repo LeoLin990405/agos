@@ -3,7 +3,7 @@
    ========================================================================== */
 
 @keyframes surface-enter {
-  from { opacity: 0; transform: translateY(6px); }
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
   to   { opacity: 1; transform: none; }
 }
 
@@ -16,11 +16,16 @@
   overflow: hidden;
 }
 
+.chat-workspace,
+.page-workspace {
+  animation: agos-rise-in var(--u-dur-xslow) var(--u-ease-smooth) both;
+}
+
 .surface-page {
   display: flex;
   flex-direction: column;
   gap: 18px;
-  animation: surface-enter var(--u-dur-base) var(--u-ease-swift) both;
+  animation: agos-rise-in var(--u-dur-xslow) var(--u-ease-smooth) both;
 }
 
 .surface-page.is-dense { gap: 18px; }
@@ -77,6 +82,38 @@
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+}
+
+.surface-instrument {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.inventory-list {
+  display: flex;
+  flex-direction: column;
+  margin-top: 10px;
+}
+
+.inventory-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 16px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.inventory-row:last-child { border-bottom: 0; }
+
+.inventory-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
 }
 
 .surface-cluster.is-spread { justify-content: space-between; width: 100%; }
@@ -188,6 +225,10 @@
   font-size: 13px;
   font-weight: 650;
   margin: 0 0 8px;
+}
+
+.surface-section > summary {
+  cursor: pointer;
 }
 
 .surface-image {
@@ -476,5 +517,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .chat-workspace,
+  .page-workspace,
   .surface-page { animation: none; }
 }

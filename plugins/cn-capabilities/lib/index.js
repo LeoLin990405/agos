@@ -9,6 +9,7 @@ import { homedir } from 'node:os'
 import { tmpdir } from 'node:os'
 import { basename, dirname, extname, join, sep } from 'node:path'
 import { formatCodexBarUsage, readCodexBarUsage } from './usage.mjs'
+import { composeOptimizeAgentPrompt } from '../../dsh-agos/lib/agent-prompts.js'
 import { buildCouncilReviewRecord, councilReviewVerdict, disagreementsFromParsed, normalizeDisagreementItems } from './council-record.js'
 
 const name = 'cn-capabilities'
@@ -2465,13 +2466,15 @@ const PROVIDER_DEFAULT_MODEL = {
       let log = []
 
       for (let i = 1; i <= iterations; i++) {
-        const ctxText = [
-          '你是自主优化 agent。目标: ' + goal,
-          '当前 ' + metric + ': ' + best + '(baseline: ' + baseMetric + ',方向: ' + direction + ')',
-          '可修改范围: ' + scope,
-          '最近日志: ' + (log.length ? log.join('; ') : '(无)'),
-          '请做【一次】原子修改来改进该指标,修改后立刻退出。不要解释,只改。',
-        ].join('\n')
+        const ctxText = composeOptimizeAgentPrompt({
+          goal,
+          metric,
+          best,
+          baseMetric,
+          direction,
+          scope,
+          recentLog: log.length ? log.join('; ') : '(无)',
+        })
 
         let run
         try {

@@ -226,7 +226,7 @@
   border-left: 1px solid var(--border-bold);
   background: var(--bg-base);
   box-shadow: -20px 0 60px rgba(0, 0, 0, 0.35);
-  animation: fleet-drawer-in var(--u-dur-base) var(--u-ease-swift) both;
+  animation: fleet-drawer-in var(--u-dur-slow) var(--u-ease-standard) both;
 }
 
 @keyframes fleet-drawer-in {

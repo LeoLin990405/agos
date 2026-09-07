@@ -238,6 +238,16 @@ html, body {
 @keyframes agos-breathe { 0%, 100% { opacity: 0; } 50% { opacity: 0.06; } }
 /* tooltip 入场:Manus tipIn */
 @keyframes agos-tip-in { from { opacity: 0; transform: translateY(6px) scale(0.96); } to { opacity: 1; transform: none; } }
+/* 遮罩淡入:全屏 overlay 用,不做位移 */
+@keyframes agos-scrim-in { from { opacity: 0; } to { opacity: 1; } }
+
+.agos-enter {
+  animation: agos-rise-in var(--u-dur-base) var(--u-ease-out) both;
+}
+
+.agos-pane-enter {
+  animation: agos-rise-in var(--u-dur-xslow) var(--u-ease-smooth) both;
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

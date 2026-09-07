@@ -31,6 +31,8 @@ import {
   type ProposeReport,
 } from './skills-evolve';
 import { RERANK_UNAVAILABLE_COPY, SHORTLIST_METHOD_COPY, shortlistSkills } from './skills-ranking';
+import { fetchCatalogTrim, postCatalogTrim } from './skills-trim-api';
+import { postSkillOutcome } from './skills-studio-api';
 
 const fetchSkills = async (url: string, signal: AbortSignal): Promise<SkillsPayload> =>
   parseSkillsPayload(await fetchJsonResource<unknown>(url, signal));
@@ -194,6 +196,28 @@ export const SkillsView: React.FC<{
     [catalogMerged, payload?.usage],
   );
   const [vanishedOpen, setVanishedOpen] = useState(false);
+  const [trimEnabled, setTrimEnabled] = useState<boolean | undefined>();
+  const [trimCopy, setTrimCopy] = useState<string>();
+  const [trimConfirm, setTrimConfirm] = useState(false);
+  const [trimBusy, setTrimBusy] = useState(false);
+  const [trimError, setTrimError] = useState<string>();
+  const [recordConfirm, setRecordConfirm] = useState(false);
+  const [recordNotice, setRecordNotice] = useState<string>();
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchCatalogTrim().then(
+      (status) => {
+        if (cancelled) return;
+        setTrimEnabled(status.enabled);
+        setTrimCopy(status.copy);
+      },
+      (error) => {
+        if (!cancelled) setTrimError(error instanceof Error ? error.message : String(error));
+      },
+    );
+    return () => { cancelled = true; };
+  }, [payload?.at]);
   const consistency = payload?.consistency;
   const budget = payload?.budget;
   const usageReady = usageDenominatorReady(payload?.usageMeta);
@@ -206,8 +230,16 @@ export const SkillsView: React.FC<{
           <h2 className="surface-title">技能库</h2>
           <p className="surface-lede">
             目录来自根并集审计；会话内 <code>skill.list</code> 可覆盖 modelInvocable。工作室只写模型根，审计台不动。
-            {SHORTLIST_METHOD_COPY}。{POSTERIOR_METHOD_COPY}。{CALL_IS_NOT_VERDICT_COPY}。{RERANK_UNAVAILABLE_COPY}。
           </p>
+          <div className="surface-instrument">
+            <Badge state="queued">{SHORTLIST_METHOD_COPY}</Badge>
+            <Badge state="queued">{POSTERIOR_METHOD_COPY}</Badge>
+            <Badge state="queued">{CALL_IS_NOT_VERDICT_COPY}</Badge>
+            <Badge state="queued">{RERANK_UNAVAILABLE_COPY}</Badge>
+            <Badge state={trimEnabled === true ? 'done' : 'queued'}>
+              {trimCopy ?? CATALOG_TRIM_OFF_COPY}
+            </Badge>
+          </div>
         </div>
         <div className="surface-toolbar">
           <div className="surface-cluster">
@@ -321,6 +353,45 @@ export const SkillsView: React.FC<{
             </label>
           </div>
 
+          <div className="surface-cluster">
+            <label className="surface-quiet">
+              <input
+                type="checkbox"
+                checked={trimConfirm}
+                onChange={(event) => setTrimConfirm(event.target.checked)}
+              />
+              确认改裁剪
+            </label>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={trimBusy || !trimConfirm || trimEnabled === undefined}
+              onClick={() => {
+                if (trimEnabled === undefined) return;
+                setTrimBusy(true);
+                void postCatalogTrim(!trimEnabled).then((result) => {
+                  setTrimBusy(false);
+                  setTrimConfirm(false);
+                  if (result.ok) {
+                    setTrimEnabled(result.enabled);
+                    setTrimCopy(result.copy);
+                    setTrimError(undefined);
+                  } else {
+                    setTrimError(result.error);
+                  }
+                });
+              }}
+            >
+              {trimEnabled === true ? '停用本跳裁剪' : '启用本跳裁剪'}
+            </Button>
+            {trimEnabled === undefined ? (
+              <span className="surface-quiet">裁剪开关未采集</span>
+            ) : (
+              <span className="surface-quiet">{trimCopy ?? (trimEnabled ? '本跳目录按短名单替换，失败回退全量' : CATALOG_TRIM_OFF_COPY)}</span>
+            )}
+            {trimError && <span className="surface-alert">{trimError}</span>}
+          </div>
+
           <p className="surface-quiet">
             「从未用过」是使用率信号，不是删除判决。
             {payload.usageMeta?.note ? ` ${payload.usageMeta.note}` : ''}
@@ -351,8 +422,10 @@ export const SkillsView: React.FC<{
           )}
 
           {budget?.topExpensiveDescriptions && budget.topExpensiveDescriptions.length > 0 && (
-            <section className="surface-section" aria-label="索引预算">
-              <h3 className="surface-h3">索引预算 · Top 描述成本</h3>
+            <details className="surface-section" aria-label="索引预算">
+              <summary className="surface-h3">
+                索引预算 · {Math.min(8, budget.topExpensiveDescriptions.length)} 条描述成本建议
+              </summary>
               <p className="surface-quiet">
                 业界压缩实验：description −48% 后约 86% 表现持平或变好。此处只建议，不改 frontmatter。
               </p>
@@ -372,7 +445,7 @@ export const SkillsView: React.FC<{
                   ));
                 })()}
               </ul>
-            </section>
+            </details>
           )}
 
           {(evolveHits.length > 0 || shortlist.length > 0) && (
@@ -381,10 +454,21 @@ export const SkillsView: React.FC<{
                 {evolveResource.data && evolveResource.data.matchingLabel > 0 ? POSTERIOR_METHOD_COPY : SHORTLIST_METHOD_COPY}
               </h3>
               <p className="surface-quiet">
-                {evolveResource.data?.catalogTrim.copy ?? CATALOG_TRIM_OFF_COPY}
+                {evolveResource.data?.catalogTrim.copy ?? trimCopy ?? CATALOG_TRIM_OFF_COPY}
                 {' '}
                 {evolveResource.data?.rerank?.copy ?? RERANK_UNAVAILABLE_COPY}
               </p>
+              <div className="surface-cluster">
+                <label className="surface-quiet">
+                  <input
+                    type="checkbox"
+                    checked={recordConfirm}
+                    onChange={(event) => setRecordConfirm(event.target.checked)}
+                  />
+                  确认记录人工胜负
+                </label>
+                {recordNotice && <span className="surface-quiet">{recordNotice}</span>}
+              </div>
               <ul className="surface-list">
                 {(evolveHits.length > 0 ? evolveHits : shortlist).map((hit) => {
                   const name = hit.name;
@@ -406,16 +490,56 @@ export const SkillsView: React.FC<{
                         </div>
                       </div>
                       <p className="surface-body">{clipDescription(row.description || '（无 description）')}</p>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          setStudioName(row.name);
-                          setTab('studio');
-                        }}
-                      >
-                        在工作室打开
-                      </Button>
+                      <div className="surface-cluster">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            setStudioName(row.name);
+                            setTab('studio');
+                          }}
+                        >
+                          在工作室打开
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={!recordConfirm || query.trim() === ''}
+                          onClick={() => {
+                            void postSkillOutcome({
+                              label: query.trim(),
+                              skill: row.name,
+                              result: 'ok',
+                            }).then((result) => {
+                              setRecordConfirm(false);
+                              setRecordNotice('ok' in result
+                                ? `已记录 ${row.name} / ok`
+                                : result.error);
+                            });
+                          }}
+                        >
+                          记胜
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={!recordConfirm || query.trim() === ''}
+                          onClick={() => {
+                            void postSkillOutcome({
+                              label: query.trim(),
+                              skill: row.name,
+                              result: 'fail',
+                            }).then((result) => {
+                              setRecordConfirm(false);
+                              setRecordNotice('ok' in result
+                                ? `已记录 ${row.name} / fail`
+                                : result.error);
+                            });
+                          }}
+                        >
+                          记负
+                        </Button>
+                      </div>
                     </li>
                   );
                 })}

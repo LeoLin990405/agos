@@ -676,6 +676,10 @@ export interface LiveTranscriptProps {
   snapshotOverride?: FoldedConversation;
   /** 远端 run 没有 approval respond 通道。 */
   readOnly?: boolean;
+  /** 当前会话是否仍在跑。运行中不露出流末「继续」。 */
+  sessionRunning?: boolean;
+  /** 空提交继续的同一条通道:补发「继续」。不传则不画流末按钮。 */
+  onContinue?: () => void;
 }
 
 /** 区分「没有 override」与「远端明确尚无 snapshot」。继承属性不算调用契约。 */
@@ -702,6 +706,8 @@ export const TranscriptBody: React.FC<TranscriptBodyProps> = ({
   error,
   readOnly = false,
   yoloByCallId = EMPTY_YOLO,
+  sessionRunning = false,
+  onContinue,
 }) => {
   const localMessages = optimisticImageMessages.filter((message) => message.sessionId === sessionId);
   const matchedLocalIds = new Set<string>();
@@ -769,6 +775,20 @@ export const TranscriptBody: React.FC<TranscriptBodyProps> = ({
       {renderedItems}
       {deliverables !== undefined && (
         <DeliverableBlock summary={deliverables} onOpenFile={onOpenFile} />
+      )}
+      {!readOnly && onContinue !== undefined && !sessionRunning && !isReplaying
+        && pendingLocalMessages.length === 0 && items.length > 0 && phase === 'live' && (
+        <div className="chat-continue-row">
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={onContinue}
+            title="向当前会话补发「继续」"
+            aria-label="继续当前会话"
+          >
+            继续
+          </button>
+        </div>
       )}
       {pendingLocalMessages.map((message) => (
         <div className="message-wrap" key={`optimistic:${message.id}`}>

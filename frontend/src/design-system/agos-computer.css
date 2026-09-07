@@ -14,7 +14,7 @@
   background-color: var(--bg-layer-1);
   border-left: 1px solid var(--border-dim);
   overflow: hidden;
-  animation: agc-enter var(--u-dur-base) var(--u-ease-swift) both;
+  animation: agos-rise-in var(--u-dur-slow) var(--u-ease-standard) both;
 }
 
 @media (max-width: 1400px) {

@@ -97,6 +97,7 @@ test('polling is enabled only while extracting and time labels stay deterministi
   }));
 
   assert.equal(sessionMemoryPollInterval(extracting), 1_000);
+  assert.equal(parseSessionMemoryPayload(payload({ status: 'degraded' })).status, 'degraded');
   assert.equal(sessionMemoryPollInterval(ready), 0);
   assert.equal(sessionMemoryPollInterval(empty), 0);
   assert.equal(formatSessionMemoryTime('2026-08-21T08:00:00.000Z', Date.parse('2026-08-21T08:00:40.000Z')), '刚刚');

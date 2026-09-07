@@ -2,6 +2,18 @@ import type { SessionMemoryItem, SessionMemoryKind } from './session-memory-mode
 
 /** Graphiti-style episodic / working layer over the frozen session-memory contract. */
 export const SESSION_MEMORY_LAYER = '情节层';
+export const INJECT_ENABLED_COPY = '下一跳会回注本会话已提炼条目';
+export const INJECT_EMPTY_COPY = '回注已启用，本会话没有可回注条目';
+export const INJECT_OFF_COPY = '回注未启用：仅观察，不进下一跳';
+export const INJECT_METHOD_COPY = '会话记忆回注是便利投影，不是权威记忆';
+export const PIN_EMPTY_COPY = '本会话还没有已提炼的短期记忆。完成一轮后会在空闲时异步整理。也可确认后把一条真实约束或偏好收进本会话。';
+export const PIN_METHOD_COPY = '收进本会话是操作员确认写入，不是抽取例句，也不是 Fleet Memory。';
+
+export function sessionMemoryInjectCopy(enabled: boolean | undefined, itemCount: number): string {
+  if (enabled === undefined) return '回注状态未采集';
+  if (!enabled) return INJECT_OFF_COPY;
+  return itemCount > 0 ? INJECT_ENABLED_COPY : INJECT_EMPTY_COPY;
+}
 
 export const SESSION_KIND_ORDER: readonly SessionMemoryKind[] = [
   'constraint',

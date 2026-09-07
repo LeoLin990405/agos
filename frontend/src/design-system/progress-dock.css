@@ -14,7 +14,7 @@
   border-bottom: none;
   border-radius: 16px 16px 0 0;
   overflow: hidden;
-  animation: progress-dock-enter var(--u-dur-base) var(--u-ease-swift) both;
+  animation: agos-rise-in var(--u-dur-base) var(--u-ease-out) both;
 }
 
 .progress-dock-stack {

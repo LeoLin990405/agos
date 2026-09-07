@@ -16,7 +16,7 @@
   font-size: 12px;
   color: var(--text-secondary);
   transition: border-color var(--u-dur-base) ease-in-out;
-  animation: rb-fade-in var(--u-dur-base) var(--u-ease-swift) both;
+  animation: agos-fade-in var(--u-dur-base) var(--u-ease-out) both;
 }
 
 /* 思考中:只给一条 1px 的品牌蓝发丝边,不做任何侧边彩条 */

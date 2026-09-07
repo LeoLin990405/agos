@@ -14,6 +14,7 @@ import {
   encodeSessionMemorySegment,
   extractSessionMemory,
   isDirectUserSource,
+  pinSessionMemoryItem,
 } from '../lib/session-memory.mjs'
 
 const FIXED = new Date('2026-08-21T08:00:00.000Z')
@@ -380,4 +381,22 @@ test('W20 来源门走生产链路:capture→drain→processSnapshot 带会话�
   const mainDoc = await store.get('session-main-1')
   assert.deepEqual(subDoc.items, [], '子代理会话的 user 文本是父模型写的任务书,整个不收')
   assert.deepEqual(mainDoc.items.map((i) => i.text), ['不要在记忆库里写任何凭据。'])
+})
+
+test('operator pin is confirm-gated and does not invent text', async (t) => {
+  const refused = pinSessionMemoryItem({ kind: 'constraint', text: '不要改 fold' })
+  assert.equal(refused.code, 'CONFIRM_REQUIRED')
+  const sensitive = pinSessionMemoryItem({
+    kind: 'fact', text: '密码用 SuperSecret123!', confirm: true,
+  })
+  assert.equal(sensitive.code, 'SENSITIVE')
+  const { store } = await fixture(t)
+  const pinned = await store.pin('session-pin-1', {
+    kind: 'constraint', text: '不要改 fold', confirm: true,
+  })
+  assert.equal(pinned.ok, true)
+  assert.equal(pinned.itemCount, 1)
+  const document = await store.get('session-pin-1')
+  assert.equal(document.items[0]?.text, '不要改 fold')
+  assert.equal(document.items[0]?.kind, 'constraint')
 })

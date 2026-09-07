@@ -7,7 +7,8 @@ import { GraphInspector } from '@/components/graph/GraphInspector';
 import { GraphControls } from '@/components/graph/GraphControls';
 import type { MemoryNodeData } from '@/components/graph/mock-graph-data';
 import { SessionMemoryPane } from '@/components/stage/SessionMemoryPane';
-import type { SessionMemoryItem } from '@/components/stage/session-memory-model';
+import { fetchSessionMemory, type SessionMemoryItem } from '@/components/stage/session-memory-model';
+import { STORE_UNREAD_COPY } from '@/components/stage/session-memory-rank';
 import type { SkillCatalogEntry, SkillUsageStat } from '@/components/console/skills-model';
 import { MemorySkillsDock } from '@/components/graph/MemorySkillsDock';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
@@ -28,15 +29,26 @@ import {
 } from './memory-graph-api';
 import { adaptRealGraph, deriveMemorySearchPresentation } from './memory-graph-model';
 import {
+  ATLAS_HUB_CAP,
+  ATLAS_SPOKE_CAP,
+  revealedCap,
   deriveGraphEngineering,
   egoNeighborhood,
-  expandSearchHits,
   listSupersedesChains,
+  nextGraphSelection,
   personalizedPageRank,
+  projectAtlasNodes,
+  projectCommunityNodes,
+  projectLineageNodes,
+  projectRankedSlice,
+  projectWorkingSet,
   shortestPath,
+  WORKING_SET_REASON_COPY,
   type GraphViewMode,
 } from './memory-graph-engineering';
 import { edgeKeySet, suggestionAdopted } from './memory-slug';
+import { deskVoidedSlugSet, fetchMemoryDesk, postMemoryDesk } from '@/components/graph/memory-desk-api';
+import { fetchTurnEvidence } from '@/components/chat/turn-evidence-api';
 
 export { adaptRealGraph, TYPE_MAP } from './memory-graph-model';
 
@@ -81,18 +93,81 @@ export const MemoryGraphPage: React.FC<{
   const [isSimulating, setIsSimulating] = useState(true);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [viewMode, setViewMode] = useState<GraphViewMode>('atlas');
+  const [spokesCollapsed, setSpokesCollapsed] = useState(false);
+  const [spokeReveal, setSpokeReveal] = useState(0);
+  const [sliceReveal, setSliceReveal] = useState(0);
   const [previousNodeId, setPreviousNodeId] = useState<string | undefined>();
   const [pickedSessionId, setPickedSessionId] = useState<string | undefined>();
   const [selectedEpisode, setSelectedEpisode] = useState<SessionMemoryItem | null>(null);
   const [selectedSkill, setSelectedSkill] = useState<SkillCatalogEntry | null>(null);
   const [selectedSkillUsage, setSelectedSkillUsage] = useState<SkillUsageStat | undefined>();
   const [dockTab, setDockTab] = useState<'working' | 'skills'>('working');
+  const [desk, setDesk] = useState<Awaited<ReturnType<typeof fetchMemoryDesk>>>();
+  const [deskError, setDeskError] = useState<string>();
+  const [touchedIds, setTouchedIds] = useState<string[]>([]);
+  const [sessionItemTexts, setSessionItemTexts] = useState<string[]>([]);
+  const [sessionItemsUnread, setSessionItemsUnread] = useState(false);
+  const [turnQuery, setTurnQuery] = useState('');
   const sessions = useSyncExternalStore(sessionsStore.subscribe, sessionsStore.getSnapshot);
   const liveActiveSessionId = useSyncExternalStore(
     conversationStore.subscribe,
     () => conversationStore.activeSessionId() ?? '',
   );
   const workingSessionId = resolveWorkingSessionId(pickedSessionId, liveActiveSessionId);
+  useEffect(() => {
+    if (workingSessionId === undefined) {
+      setSessionItemTexts([]);
+      setSessionItemsUnread(false);
+      return undefined;
+    }
+    setSessionItemTexts([]);
+    setSessionItemsUnread(false);
+    let cancelled = false;
+    const controller = new AbortController();
+    void fetchSessionMemory(workingSessionId, controller.signal).then(
+      (payload) => {
+        if (cancelled) return;
+        setSessionItemTexts(payload.items.map((item) => item.text));
+        setSessionItemsUnread(false);
+      },
+      (error: unknown) => {
+        if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) return;
+        setSessionItemsUnread(true);
+      },
+    );
+    return () => { cancelled = true; controller.abort(); };
+  }, [workingSessionId]);
+  useEffect(() => {
+    if (workingSessionId === undefined) {
+      setTurnQuery('');
+      return undefined;
+    }
+    let cancelled = false;
+    const load = (): void => {
+      void fetchTurnEvidence(workingSessionId).then(
+        (evidence) => {
+          if (cancelled) return;
+          const query = evidence.memory.collected === true && typeof evidence.memory.query === 'string'
+            ? evidence.memory.query.trim()
+            : '';
+          setTurnQuery(query);
+        },
+        () => { if (!cancelled) setTurnQuery(''); },
+      );
+    };
+    load();
+    const timer = setInterval(load, 8_000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [workingSessionId]);
+  useEffect(() => {
+    let cancelled = false;
+    void fetchMemoryDesk().then(
+      (snapshot) => { if (!cancelled) { setDesk(snapshot); setDeskError(undefined); } },
+      (error) => { if (!cancelled) setDeskError(error instanceof Error ? error.message : String(error)); },
+    );
+    return () => { cancelled = true; };
+  }, []);
+  const voidedSlugs = deskVoidedSlugSet(desk?.voids ?? []);
 
   const normalizedQuery = searchQuery.trim();
   useEffect(() => {
@@ -158,6 +233,20 @@ export const MemoryGraphPage: React.FC<{
     () => (graphData === undefined ? undefined : deriveGraphEngineering(graphData.nodes, graphData.edges)),
     [graphData],
   );
+  const workingSet = useMemo(() => {
+    if (graphData === undefined) return undefined;
+    return projectWorkingSet(graphData.nodes, {
+      itemTexts: [
+        ...sessionItemTexts,
+        ...(normalizedQuery !== '' ? [normalizedQuery] : []),
+        ...(turnQuery !== '' && normalizedQuery === '' ? [turnQuery] : []),
+      ],
+      pinIds: activeSearch?.results.map((result) => result.slug),
+      inspectedIds: touchedIds,
+      selectedId: selectedNodeId,
+      excludeIds: voidedSlugs,
+    });
+  }, [activeSearch, graphData, normalizedQuery, selectedNodeId, sessionItemTexts, touchedIds, turnQuery, voidedSlugs]);
   const lineageChains = useMemo(
     () => (graphData === undefined ? [] : listSupersedesChains(graphData.edges)),
     [graphData],
@@ -169,10 +258,6 @@ export const MemoryGraphPage: React.FC<{
       graphData.nodes.map((node) => node.id),
       graphData.edges,
     );
-  }, [activeSearch, graphData]);
-  const searchFocusIds = useMemo(() => {
-    if (graphData === undefined || activeSearch === undefined || activeSearch.results.length === 0) return undefined;
-    return expandSearchHits(activeSearch.results.map((result) => result.slug), graphData.edges, 1);
   }, [activeSearch, graphData]);
   const localFocusIds = useMemo(() => {
     if (viewMode !== 'local' || selectedNodeId === undefined || graphData === undefined) return undefined;
@@ -192,29 +277,115 @@ export const MemoryGraphPage: React.FC<{
     }
     return ids.size > 0 ? ids : undefined;
   }, [graphData, lineageChains, viewMode]);
-  const focusNodeIds = localFocusIds ?? communityFocusIds ?? lineageFocusIds ?? searchFocusIds;
+  const searchHitIds = matchedNodeIds.size > 0 ? matchedNodeIds : undefined;
+  const focusNodeIds = localFocusIds ?? communityFocusIds ?? lineageFocusIds ?? searchHitIds;
+  const atlasProjection = useMemo(() => {
+    if (graphData === undefined || engineering === undefined) return undefined;
+    const pool = typeFilter === 'all'
+      ? graphData.nodes
+      : graphData.nodes.filter((item) => item.type === typeFilter);
+    const sliceCap = revealedCap(ATLAS_HUB_CAP, sliceReveal);
+    const searchPins = activeSearch?.results.map((result) => result.slug) ?? [];
+    const worksetPins = workingSet?.ids ?? [];
+    if (viewMode === 'community') {
+      return projectCommunityNodes(pool, engineering.degrees, engineering.components, {
+        selectedId: selectedNodeId,
+        cap: sliceCap,
+      });
+    }
+    if (viewMode === 'lineage') {
+      return projectLineageNodes(pool, engineering.degrees, lineageChains, {
+        selectedId: selectedNodeId,
+        cap: sliceCap,
+      });
+    }
+    if (viewMode === 'local') {
+      if (selectedNodeId === undefined || localFocusIds === undefined) {
+        return projectAtlasNodes(pool, engineering.degrees, {
+          hint: '局部：点一篇记忆后画 2 跳邻域',
+        });
+      }
+      return projectRankedSlice(pool, engineering.degrees, localFocusIds, {
+        selectedId: selectedNodeId,
+        cap: sliceCap,
+        noun: '局部 2 跳',
+        empty: '局部邻域为空。',
+      });
+    }
+    return projectAtlasNodes(pool, engineering.degrees, {
+      selectedId: selectedNodeId,
+      neighborIds: selectedNodeId === undefined
+        ? undefined
+        : egoNeighborhood(selectedNodeId, graphData.edges, 1),
+      pinIds: [...searchPins, ...worksetPins],
+      searchPinIds: searchPins,
+      excludeIds: voidedSlugs,
+      expandSpokes: !spokesCollapsed,
+      spokeCap: revealedCap(ATLAS_SPOKE_CAP, spokeReveal),
+    });
+  }, [
+    activeSearch,
+    engineering,
+    graphData,
+    lineageChains,
+    localFocusIds,
+    selectedNodeId,
+    sliceReveal,
+    spokeReveal,
+    spokesCollapsed,
+    typeFilter,
+    viewMode,
+    voidedSlugs,
+    workingSet,
+  ]);
+  const atlasNodeIds = useMemo(
+    () => new Set(atlasProjection?.nodes.map((item) => item.id) ?? []),
+    [atlasProjection],
+  );
+  const atlasEdges = useMemo(() => {
+    if (graphData === undefined || atlasProjection === undefined) return [];
+    return graphData.edges.filter((edge) => atlasNodeIds.has(edge.from) && atlasNodeIds.has(edge.to));
+  }, [atlasNodeIds, atlasProjection, graphData]);
   const pathIds = useMemo(() => {
     if (selectedNodeId === undefined || previousNodeId === undefined || graphData === undefined) return undefined;
     return shortestPath(previousNodeId, selectedNodeId, graphData.edges);
   }, [graphData, previousNodeId, selectedNodeId]);
-  const selectNode = (id: string | undefined): void => {
-    if (id !== undefined && selectedNodeId !== undefined && id !== selectedNodeId) {
+  const applySelection = (nextId: string | undefined, intent: 'canvas' | 'focus'): void => {
+    const next = nextGraphSelection({
+      currentId: selectedNodeId,
+      nextId,
+      viewMode,
+      spokesCollapsed,
+      collapsible: atlasProjection?.collapsible ?? false,
+      intent,
+    });
+    if (next.selectedId !== undefined && selectedNodeId !== undefined && next.selectedId !== selectedNodeId) {
       setPreviousNodeId(selectedNodeId);
     }
-    if (id === undefined) setPreviousNodeId(undefined);
-    setSelectedNodeId(id);
-    if (id !== undefined) {
+    if (next.selectedId === undefined) setPreviousNodeId(undefined);
+    setSelectedNodeId(next.selectedId);
+    setSpokesCollapsed(next.spokesCollapsed);
+    if (next.resetReveal) {
+      setSpokeReveal(0);
+      setSliceReveal(0);
+    }
+    if (next.selectedId !== undefined) {
+      setTouchedIds((previous) => [next.selectedId as string, ...previous.filter((id) => id !== next.selectedId)].slice(0, 12));
       setSelectedEpisode(null);
       setSelectedSkill(null);
       setSelectedSkillUsage(undefined);
     }
   };
+  const selectNode = (id: string | undefined): void => applySelection(id, 'canvas');
   const selectEpisode = (item: SessionMemoryItem): void => {
     setSelectedEpisode(item);
     setSelectedSkill(null);
     setSelectedSkillUsage(undefined);
     setSelectedNodeId(undefined);
     setPreviousNodeId(undefined);
+    setSpokesCollapsed(false);
+    setSpokeReveal(0);
+    setSliceReveal(0);
     setDockTab('working');
   };
   const selectSkill = (skill: SkillCatalogEntry, usage: SkillUsageStat | undefined): void => {
@@ -223,6 +394,9 @@ export const MemoryGraphPage: React.FC<{
     setSelectedEpisode(null);
     setSelectedNodeId(undefined);
     setPreviousNodeId(undefined);
+    setSpokesCollapsed(false);
+    setSpokeReveal(0);
+    setSliceReveal(0);
     setDockTab('skills');
   };
 
@@ -230,14 +404,32 @@ export const MemoryGraphPage: React.FC<{
     const next = consumeMemoryIntent(intent);
     if (next === undefined) return;
     if (next.sessionId !== undefined) setPickedSessionId(next.sessionId);
-    if (next.nodeId !== undefined) selectNode(next.nodeId);
+    if (next.nodeId !== undefined) applySelection(next.nodeId, 'focus');
     onIntentConsumed?.();
   }, [intent, onIntentConsumed]);
   const focusNode = (id: string): void => {
     if (nodeById.has(id)) {
       setTypeFilter('all');
-      selectNode(id);
+      applySelection(id, 'focus');
     }
+  };
+
+  useEffect(() => {
+    setSpokesCollapsed(false);
+    setSpokeReveal(0);
+    setSliceReveal(0);
+  }, [viewMode]);
+
+  const revealRemainder = (): void => {
+    if (viewMode === 'atlas') {
+      if (spokesCollapsed) {
+        setSpokesCollapsed(false);
+        return;
+      }
+      setSpokeReveal((count) => count + 1);
+      return;
+    }
+    setSliceReveal((count) => count + 1);
   };
 
   const dataSourceLabel = graphResource.status === 'degraded'
@@ -276,21 +468,27 @@ export const MemoryGraphPage: React.FC<{
 
         <div className="mem-workspace-layers">
           <div className="mem-layer-rail" aria-label="记忆分层">
-            <button type="button" className={`mem-layer is-action${dockTab === 'working' ? ' is-here' : ''}`} onClick={() => setDockTab('working')}>
+            <button
+              type="button"
+              className={`mem-layer is-action${dockTab === 'working' ? ' is-here' : ''}`}
+              title="左栏会话提炼。晋升写入甲板账本，不是 Fleet Memory 真源。"
+              onClick={() => setDockTab('working')}
+            >
               <span className="mem-layer-title">情节层</span>
-              <span className="mem-layer-copy">左栏会话提炼。是否写入长期图谱未采集。</span>
             </button>
-            <div className="mem-layer is-here">
+            <div className="mem-layer is-here" title="文档节点与 wikilink。不是实体抽取。">
               <span className="mem-layer-title">语义层</span>
-              <span className="mem-layer-copy">文档节点与 wikilink。不是实体抽取。</span>
             </div>
-            <div className="mem-layer is-here">
+            <div className="mem-layer is-here" title="supersedes 与 validUntil。缺失效时间写未采集。">
               <span className="mem-layer-title">时间层</span>
-              <span className="mem-layer-copy">supersedes 与 validUntil。缺失效时间写未采集。</span>
             </div>
-            <button type="button" className={`mem-layer is-action${dockTab === 'skills' ? ' is-here' : ''}`} onClick={() => setDockTab('skills')}>
+            <button
+              type="button"
+              className={`mem-layer is-action${dockTab === 'skills' ? ' is-here' : ''}`}
+              title="程序记忆。目录在左栏，审计在控制台。"
+              onClick={() => setDockTab('skills')}
+            >
               <span className="mem-layer-title">技能层</span>
-              <span className="mem-layer-copy">程序记忆。目录在左栏，审计在控制台。</span>
             </button>
           </div>
         </div>
@@ -344,12 +542,48 @@ export const MemoryGraphPage: React.FC<{
           </div>
           <div className="mem-working-body">
             {dockTab === 'working' ? (
-              <SessionMemoryPane
-                sessionId={workingSessionId}
-                query={normalizedQuery}
-                selectedItemId={selectedEpisode?.id}
-                onSelectItem={selectEpisode}
-              />
+              <>
+                <SessionMemoryPane
+                  sessionId={workingSessionId}
+                  query={normalizedQuery}
+                  relevanceQuery={turnQuery}
+                  selectedItemId={selectedEpisode?.id}
+                  onSelectItem={selectEpisode}
+                  onItemsChange={setSessionItemTexts}
+                />
+                <section className="mem-panel" aria-label="本会话工作集">
+                  <h3 className="mem-layer-title">工作集</h3>
+                  <p className="u-microlabel">
+                    {sessionItemsUnread ? STORE_UNREAD_COPY : (workingSet?.copy ?? '本会话没有可钉的文档')}
+                  </p>
+                  {sessionItemsUnread && (
+                    <p className="u-microlabel">工作集词面未采集，不是空店</p>
+                  )}
+                  {turnQuery !== '' && normalizedQuery === '' && (
+                    <p className="u-microlabel">工作集问句来自本跳回注，不是搜索</p>
+                  )}
+                  {workingSet && workingSet.nodes.length > 0 && (
+                    <div className="mem-panel-list">
+                      {workingSet.nodes.map((node) => (
+                        <button
+                          key={node.id}
+                          type="button"
+                          className="mem-panel-row"
+                          onClick={() => focusNode(node.id)}
+                        >
+                          <code>{node.id}</code>
+                          <span className="u-microlabel">{node.title}</span>
+                          <span className="u-microlabel">
+                            {workingSet.reasons[node.id] === undefined
+                              ? ''
+                              : WORKING_SET_REASON_COPY[workingSet.reasons[node.id]]}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              </>
             ) : (
               <MemorySkillsDock
                 query={normalizedQuery}
@@ -394,6 +628,14 @@ export const MemoryGraphPage: React.FC<{
               onRefreshSuggestions={() => suggestionsResource.refresh()}
               viewMode={viewMode}
               onViewModeChange={setViewMode}
+              atlasCopy={atlasProjection?.copy}
+              remainder={atlasProjection?.remainder}
+              onRevealRemainder={revealRemainder}
+              onCollapseSpokes={
+                viewMode === 'atlas' && atlasProjection?.collapsible === true && !spokesCollapsed && selectedNodeId !== undefined
+                  ? () => selectNode(selectedNodeId)
+                  : undefined
+              }
               componentCount={engineering?.components.length ?? 0}
               isolateCount={engineering?.isolateCount ?? 0}
               expiredCount={engineering?.expiredCount ?? 0}
@@ -401,6 +643,7 @@ export const MemoryGraphPage: React.FC<{
               supersedesCount={engineering?.supersedesCount ?? 0}
               largestComponentSize={engineering?.largestComponentSize ?? 0}
               components={engineering?.components ?? []}
+              degrees={engineering?.degrees}
               lineageChains={lineageChains}
               activationBySlug={activationBySlug}
             />
@@ -425,8 +668,8 @@ export const MemoryGraphPage: React.FC<{
           )}
           {graphData && graphData.nodes.length > 0 && (
             <CanvasGraph
-              nodes={graphData.nodes}
-              edges={graphData.edges}
+              nodes={atlasProjection?.nodes ?? graphData.nodes}
+              edges={atlasEdges}
               selectedNodeId={selectedNode?.id}
               searchQuery={activeSearch === undefined ? '' : normalizedQuery}
               matchedNodeIds={matchedNodeIds}
@@ -435,8 +678,10 @@ export const MemoryGraphPage: React.FC<{
               focusNodeIds={focusNodeIds}
               expiredNodeIds={engineering?.expiredIds}
               pathIds={pathIds}
+              remainder={atlasProjection?.remainder}
               onSelectNode={(node: MemoryNodeData | null) => selectNode(node?.id)}
               onHoverNode={(node: MemoryNodeData | null) => setHoveredNodeId(node?.id)}
+              onRevealRemainder={revealRemainder}
             />
           )}
 
@@ -468,6 +713,52 @@ export const MemoryGraphPage: React.FC<{
             }}
             onNavigateNode={focusNode}
             onOpenStudio={selectedSkill ? () => onNavigateSkills?.({ skillsTab: 'studio', skill: selectedSkill.name }) : undefined}
+            deskCopy={deskError ?? desk?.copy}
+            civAvailable={desk?.civAvailable}
+            voided={selectedNodeId !== undefined && voidedSlugs.has(selectedNodeId)}
+            onPromoteEpisode={async (item) => {
+              if (workingSessionId === undefined) return '工作会话未采集，不能晋升。';
+              const result = await postMemoryDesk({
+                action: 'promote',
+                sessionId: workingSessionId,
+                itemId: item.id,
+                kind: item.kind,
+                text: item.text,
+              });
+              if (result.ok) {
+                const next = await fetchMemoryDesk();
+                setDesk(next);
+                return result.copy;
+              }
+              return result.error;
+            }}
+            onSubmitToCiv={async (input) => {
+              if (workingSessionId === undefined) return '工作会话未采集，不能送真源。';
+              const result = await postMemoryDesk({
+                action: 'submit',
+                sessionId: workingSessionId,
+                itemId: input.itemId,
+                slug: input.slug,
+                type: input.type,
+                description: input.description,
+                body: input.body,
+              });
+              if (result.ok) {
+                const next = await fetchMemoryDesk();
+                setDesk(next);
+                return result.copy;
+              }
+              return result.error;
+            }}
+            onVoidNode={async (slug) => {
+              const result = await postMemoryDesk({ action: 'void', slug });
+              if (result.ok) {
+                const next = await fetchMemoryDesk();
+                setDesk(next);
+                return result.copy;
+              }
+              return result.error;
+            }}
           />
         </div>
         </div>

@@ -10,6 +10,7 @@ import {
   type SettingRow,
   type SettingsReadSnapshot,
 } from './settings-data.ts'
+import { currentProcessCopy, parsePluginsInventory, pluginDriftCopy, type PluginsInventory } from './plugins-inventory.ts'
 
 type PageState =
   | { phase: 'loading' }
@@ -70,6 +71,8 @@ export const SettingsPage: React.FC = () => {
   const [reloadKey, setReloadKey] = useState(0)
   const [openState, setOpenState] = useState<'idle' | 'opening'>('idle')
   const [openError, setOpenError] = useState<string>()
+  const [plugins, setPlugins] = useState<PluginsInventory>()
+  const [pluginsError, setPluginsError] = useState<string>()
 
   useEffect(() => {
     const controller = new AbortController()
@@ -78,6 +81,21 @@ export const SettingsPage: React.FC = () => {
       (snapshot) => { if (!controller.signal.aborted) setState({ phase: 'ready', snapshot }) },
       (error) => { if (!controller.signal.aborted) setState({ phase: 'error', message: messageOf(error) }) },
     )
+    return () => controller.abort()
+  }, [reloadKey])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void fetch('/api/agos/plugins', { signal: controller.signal })
+      .then(async (response) => {
+        const payload = await response.json() as unknown
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        return parsePluginsInventory(payload)
+      })
+      .then((inventory) => { if (!controller.signal.aborted) { setPlugins(inventory); setPluginsError(undefined) } })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setPluginsError(error instanceof Error ? error.message : String(error))
+      })
     return () => controller.abort()
   }, [reloadKey])
 
@@ -197,6 +215,56 @@ export const SettingsPage: React.FC = () => {
                       </div>
                     ))}
                   </div>
+                )}
+              </section>
+
+              <section className="settings-section">
+                <h2 className="settings-heading">插件清单</h2>
+                <div className="surface-instrument">
+                  <Chip>{plugins?.writable === false ? '只读' : '可写性未采集'}</Chip>
+                  <Chip active={plugins?.currentProcess !== undefined}>{currentProcessCopy(plugins?.currentProcess)}</Chip>
+                  <span className="surface-quiet">{plugins?.copy ?? '插件清单未采集。'}</span>
+                </div>
+                {pluginsError !== undefined && <p className="surface-quiet surface-alert">{pluginsError}</p>}
+                {plugins !== undefined && (
+                  <>
+                    <div className="inventory-list">
+                      {plugins.agos.map((row) => (
+                        <div key={row.id} className="inventory-row">
+                          <code className="surface-code">{row.id}</code>
+                          <div className="inventory-meta">
+                            <Chip active={row.web}>web {row.web ? '已部署' : '未部署'}</Chip>
+                            <Chip active={row.desktop}>desktop {row.desktop ? '已部署' : '未部署'}</Chip>
+                            <Chip active={row.drift === false}>{pluginDriftCopy(row.drift)}</Chip>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {plugins.profiles.map((profile) => (
+                      <details key={profile.name} className="surface-section">
+                        <summary className="settings-summary">
+                          {profile.name} · {profile.present ? `${profile.pluginCount} 个插件目录` : 'profile 不存在'}
+                          {plugins.currentProcess === profile.name ? ' · 当前进程' : ''}
+                        </summary>
+                        <div className="inventory-list">
+                          {profile.plugins.length === 0
+                            ? <p className="surface-quiet">该 profile 没有插件目录。</p>
+                            : profile.plugins.map((plugin) => (
+                              <div key={plugin.id} className="inventory-row">
+                                <code className="surface-code">{plugin.id}</code>
+                                <div className="inventory-meta">
+                                  <Chip>{plugin.kind === 'agos' ? 'AgOS' : '宿主'}</Chip>
+                                  <Chip active={plugin.drift === false}>{pluginDriftCopy(plugin.drift)}</Chip>
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      </details>
+                    ))}
+                    {plugins.at > 0 && (
+                      <p className="u-num surface-quiet">扫描时间 {new Date(plugins.at).toLocaleString()}</p>
+                    )}
+                  </>
                 )}
               </section>
 

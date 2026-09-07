@@ -14,7 +14,9 @@ import {
   applyOptionalRerank,
   bindCatalogTrim,
   blendShortlist,
+  catalogTrimConfig,
   createSkillEvolveStore,
+  writeCatalogTrimConfig,
   lastUserQuery,
   parseSelectorSkillPick,
   proposeSkillEvolve,
@@ -109,6 +111,16 @@ test('catalog rewrite is fail-closed', () => {
   assert.equal(next.messages[0].source.entries.length, 1)
   assert.equal(next.messages[0].source.trimmed, true)
   assert.deepEqual(trimCatalogEntries(catalog, []), { ok: false, reason: 'empty-shortlist' })
+})
+
+test('catalog trim defaults on and persist is confirm-gated', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'agos-trim-cfg-'))
+  assert.equal(catalogTrimConfig(home).enabled, true)
+  const refused = await writeCatalogTrimConfig({ enabled: false }, { home })
+  assert.equal(refused.code, 'CONFIRM_REQUIRED')
+  const written = await writeCatalogTrimConfig({ enabled: false, confirm: true }, { home })
+  assert.equal(written.ok, true)
+  assert.equal(catalogTrimConfig(home).enabled, false)
 })
 
 test('trim hook calls next first and leaves the decision when disabled', async () => {

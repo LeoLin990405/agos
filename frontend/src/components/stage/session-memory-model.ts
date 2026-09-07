@@ -1,5 +1,5 @@
 export type SessionMemoryKind = 'fact' | 'constraint' | 'preference' | 'rejected';
-export type SessionMemoryStatus = 'empty' | 'extracting' | 'ready';
+export type SessionMemoryStatus = 'empty' | 'extracting' | 'ready' | 'degraded';
 
 export interface SessionMemoryItem {
   id: string;
@@ -34,7 +34,7 @@ const PAYLOAD_KEYS = ['version', 'sessionId', 'status', 'items', 'counts', 'skip
 const ITEM_KEYS = ['id', 'kind', 'text', 'importance', 'sourceTurn', 'createdAt'] as const;
 const COUNT_KEYS = ['total', 'fact', 'constraint', 'preference', 'rejected'] as const;
 const KINDS: readonly SessionMemoryKind[] = ['fact', 'constraint', 'preference', 'rejected'];
-const STATUSES: readonly SessionMemoryStatus[] = ['empty', 'extracting', 'ready'];
+const STATUSES: readonly SessionMemoryStatus[] = ['empty', 'extracting', 'ready', 'degraded'];
 
 export class SessionMemorySchemaError extends Error {
   constructor() {

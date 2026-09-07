@@ -93,6 +93,7 @@ test('last user query skips catalog injections', () => {
   assert.equal(lastUserQuery([
     { role: 'user', content: [{ type: 'text', text: '整理收件箱' }] },
     { role: 'user', source: { kind: 'skill-catalog' }, content: [{ type: 'text', text: 'available_skills' }] },
+    { role: 'user', source: { kind: 'session-memory' }, content: [{ type: 'text', text: '不要改 fold' }] },
   ]), '整理收件箱');
   assert.equal(normalizeEvolveLabel(' Inbox Triage '), 'inbox-triage');
   assert.equal(CALL_IS_NOT_VERDICT_COPY.includes('不是胜负'), true);

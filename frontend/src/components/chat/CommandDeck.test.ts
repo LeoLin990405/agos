@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  CONTINUE_PROMPT,
   buildCommandDeckMessage,
+  canEmptySubmitContinue,
   selectAsrSegments,
   extractMultimodalMessageId,
   remainingDraftAfterSend,
@@ -56,6 +58,28 @@ test('empty composer stays inert while text-only behavior remains one text part'
     buildCommandDeckMessage(' 普通消息 ', createImageAttachmentSnapshot([]))?.parts,
     [{ type: 'text', text: '普通消息' }],
   );
+});
+
+test('empty submit continue only when history is live, non-empty, and idle', () => {
+  assert.equal(canEmptySubmitContinue({
+    hasActiveSession: true, historyReady: true, historyCount: 3, running: false,
+  }), true);
+  assert.equal(canEmptySubmitContinue({
+    hasActiveSession: true, historyReady: true, historyCount: 3, running: true,
+  }), false);
+  assert.equal(canEmptySubmitContinue({
+    hasActiveSession: true, historyReady: false, historyCount: 3, running: false,
+  }), false);
+  assert.equal(canEmptySubmitContinue({
+    hasActiveSession: true, historyReady: true, historyCount: 0, running: false,
+  }), false);
+  assert.equal(canEmptySubmitContinue({
+    hasActiveSession: false, historyReady: true, historyCount: 3, running: false,
+  }), false);
+  const continued = buildCommandDeckMessage('  ', createImageAttachmentSnapshot([]), [], { emptyAsContinue: true });
+  assert.deepEqual(continued?.parts, [{ type: 'text', text: CONTINUE_PROMPT }]);
+  assert.equal(continued?.text, CONTINUE_PROMPT);
+  assert.equal(buildCommandDeckMessage('  ', createImageAttachmentSnapshot([]), [], { emptyAsContinue: false }), null);
 });
 
 test('W22(b) provenance: 只保留仍在提交文本里的 ASR 片段;全被改写/删除则不带 provenance 字段', () => {

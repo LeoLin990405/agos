@@ -47,6 +47,11 @@ export interface CommandDeckProps {
    * 组件自己不碰 deck 之外的 DOM;没给回调就退化成不可点的强调态。
    */
   onFocusApproval?: () => void;
+  /**
+   * 当前会话已有历史且未在跑时,空提交发送「继续」。
+   * 由 ChatPage 按 fold 相位 / running 实值计算,组件自己不猜。
+   */
+  canContinue?: boolean;
 }
 
 let multimodalMessageSequence = 0;
@@ -101,14 +106,35 @@ export function selectAsrSegments(submittedText: string, segments: readonly AsrS
   return segments.filter((s) => isAsrEvidence(s.text) && submittedText.includes(s.text.trim()));
 }
 
+/** 空提交继续：补发给宿主的原文。不是自动续跑，只在用户点发送/继续时发出。 */
+export const CONTINUE_PROMPT = '继续';
+
+/** 有已折叠出的历史、会话当前没在跑，空提交才变成「继续」。空会话 / 折叠中 / 运行中一律不发。 */
+export function canEmptySubmitContinue(input: {
+  hasActiveSession: boolean;
+  historyReady: boolean;
+  historyCount: number;
+  running: boolean;
+}): boolean {
+  return input.hasActiveSession && input.historyReady && input.historyCount > 0 && !input.running;
+}
+
 export function buildCommandDeckMessage(
   inputText: string,
   snapshot: ImageAttachmentSnapshot,
   asrSegments: readonly AsrSegment[] = [],
+  options: { emptyAsContinue?: boolean } = {},
 ): CommandDeckMessage | null {
   const text = inputText.trim();
   const imageCount = snapshot.items.length;
-  if (text === '' && imageCount === 0) return null;
+  if (text === '' && imageCount === 0) {
+    if (options.emptyAsContinue !== true) return null;
+    return {
+      text: CONTINUE_PROMPT,
+      parts: [{ type: 'text', text: CONTINUE_PROMPT }],
+      images: [],
+    };
+  }
   const asr = selectAsrSegments(text, asrSegments);
   const optimisticId = imageCount > 0 ? nextMultimodalMessageId() : undefined;
   // fold 当前只投影 text part；把轻量占位写进同一条用户消息，刷新后仍能知道曾带图。
@@ -263,11 +289,13 @@ export const CommandDeck: React.FC<CommandDeckProps> = ({
   onAnalyzeImage,
   sessionId,
   onFocusApproval,
+  canContinue = false,
 }) => {
   const [text, setText] = useState('');
   const [swarmMode, setSwarmMode] = useState(true);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState('');
+  const [imageCount, setImageCount] = useState(0);
   const imageInputRef = useRef<ImageAttachmentsHandle>(null);
   const sendInFlightRef = useRef(false);
   const mountedRef = useRef(true);
@@ -296,7 +324,8 @@ export const CommandDeck: React.FC<CommandDeckProps> = ({
         optimisticImages: [],
       };
       const sendSeq = asrSeqRef.current;
-      const message = buildCommandDeckMessage(text, snapshot, asrSegmentsRef.current);
+      const emptyAsContinue = canContinue && text.trim() === '' && snapshot.items.length === 0;
+      const message = buildCommandDeckMessage(text, snapshot, asrSegmentsRef.current, { emptyAsContinue });
       if (message === null) return;
       const submittedText = text;
       const result = await onSend?.(message);
@@ -311,6 +340,7 @@ export const CommandDeck: React.FC<CommandDeckProps> = ({
       // 发送开始前到达的 ASR 片段无论有没有进文本都清掉(被删掉/改写的不能跨消息滞留);发送中才到的留给下一条。
       asrSegmentsRef.current = asrSegmentsRef.current.filter((s) => s.seq >= sendSeq);
       imageInputRef.current?.clear();
+      setImageCount(0);
     } catch (error) {
       if (mountedRef.current) setSendError(String((error as Error)?.message ?? error));
     } finally {
@@ -342,7 +372,9 @@ export const CommandDeck: React.FC<CommandDeckProps> = ({
       >
         <textarea
           className="chat-textarea"
-          placeholder="输入需求、执行指令，或使用 / 唤起工具与技能..."
+          placeholder={canContinue
+            ? '输入新指令，或空提交发送「继续」…'
+            : '输入需求、执行指令，或使用 / 唤起工具与技能...'}
           value={text}
           disabled={sending}
           onChange={(event) => setText(event.target.value)}
@@ -356,6 +388,7 @@ export const CommandDeck: React.FC<CommandDeckProps> = ({
           ref={imageInputRef}
           disabled={sending}
           onAnalyze={onAnalyzeImage}
+          onChange={(snapshot) => setImageCount(snapshot.items.length)}
         />
 
         <div className="input-deck-footer">
@@ -391,8 +424,12 @@ export const CommandDeck: React.FC<CommandDeckProps> = ({
               size="sm"
               onClick={() => { void handleSend(); }}
               disabled={sending}
+              title={canContinue && text.trim() === '' && imageCount === 0
+                ? '空输入将发送「继续」，接着当前会话'
+                : undefined}
+              aria-label={canContinue && text.trim() === '' && imageCount === 0 ? '继续当前会话' : '发送'}
             >
-              <span>{sending ? '发送中…' : '发送'}</span>
+              <span>{sending ? '发送中…' : canContinue && text.trim() === '' && imageCount === 0 ? '继续' : '发送'}</span>
               <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <line x1="22" y1="2" x2="11" y2="13" />
                 <polygon points="22 2 15 22 11 13 2 9 22 2" />

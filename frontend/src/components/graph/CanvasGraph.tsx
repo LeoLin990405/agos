@@ -1,6 +1,13 @@
 import React, { useRef, useEffect } from 'react';
 import type { MemoryNodeData, MemoryEdgeData } from './mock-graph-data';
 import type { MemoryNodeType } from '@/design-system/tokens';
+import type { GraphRemainder } from '@/pages/memory-graph-engineering';
+
+interface RemainderGeom {
+  x: number;
+  y: number;
+  r: number;
+}
 
 interface SimNode extends MemoryNodeData {
   x: number;
@@ -56,8 +63,10 @@ export interface CanvasGraphProps {
   pathIds?: readonly string[];
   typeFilter?: string;
   isSimulating?: boolean;
+  remainder?: GraphRemainder;
   onSelectNode: (node: MemoryNodeData | null) => void;
   onHoverNode: (node: MemoryNodeData | null) => void;
+  onRevealRemainder?: () => void;
 }
 
 export const CanvasGraph: React.FC<CanvasGraphProps> = ({
@@ -71,8 +80,10 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
   pathIds = NO_PATH,
   typeFilter = 'all',
   isSimulating = true,
+  remainder,
   onSelectNode,
   onHoverNode,
+  onRevealRemainder,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const simNodesRef = useRef<SimNode[]>([]);
@@ -82,32 +93,42 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
   const isPanningRef = useRef(false);
   const panStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const kickLoopRef = useRef<() => void>(() => {});
+  const remainderGeomRef = useRef<RemainderGeom | null>(null);
+  const remainderHoverRef = useRef(false);
+  const autofitDoneRef = React.useRef(false);
 
-  // 初始化物理仿真节点
+  // 初始化物理仿真节点；已在场的点保住坐标，避免长辐条时整盘重排
   useEffect(() => {
     const width = 1000;
     const height = 700;
     const now = Date.now();
     const SEVEN_DAYS = 7 * 86400000;
+    const prev = new Map(simNodesRef.current.map((node) => [node.id, node]));
+    const kept = rawNodes.filter((node) => prev.has(node.id)).length;
+    const anchor = selectedNodeId === undefined ? undefined : prev.get(selectedNodeId);
 
     simNodesRef.current = rawNodes.map((n, i) => {
-      const angle = (i / rawNodes.length) * Math.PI * 2;
-      const dist = 220 + Math.random() * 520; // 大幅铺开:428 节点需要空间(Obsidian 的"星空"来自留白)
+      const radius = Math.max(2.6, Math.min(9, 2.6 + Math.sqrt(n.outDegree) * 1.7));
+      const isRecent = now - n.mtime < SEVEN_DAYS;
+      const existing = prev.get(n.id);
+      if (existing !== undefined) {
+        return { ...existing, ...n, radius, isRecent, x: existing.x, y: existing.y, vx: existing.vx, vy: existing.vy };
+      }
+      const angle = (i / Math.max(1, rawNodes.length)) * Math.PI * 2;
+      const around = anchor ?? { x: width / 2, y: height / 2 };
+      const dist = anchor === undefined ? 220 + Math.random() * 520 : 72 + Math.random() * 36;
       return {
         ...n,
-        x: width / 2 + Math.cos(angle) * dist + (Math.random() - 0.5) * 50,
-        y: height / 2 + Math.sin(angle) * dist + (Math.random() - 0.5) * 50,
+        x: around.x + Math.cos(angle) * dist + (Math.random() - 0.5) * 18,
+        y: around.y + Math.sin(angle) * dist + (Math.random() - 0.5) * 18,
         vx: 0,
         vy: 0,
-        radius: Math.max(2.6, Math.min(9, 2.6 + Math.sqrt(n.outDegree) * 1.7)), // Obsidian 星点:小而密,sqrt 缩放
-        isRecent: now - n.mtime < SEVEN_DAYS,
+        radius,
+        isRecent,
       };
     });
-  }, [rawNodes]);
-
-  // 首帧自动取景(一次):包围盒适配画布,留 12% 边距
-  const autofitDoneRef = React.useRef(false);
-  useEffect(() => { autofitDoneRef.current = false; }, [rawNodes]);
+    if (kept === 0) autofitDoneRef.current = false;
+  }, [rawNodes, selectedNodeId]);
 
   // 动画与物理主循环
   useEffect(() => {
@@ -359,7 +380,7 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
         ctx.beginPath();
         ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
         const dimMix = isDimmed ? focusT : 0; // 0=正常 1=完全沉底
-        ctx.globalAlpha = appearT * (1 - dimMix * 0.85);
+        ctx.globalAlpha = appearT * (1 - dimMix * 0.78);
         ctx.fillStyle = color;
         ctx.fill();
         ctx.globalAlpha = appearT;
@@ -391,6 +412,42 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
         }
       });
 
+      const remainderAnchor = remainder === undefined ? undefined : nodeMap.get(remainder.anchorId);
+      if (remainder !== undefined && remainderAnchor !== undefined) {
+        const marker: RemainderGeom = {
+          x: remainderAnchor.x + remainderAnchor.radius + 34,
+          y: remainderAnchor.y - remainderAnchor.radius - 16,
+          r: 13,
+        };
+        remainderGeomRef.current = marker;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(remainderAnchor.x, remainderAnchor.y);
+        ctx.lineTo(marker.x, marker.y);
+        ctx.strokeStyle = remainderHoverRef.current ? 'rgba(103, 158, 254, 0.55)' : 'rgba(255, 255, 255, 0.22)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(marker.x, marker.y, marker.r, 0, Math.PI * 2);
+        ctx.fillStyle = remainderHoverRef.current ? 'rgba(20, 24, 32, 0.92)' : 'rgba(20, 24, 32, 0.72)';
+        ctx.fill();
+        ctx.strokeStyle = remainderHoverRef.current ? 'rgba(103, 158, 254, 0.95)' : 'rgba(255, 255, 255, 0.42)';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.88)';
+        ctx.font = '600 10px -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`+${remainder.count}`, marker.x, marker.y);
+        ctx.textBaseline = 'alphabetic';
+        ctx.font = '9px -apple-system, sans-serif';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+        ctx.fillText('其余', marker.x, marker.y + marker.r + 11);
+      } else {
+        remainderGeomRef.current = null;
+      }
+
       ctx.restore();
       const interacting = draggingNodeRef.current !== null || isPanningRef.current;
       const settling = appearT < 1 || Math.abs(focusTarget - focusT) > 0.02;
@@ -416,6 +473,9 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
     matchedNodeIds,
     pathIds,
     rawEdges,
+    remainder,
+    remainder?.anchorId,
+    remainder?.count,
     searchQuery,
     selectedNodeId,
     typeFilter,
@@ -441,13 +501,30 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
   }, []);
 
   // 鼠标交互 (Hover / Drag / Zoom / Pan)
-  const getSimNodeAtPos = (clientX: number, clientY: number): SimNode | null => {
+  const worldPos = (clientX: number, clientY: number): { x: number; y: number } | null => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
     const { x: tx, y: ty, k } = transformRef.current;
-    const x = (clientX - rect.left - tx) / k;
-    const y = (clientY - rect.top - ty) / k;
+    return {
+      x: (clientX - rect.left - tx) / k,
+      y: (clientY - rect.top - ty) / k,
+    };
+  };
+
+  const getRemainderAtPos = (clientX: number, clientY: number): boolean => {
+    const geom = remainderGeomRef.current;
+    const pos = worldPos(clientX, clientY);
+    if (geom === null || pos === null) return false;
+    const dx = geom.x - pos.x;
+    const dy = geom.y - pos.y;
+    return dx * dx + dy * dy <= (geom.r + 6) * (geom.r + 6);
+  };
+
+  const getSimNodeAtPos = (clientX: number, clientY: number): SimNode | null => {
+    const pos = worldPos(clientX, clientY);
+    if (pos === null) return null;
+    const { x, y } = pos;
 
     const simNodes = simNodesRef.current;
     for (let i = simNodes.length - 1; i >= 0; i--) {
@@ -483,6 +560,19 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
       return;
     }
 
+    const overRemainder = getRemainderAtPos(e.clientX, e.clientY);
+    if (overRemainder !== remainderHoverRef.current) {
+      remainderHoverRef.current = overRemainder;
+    }
+    const canvas = canvasRef.current;
+    if (canvas) canvas.style.cursor = overRemainder || getSimNodeAtPos(e.clientX, e.clientY) ? 'pointer' : 'default';
+    if (overRemainder) {
+      if (hoveredNodeRef.current !== null) {
+        hoveredNodeRef.current = null;
+        onHoverNode(null);
+      }
+      return;
+    }
     const hit = getSimNodeAtPos(e.clientX, e.clientY);
     if (hit !== hoveredNodeRef.current) {
       hoveredNodeRef.current = hit;
@@ -492,6 +582,10 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     kickLoopRef.current();
+    if (getRemainderAtPos(e.clientX, e.clientY)) {
+      onRevealRemainder?.();
+      return;
+    }
     const hit = getSimNodeAtPos(e.clientX, e.clientY);
     if (hit) {
       draggingNodeRef.current = hit;
@@ -510,6 +604,9 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
   const handleMouseLeave = () => {
     handleMouseUp();
     hoveredNodeRef.current = null;
+    remainderHoverRef.current = false;
+    const canvas = canvasRef.current;
+    if (canvas) canvas.style.cursor = 'default';
     onHoverNode(null);
     kickLoopRef.current();
   };
@@ -565,7 +662,9 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
         className="graph-canvas"
         role="application"
         aria-roledescription="交互式记忆图谱"
-        aria-label={`记忆图谱，共 ${rawNodes.length} 个节点。使用方向键浏览，Home 或 End 跳转，Escape 清除选择。`}
+        aria-label={remainder
+          ? `记忆图谱，共 ${rawNodes.length} 个节点。${remainder.copy}。点击其余标记展开下一批。再点枢纽收起辐条。方向键浏览，Escape 清除选择。`
+          : `记忆图谱，共 ${rawNodes.length} 个节点。再点枢纽收起辐条。使用方向键浏览，Home 或 End 跳转，Escape 清除选择。`}
         tabIndex={0}
         onMouseMove={handleMouseMove}
         onMouseDown={handleMouseDown}
@@ -580,7 +679,9 @@ export const CanvasGraph: React.FC<CanvasGraphProps> = ({
         aria-live="polite"
         style={{ position: 'absolute', width: '1px', height: '1px', padding: 0, margin: '-1px', overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 }}
       >
-        {selectedAccessibleNode ? `已选择 ${selectedAccessibleNode.id}，类型 ${selectedAccessibleNode.sourceType}` : '未选择记忆节点'}
+        {remainder
+          ? `${selectedAccessibleNode ? `已选择 ${selectedAccessibleNode.id}。` : ''}${remainder.copy}`
+          : selectedAccessibleNode ? `已选择 ${selectedAccessibleNode.id}，类型 ${selectedAccessibleNode.sourceType}` : '未选择记忆节点'}
       </span>
     </div>
   );

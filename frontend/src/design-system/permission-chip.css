@@ -36,7 +36,7 @@
     border-color 0.3s ease-in-out,
     color 0.3s ease-in-out,
     box-shadow 0.3s ease-in-out;
-  animation: pc-enter var(--u-dur-base) var(--u-ease-swift) both;
+  animation: agos-rise-in var(--u-dur-base) var(--u-ease-out) both;
 }
 
 .pc-capsule__icon {
@@ -159,7 +159,7 @@ button.pc-capsule:active {
   font-size: 11.5px;
   font-weight: 500;
   line-height: 1.4;
-  animation: pc-enter var(--u-dur-base) var(--u-ease-swift) both;
+  animation: agos-rise-in var(--u-dur-base) var(--u-ease-out) both;
 }
 
 .pc-approval-resolved.is-allowed {

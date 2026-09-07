@@ -29,38 +29,18 @@ function isPositiveInt(v) {
   return Number.isInteger(v) && v > 0
 }
 
-export const SELECTOR_IO_CONTRACT = [
-  '输入是一个 JSON 对象：task（任务描述）、role（期望角色）、candidates（候选数组，每项含 id/role/description）、evidence（可选历史摘要）。',
-  '只从 candidates[].id 里选一个 pick；不要发明不在名单里的 id。',
-  'role 只能是 planner、implementer、reviewer、fixer 之一。',
-  'label 必须是短 kebab 任务类（如 coding、code-review、planning、sql、docs、research），不要复述整段任务。',
-  '仅输出如下 JSON（可包在 ``` 代码围栏中，也可带少量前后说明文本）：',
-  '{"pick":"<candidate id>","role":"<role>","confidence":0.0,"reason":"一句理由","alternates":[],"label":"<kebab>"}',
-].join('\n')
+import {
+  composeSelectorSystemPrompt,
+  DEFAULT_SYSTEM_PROMPT,
+  SELECTOR_IO_CONTRACT,
+  USER_RULES_HEADER,
+} from '../../dsh-agos/lib/agent-prompts.js'
 
-const DEFAULT_BODY = [
-  '你是 AgOS 的模型选择器，不是发起方 agent。',
-  '根据任务描述与候选能力，选出最合适的一个候选。',
-  '只依据给定的结构化事实；存疑时降低 confidence，不要编造候选能力。',
-]
-export const DEFAULT_SYSTEM_PROMPT = DEFAULT_BODY.join('\n') + '\n' + SELECTOR_IO_CONTRACT
-
-export const USER_RULES_HEADER =
-  '【部署方补充规则】以下规则由部署方给出，是对上文一般性指引的细化与补充（遇到冲突以下文为准）；但它不改变输出格式——最终仍必须按文末契约输出 JSON。'
-
-function stripTrailingContract(text) {
-  const t = text.trimEnd()
-  if (t.endsWith(SELECTOR_IO_CONTRACT)) return t.slice(0, t.length - SELECTOR_IO_CONTRACT.length).trimEnd()
-  return t
-}
-
-export function composeSelectorSystemPrompt(userPrompt) {
-  const user = typeof userPrompt === 'string' ? userPrompt.trim() : ''
-  if (user === '') return DEFAULT_SYSTEM_PROMPT
-  if (user === DEFAULT_SYSTEM_PROMPT.trim()) return DEFAULT_SYSTEM_PROMPT
-  const body = stripTrailingContract(DEFAULT_SYSTEM_PROMPT)
-  const rules = stripTrailingContract(user)
-  return [body, USER_RULES_HEADER, rules, SELECTOR_IO_CONTRACT].join('\n\n')
+export {
+  composeSelectorSystemPrompt,
+  DEFAULT_SYSTEM_PROMPT,
+  SELECTOR_IO_CONTRACT,
+  USER_RULES_HEADER,
 }
 
 /**

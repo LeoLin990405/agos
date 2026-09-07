@@ -1,10 +1,9 @@
 // Port of FuguNano engine/src/domain/allocation-score.ts.
 // Bookkeeping / offline ranking only — do not wire into live dispatch this round.
 import { UNLISTED_RANK } from './allocation.js'
+import { betaPrior, q6 } from '../../dsh-agos/lib/allocate-kernel.js'
 
-export const betaPrior = (index, listSize) => (listSize - index) / (listSize + 1)
-
-export const q6 = (x) => Math.round(x * 1e6)
+export { betaPrior, q6 }
 
 export function betaPseudoCounts(p0, kappa) {
   return { a0: kappa * p0 + 1, b0: kappa * (1 - p0) + 1 }

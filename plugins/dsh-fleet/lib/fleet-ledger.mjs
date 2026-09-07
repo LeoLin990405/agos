@@ -2,36 +2,18 @@ import * as nodeFs from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { scrubSecrets as redactSecrets } from '../../dsh-agos/lib/secrets-gate.js'
 
 export const DEFAULT_FLEET_LEDGER_PATH = join(homedir(), '.dsh', 'logs', 'fleet', 'runs.jsonl')
 export const FLEET_LEDGER_VERSION = 1
 export const DEFAULT_LEDGER_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
 export const DEFAULT_LEDGER_MIN_EVENTS = 500
 
-const REDACTED = '«redacted»'
 const TERMINAL_REATTACH = new Set(['interrupted', 'lost'])
 
-function scrubString(value) {
-  return String(value)
-    .replace(/sk-[A-Za-z0-9_-]{16,}/g, REDACTED)
-    .replace(/(Bearer\s+)\S+/gi, `$1${REDACTED}`)
-    .replace(/([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)\s*=\s*)(?:"[^"]*"|'[^']*'|\S+)/g, `$1${REDACTED}`)
-}
-
 /** Recursively redact values before they reach either disk or an HTTP response. */
-export function scrubSecrets(value, seen = new WeakSet()) {
-  if (typeof value === 'string') return scrubString(value)
-  if (value === null || typeof value !== 'object') return value
-  if (seen.has(value)) return undefined
-  seen.add(value)
-  if (Array.isArray(value)) {
-    const out = []
-    for (const item of value) out.push(scrubSecrets(item, seen))
-    return out
-  }
-  const out = {}
-  for (const [key, item] of Object.entries(value)) out[scrubString(key)] = scrubSecrets(item, seen)
-  return out
+export function scrubSecrets(value, seen) {
+  return redactSecrets(value, seen)
 }
 
 function clip(value, limit) {

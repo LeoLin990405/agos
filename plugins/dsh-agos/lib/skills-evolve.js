@@ -1,28 +1,32 @@
 // Skill self-evolution: FuguNano Beta-Bernoulli + lexical bench.
 // Outcomes are operator (or later session) verdicts. skill() calls are not ok/fail.
-// Small-model rerank is opt-in and fail-closed. Catalog trim is off unless enabled.
+// Small-model rerank is opt-in and fail-closed. Catalog trim is fail-closed.
 import { existsSync, readFileSync } from 'node:fs'
-import { appendFile, mkdir, readFile } from 'node:fs/promises'
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-export const EVOLVE_KAPPA = 4
-export const EVOLVE_UNLISTED_PRIOR = 0.15
+import {
+  ALLOCATE_KAPPA,
+  ALLOCATE_POSTERIOR_COPY,
+  ALLOCATE_UNLISTED_PRIOR,
+  betaPrior,
+  posteriorMean,
+} from './allocate-kernel.js'
+import { SKILL_RERANK_SYSTEM } from './agent-prompts.js'
+
+export const EVOLVE_KAPPA = ALLOCATE_KAPPA
+export const EVOLVE_UNLISTED_PRIOR = ALLOCATE_UNLISTED_PRIOR
 export const SHORTLIST_K = 8
 export const LEXICAL_METHOD = 'lexical-overlap'
-export const POSTERIOR_METHOD_COPY = '经验后验，不是模型推荐'
+export const POSTERIOR_METHOD_COPY = ALLOCATE_POSTERIOR_COPY
 export const CALL_IS_NOT_VERDICT_COPY = 'skill() 调用不是胜负'
 export const CATALOG_TRIM_OFF_COPY = '本跳目录裁剪未启用：宿主仍注入全量 catalog'
 export const CATALOG_TRIM_ON_COPY = '本跳目录按短名单替换，失败回退全量'
 export const RERANK_UNAVAILABLE_COPY = '小模型重排未采集：宿主没有推荐接口'
 export const RERANK_FAIL_CLOSED_COPY = '小模型提案失败，已回退词面+后验'
 export const RERANK_OPT_IN_COPY = '小模型只提案短名单，不写路由账本'
-export const SKILL_RERANK_SYSTEM = [
-  '你是技能短名单提案器，不是路由选择器，也不写 /api/agos/routes/decide。',
-  '只从 candidates[].id 里选一个 pick；不要发明名单外的 id。',
-  'label 必须是短 kebab 任务类。',
-  '仅输出 JSON：{"pick":"<id>","confidence":0.0,"reason":"一句理由","label":"<kebab>"}',
-].join('\n')
+export { SKILL_RERANK_SYSTEM, betaPrior, posteriorMean }
 export const NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
 export function normalizeEvolveLabel(value) {
@@ -78,10 +82,6 @@ export function shortlistSkills(catalog, query, limit = SHORTLIST_K) {
     .slice(0, limit)
 }
 
-export function betaPrior(index, listSize) {
-  return (listSize - index) / (listSize + 1)
-}
-
 export function evidenceFor(state, label, skill) {
   let s = 0
   let f = 0
@@ -91,12 +91,6 @@ export function evidenceFor(state, label, skill) {
     if (row.result === 'fail') f += 1
   }
   return { s, f }
-}
-
-export function posteriorMean(prior, evidence, kappa = EVOLVE_KAPPA) {
-  const a0 = kappa * prior + 1
-  const b0 = kappa * (1 - prior) + 1
-  return (a0 + evidence.s) / (a0 + evidence.s + b0 + evidence.f)
 }
 
 export function blendShortlist(lexical, state, label, options = {}) {
@@ -169,7 +163,7 @@ export function lastUserQuery(messages) {
     const message = messages[index]
     if (!message || typeof message !== 'object') continue
     const kind = message.source && message.source.kind
-    if (kind === 'skill-catalog' || kind === 'skill-invocation') continue
+    if (kind === 'skill-catalog' || kind === 'skill-invocation' || kind === 'session-memory') continue
     if (message.role !== undefined && message.role !== 'user') continue
     const text = flattenMessageText(message.content).replace(/\s+/g, ' ').trim()
     if (text !== '') return text
@@ -288,19 +282,43 @@ function extractJsonObject(text) {
 }
 
 export function catalogTrimConfig(home = homedir()) {
+  if (process.env.DSH_AGOS_CATALOG_TRIM === '0') return { enabled: false, maxEntries: SHORTLIST_K }
   if (process.env.DSH_AGOS_CATALOG_TRIM === '1') return { enabled: true, maxEntries: SHORTLIST_K }
   const path = join(home, '.dsh', 'agos', 'catalog-trim.json')
-  if (!existsSync(path)) return { enabled: false, maxEntries: SHORTLIST_K }
+  if (!existsSync(path)) return { enabled: true, maxEntries: SHORTLIST_K }
   try {
     const raw = JSON.parse(readFileSync(path, 'utf8'))
     return {
-      enabled: raw && raw.enabled === true,
+      enabled: raw && raw.enabled !== false,
       maxEntries: Number.isInteger(raw && raw.maxEntries) && raw.maxEntries > 0
         ? Math.min(raw.maxEntries, 32)
         : SHORTLIST_K,
     }
   } catch {
-    return { enabled: false, maxEntries: SHORTLIST_K }
+    return { enabled: true, maxEntries: SHORTLIST_K }
+  }
+}
+
+export async function writeCatalogTrimConfig(input, options = {}) {
+  if (!input || input.confirm !== true) {
+    return { ok: false, status: 400, code: 'CONFIRM_REQUIRED', error: '改目录裁剪需要 confirm:true' }
+  }
+  if (typeof input.enabled !== 'boolean') {
+    return { ok: false, status: 400, code: 'INVALID_ENABLED', error: 'enabled 必须是布尔值' }
+  }
+  const home = options.home ?? homedir()
+  const maxEntries = Number.isInteger(input.maxEntries) && input.maxEntries > 0
+    ? Math.min(input.maxEntries, 32)
+    : SHORTLIST_K
+  const path = join(home, '.dsh', 'agos', 'catalog-trim.json')
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+  await writeFile(path, JSON.stringify({ enabled: input.enabled, maxEntries }, null, 2) + '\n', { mode: 0o600 })
+  return {
+    ok: true,
+    enabled: input.enabled,
+    maxEntries,
+    copy: input.enabled ? CATALOG_TRIM_ON_COPY : CATALOG_TRIM_OFF_COPY,
+    path,
   }
 }
 
@@ -423,18 +441,52 @@ export function bindCatalogTrim(ctx, options = {}) {
   const home = options.home ?? homedir()
   const store = options.store ?? createSkillEvolveStore({ home })
   const catalogOf = typeof options.catalog === 'function' ? options.catalog : async () => []
+  const evidence = options.evidence
+  const resolveId = typeof options.sessionId === 'function'
+    ? options.sessionId
+    : (event) => {
+      const agent = event && event.agent
+      if (agent && typeof agent.id === 'string') return agent.id.trim()
+      return typeof event?.sessionId === 'string' ? event.sessionId.trim() : ''
+    }
   const handler = async (event, next) => {
     const decision = await next()
+    const sessionId = resolveId(event)
     const trim = catalogTrimConfig(home)
-    if (!trim.enabled) return decision
+    const record = (skills) => {
+      if (sessionId !== '' && evidence && typeof evidence.record === 'function') {
+        evidence.record(sessionId, { skills })
+      }
+    }
+    if (!trim.enabled) {
+      record({ trimmed: false, query: null, served: null, copy: '目录裁剪未启用' })
+      return decision
+    }
     try {
       const messages = event && event.messages
       const query = lastUserQuery(messages)
-      if (query === '') return decision
+      if (query === '') {
+        record({ trimmed: false, query: '', served: null, copy: '本跳没有可裁剪的用户问句' })
+        return decision
+      }
       const catalog = await catalogOf(event)
       const report = await store.propose({ query, catalog })
       const names = selectTrimNames(report.hits, trim.maxEntries)
-      return rewriteCatalogDecision(decision, names)
+      const nextDecision = rewriteCatalogDecision(decision, names)
+      const catalogMessage = Array.isArray(nextDecision?.messages)
+        ? nextDecision.messages.find((message) => message && message.source && message.source.kind === 'skill-catalog')
+        : undefined
+      const served = catalogMessage && catalogMessage.source && catalogMessage.source.trimmed === true
+        && Array.isArray(catalogMessage.source.entries)
+        ? catalogMessage.source.entries.map((entry) => entry.name).filter(Boolean)
+        : null
+      record({
+        trimmed: served !== null,
+        query,
+        served,
+        copy: served ? undefined : '本跳没有技能目录消息',
+      })
+      return nextDecision
     } catch {
       return decision
     }

@@ -15,8 +15,41 @@ registerHooks({
   },
 });
 
-const { hasSnapshotOverride } = await import('./chat-transcript');
+const { hasSnapshotOverride, LiveTranscript } = await import('./chat-transcript');
 const { ApprovalPanel } = await import('@/components/chat/ApprovalPanel');
+import type { FoldedConversation } from '@/fold/model';
+
+const emptyDiag = {
+  events: 1, unknown: {}, ignored: {}, parseErrors: 0,
+  danglingToolCalls: 0, orphanToolResults: 0, compactionPrunes: 0,
+};
+
+const historySnapshot: FoldedConversation = {
+  header: undefined,
+  subagentLabel: undefined,
+  title: 'fixture',
+  items: [{
+    kind: 'assistant',
+    id: 'a1',
+    turn: 1,
+    step: 0,
+    text: '先做到这里。',
+    reasoning: '',
+    provider: 'fixture',
+    model: 'fixture',
+    at: 1,
+    streaming: false,
+  }],
+  turnsStarted: 1,
+  turnsEnded: 1,
+  lastTurnEndReason: undefined,
+  todos: [],
+  planMode: false,
+  sandboxMode: undefined,
+  approvalPolicy: undefined,
+  queuedUserTexts: [],
+  diagnostics: emptyDiag,
+};
 
 test('snapshot override distinguishes omitted, own undefined, and inherited values', () => {
   assert.equal(hasSnapshotOverride({ sessionId: 'local' }), false);
@@ -40,4 +73,31 @@ test('read-only approval exposes no actionable browser control and explains why'
 
   assert.equal((html.match(/disabled=""/g) ?? []).length, 2);
   assert.match(html, /远端审批暂不可答/);
+});
+
+test('stream-end continue appears only when idle history can accept it', () => {
+  const shown = renderToStaticMarkup(React.createElement(LiveTranscript, {
+    sessionId: 's1',
+    snapshotOverride: historySnapshot,
+    sessionRunning: false,
+    onContinue: () => undefined,
+  }));
+  assert.match(shown, /aria-label="继续当前会话"/);
+
+  const running = renderToStaticMarkup(React.createElement(LiveTranscript, {
+    sessionId: 's1',
+    snapshotOverride: historySnapshot,
+    sessionRunning: true,
+    onContinue: () => undefined,
+  }));
+  assert.doesNotMatch(running, /aria-label="继续当前会话"/);
+
+  const remote = renderToStaticMarkup(React.createElement(LiveTranscript, {
+    sessionId: 's1',
+    snapshotOverride: historySnapshot,
+    readOnly: true,
+    sessionRunning: false,
+    onContinue: () => undefined,
+  }));
+  assert.doesNotMatch(remote, /aria-label="继续当前会话"/);
 });

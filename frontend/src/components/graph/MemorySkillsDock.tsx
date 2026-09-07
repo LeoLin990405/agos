@@ -19,6 +19,7 @@ import {
   POSTERIOR_METHOD_COPY,
   type ProposeReport,
 } from '@/components/console/skills-evolve';
+import { postSkillOutcome } from '@/components/console/skills-studio-api';
 import {
   RERANK_UNAVAILABLE_COPY,
   SHORTLIST_METHOD_COPY,
@@ -53,6 +54,8 @@ export const MemorySkillsDock: React.FC<{
     whenToUse?: string;
     modelInvocable: boolean;
   }>>([]);
+  const [recordConfirm, setRecordConfirm] = useState(false);
+  const [recordNotice, setRecordNotice] = useState<string>();
 
   useEffect(() => {
     const id = sessionId?.trim() || conversationStore.activeSessionId();
@@ -88,9 +91,16 @@ export const MemorySkillsDock: React.FC<{
     <div className="mem-skills-dock">
       <div className="mem-working-head">
         <span className="mem-layer-title">技能层</span>
-        <span className="mem-layer-copy">
-          程序记忆。目录来自根并集；{SHORTLIST_METHOD_COPY}；{POSTERIOR_METHOD_COPY}；{RERANK_UNAVAILABLE_COPY}。
-        </span>
+        <div className="surface-instrument">
+          <Chip>{SHORTLIST_METHOD_COPY}</Chip>
+          <Chip>{POSTERIOR_METHOD_COPY}</Chip>
+          <Chip>{RERANK_UNAVAILABLE_COPY}</Chip>
+          <Chip>
+            {evolveResource.data === undefined
+              ? '胜负账本未采集'
+              : `胜负账本 ${evolveResource.data.evidenceRows} 行`}
+          </Chip>
+        </div>
         <div className="mem-working-actions">
           <span className="u-num" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
             {payload === undefined ? '目录未采集' : `${catalog.length} / ${payload.catalog?.length ?? 0}`}
@@ -130,6 +140,15 @@ export const MemorySkillsDock: React.FC<{
           <span className="u-microlabel">
             {evolveResource.data && evolveResource.data.matchingLabel > 0 ? POSTERIOR_METHOD_COPY : SHORTLIST_METHOD_COPY}
           </span>
+          <label className="u-microlabel">
+            <input
+              type="checkbox"
+              checked={recordConfirm}
+              onChange={(event) => setRecordConfirm(event.target.checked)}
+            />
+            确认记录人工胜负
+          </label>
+          {recordNotice !== undefined && <span className="u-microlabel">{recordNotice}</span>}
           <ul className="agc-memory-list">
             {(evolveHits.length > 0 ? evolveHits : shortlist).map((hit) => {
               const row = merged.find((item) => item.name === hit.name);
@@ -151,6 +170,46 @@ export const MemorySkillsDock: React.FC<{
                       {posterior !== undefined ? ` · 后验 ${posterior.toFixed(2)}` : ''}
                     </span>
                   </button>
+                  {query.trim() !== '' && (
+                    <div className="surface-cluster">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={!recordConfirm}
+                        onClick={() => {
+                          void postSkillOutcome({
+                            label: query.trim(),
+                            skill: row.name,
+                            result: 'ok',
+                          }).then((result) => {
+                            setRecordConfirm(false);
+                            setRecordNotice('ok' in result ? `已记录 ${row.name} / ok` : result.error);
+                            evolveResource.refresh();
+                          });
+                        }}
+                      >
+                        记胜
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={!recordConfirm}
+                        onClick={() => {
+                          void postSkillOutcome({
+                            label: query.trim(),
+                            skill: row.name,
+                            result: 'fail',
+                          }).then((result) => {
+                            setRecordConfirm(false);
+                            setRecordNotice('ok' in result ? `已记录 ${row.name} / fail` : result.error);
+                            evolveResource.refresh();
+                          });
+                        }}
+                      >
+                        记负
+                      </Button>
+                    </div>
+                  )}
                 </li>
               );
             })}

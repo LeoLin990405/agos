@@ -4,10 +4,16 @@ import type { MemoryNodeType } from '@/design-system/tokens';
 import type { ResourceStatus } from '@/lib/resource';
 import type { LinkSuggestion, MemorySearchResult } from '@/pages/memory-graph-api';
 import type { MemoryGraphSummary } from './mock-graph-data';
+import { clipDescription } from '@/components/console/skills-model';
 import {
+  collapseIds,
+  componentHubId,
   GRAPH_VIEW_MODES,
+  SEARCH_RESULT_CAP,
+  type GraphRemainder,
   type GraphViewMode,
   type MemoryComponent,
+  type MemoryDegrees,
   type SupersedesChain,
 } from '@/pages/memory-graph-engineering';
 
@@ -44,8 +50,13 @@ export interface GraphControlsProps {
   supersedesCount: number;
   largestComponentSize: number;
   components: readonly MemoryComponent[];
+  degrees?: ReadonlyMap<string, MemoryDegrees>;
   lineageChains: readonly SupersedesChain[];
   activationBySlug?: ReadonlyMap<string, number>;
+  atlasCopy?: string;
+  remainder?: GraphRemainder;
+  onRevealRemainder?: () => void;
+  onCollapseSpokes?: () => void;
 }
 
 const panelStyle: React.CSSProperties = {
@@ -60,6 +71,53 @@ const quietText: React.CSSProperties = {
   fontSize: '11.5px',
   lineHeight: 1.5,
 };
+
+function SearchHitList({
+  results,
+  activationBySlug,
+  onFocusNode,
+}: {
+  results: MemorySearchResult[];
+  activationBySlug?: ReadonlyMap<string, number>;
+  onFocusNode: (id: string) => void;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const folded = collapseIds(results.map((result) => result.slug), SEARCH_RESULT_CAP);
+  const shown = results.slice(0, folded.visible.length);
+  return (
+    <div className="mem-search-list">
+      {shown.map((result) => (
+        <button key={result.slug} type="button" className="mem-search-hit" onClick={() => onFocusNode(result.slug)}>
+          <span className="mem-search-hit-head">
+            <code>{result.slug}</code>
+            <span className="u-num">{result.score.toFixed(4)}</span>
+          </span>
+          {result.description && <span className="mem-search-hit-copy">{clipDescription(result.description, 72)}</span>}
+          <span className="u-microlabel">
+            {result.matchedBy.join(' + ')}
+            {activationBySlug?.has(result.slug)
+              ? ` · 种子激活 ${activationBySlug.get(result.slug)?.toFixed(4)}`
+              : ''}
+          </span>
+        </button>
+      ))}
+      {folded.hidden > 0 && (
+        <button type="button" className="mem-inspector-more-btn" onClick={() => setOpen((value) => !value)}>
+          {open ? '收起其余命中' : `其余 ${folded.hidden} 条命中`}
+        </button>
+      )}
+      {open && results.slice(shown.length).map((result) => (
+        <button key={`more:${result.slug}`} type="button" className="mem-search-hit" onClick={() => onFocusNode(result.slug)}>
+          <span className="mem-search-hit-head">
+            <code>{result.slug}</code>
+            <span className="u-num">{result.score.toFixed(4)}</span>
+          </span>
+          {result.description && <span className="mem-search-hit-copy">{clipDescription(result.description, 72)}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function SearchResults({
   status,
@@ -107,36 +165,7 @@ function SearchResults({
         <div style={quietText}>没有命中节点。图谱不会生成替代结果。</div>
       )}
       {results && results.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-          {results.map((result) => (
-            <button
-              key={result.slug}
-              type="button"
-              onClick={() => onFocusNode(result.slug)}
-              style={{
-                border: '1px solid var(--border-dim)',
-                borderRadius: '6px',
-                background: 'var(--bg-layer-2)',
-                color: 'var(--text-primary)',
-                padding: '8px 9px',
-                textAlign: 'left',
-                cursor: 'pointer',
-              }}
-            >
-              <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
-                <code style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{result.slug}</code>
-                <span className="u-num" style={{ ...quietText, whiteSpace: 'nowrap' }}>{result.score.toFixed(4)}</span>
-              </span>
-              {result.description && <span style={{ display: 'block', ...quietText, marginTop: '4px' }}>{result.description}</span>}
-              <span className="u-microlabel" style={{ display: 'block', marginTop: '5px' }}>
-                {result.matchedBy.join(' + ')}
-                {activationBySlug?.has(result.slug)
-                  ? ` · 种子激活 ${activationBySlug.get(result.slug)?.toFixed(4)}`
-                  : ''}
-              </span>
-            </button>
-          ))}
-        </div>
+        <SearchHitList results={results} activationBySlug={activationBySlug} onFocusNode={onFocusNode} />
       )}
     </section>
   );
@@ -253,8 +282,13 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
   supersedesCount,
   largestComponentSize,
   components,
+  degrees,
   lineageChains,
   activationBySlug,
+  atlasCopy,
+  remainder,
+  onRevealRemainder,
+  onCollapseSpokes,
 }) => {
   const hasQuery = searchQuery.trim() !== '';
   const unknownEntries = Object.entries(summary.unknownTypes).sort(([left], [right]) => left.localeCompare(right));
@@ -282,6 +316,29 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
         <span className="u-num" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
           {totalNodes > 0 ? '星图已采集 · ' : ''}{totalNodes} 节点 · {totalEdges} 边
         </span>
+        {atlasCopy !== undefined && (
+          <span className="u-num" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{atlasCopy}</span>
+        )}
+        {remainder !== undefined && onRevealRemainder !== undefined && (
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            title={remainder.copy}
+            onClick={onRevealRemainder}
+          >
+            +{remainder.count} 其余
+          </button>
+        )}
+        {onCollapseSpokes !== undefined && (
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            title="收回多出来的辐条，枢纽仍在"
+            onClick={onCollapseSpokes}
+          >
+            收起辐条
+          </button>
+        )}
       </div>
 
       {hasQuery && (
@@ -371,7 +428,7 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
       {viewMode === 'community' && (
         <section className="mem-panel" aria-label="连通分量">
           <h3 style={{ fontSize: '12px', fontWeight: 700, margin: '0 0 8px' }}>连通分量</h3>
-          <p style={quietText}>按已解析边计算。不是 GraphRAG 的 Leiden 社区摘要。</p>
+          <p style={quietText}>按已解析边计算。未选中时各取度最高一篇；点开后展开该分量，有上限。不是 GraphRAG 的 Leiden 社区摘要。</p>
           {components.filter((component) => !component.isolate).length === 0 ? (
             <p style={{ ...quietText, marginTop: '8px' }}>没有大于 1 的分量。</p>
           ) : (
@@ -381,10 +438,19 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                   key={component.id}
                   type="button"
                   className="mem-panel-row"
-                  onClick={() => { const seed = component.memberIds[0]; if (seed) onFocusNode(seed); }}
+                  onClick={() => {
+                    const seed = degrees === undefined
+                      ? undefined
+                      : componentHubId(component.memberIds, degrees);
+                    if (seed) onFocusNode(seed);
+                  }}
                 >
                   <span className="u-num">#{component.id}</span>
-                  <code>{component.memberIds.slice(0, 3).join(' · ')}</code>
+                  <code>{
+                    degrees === undefined
+                      ? '度最高篇未采集'
+                      : (componentHubId(component.memberIds, degrees) ?? '度最高篇未采集')
+                  }</code>
                   <span className="u-microlabel">{component.size} 篇</span>
                 </button>
               ))}
@@ -423,7 +489,7 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
 
       {viewMode === 'local' && (
         <section className="mem-panel" aria-label="局部检索">
-          <p style={quietText}>选择一个节点后，星图只点亮它的 2 跳邻域。这是 GraphRAG local / LightRAG 低层，不是全文生成。</p>
+          <p style={quietText}>选择一个节点后，星图画它的 2 跳邻域，有上限，其余未画。这是 GraphRAG local / LightRAG 低层，不是全文生成。</p>
         </section>
       )}
 

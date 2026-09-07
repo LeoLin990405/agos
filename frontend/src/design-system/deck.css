@@ -436,7 +436,7 @@
   width: 100%;
   margin: 0 auto;
   gap: 10px;
-  animation: surface-enter var(--u-dur-base) var(--u-ease-swift) both;
+  animation: agos-rise-in var(--u-dur-base) var(--u-ease-out) both;
 }
 .message-wrap:nth-child(1) { animation-delay: calc(0 * var(--u-stagger)); }
 .message-wrap:nth-child(2) { animation-delay: calc(1 * var(--u-stagger)); }
@@ -445,6 +445,15 @@
 .message-wrap:nth-child(5) { animation-delay: calc(4 * var(--u-stagger)); }
 .message-wrap:nth-child(6) { animation-delay: calc(5 * var(--u-stagger)); }
 .message-wrap:nth-child(n + 7) { animation: none; }
+
+.chat-continue-row {
+  display: flex;
+  justify-content: center;
+  max-width: 760px;
+  width: 100%;
+  margin: 4px auto 0;
+  animation: agos-rise-in var(--u-dur-base) var(--u-ease-out) both;
+}
 
 .message-user {
   align-self: flex-end;
@@ -1120,7 +1129,7 @@
 }
 
 .job-cascade-detail.is-open > * {
-  animation: u-rise 180ms var(--u-ease-swift) both;
+  animation: agos-rise-in var(--u-dur-base) var(--u-ease-out) both;
 }
 .job-cascade-detail.is-open > :nth-child(1) { animation-delay: 0ms; }
 .job-cascade-detail.is-open > :nth-child(2) { animation-delay: 35ms; }
@@ -1190,6 +1199,29 @@
   font-size: 15px;
   font-weight: 550;
 }
+.turn-evidence {
+  width: calc(100% - 56px);
+  max-width: 860px;
+  margin: 0 auto 8px;
+  padding: 8px 12px;
+  background: var(--bg-layer-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+}
+.turn-evidence-feedback {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  margin-top: 6px;
+}
+.turn-evidence-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  align-items: center;
+}
+
 .instrument-unit { font-size: 11px; font-weight: 500; color: var(--text-tertiary); }
 .instrument-sub {
   font-size: 11px; color: var(--text-dimmed);
