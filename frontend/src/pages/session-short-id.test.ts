@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { readdirSync, statSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { shortSessionRef } from './session-short-id.ts'
 
 /** 任务书写「会话首行」,但首行是 type:session,没有 parentSession。实际从同文件事件里取。 */
-const CORPUS_ROOT = join(homedir(), '.dsh/sessions-trash-20260820')
+// Personal corpus reads are opt-in; ordinary npm test is synthetic and portable.
+const CORPUS_ROOT = process.env.AGOS_SHORT_ID_CORPUS
 
 function walkSessionFiles(root: string, out: string[] = []): string[] {
   let entries: string[]
@@ -77,7 +77,17 @@ test('shortSessionRef uses uuid group or slug tail, not a fixed left slice', () 
   assert.equal('session-aaaaaaaa-1111-2222-3333-444444444444'.slice(0, 8), 'session-')
 })
 
-test('real parentSession ids from ~/.dsh/sessions-trash-20260820 stay distinct', () => {
+test('synthetic parent-session fixtures stay distinct without reading a personal corpus', () => {
+  const parents = [
+    ...Array.from({ length: 64 }, (_, index) => `session-${index.toString(16).padStart(8, '0')}-1234-5678-9abc-def012345678`),
+    'preset-child-switch-parent', 'preset-child-parent',
+  ]
+  assert.equal(new Set(parents.map(shortSessionRef)).size, parents.length)
+  assert.ok(parents.map(shortSessionRef).every((id) => id !== 'session-'))
+})
+
+test('explicitly selected parent-session corpus stays distinct', { skip: CORPUS_ROOT === undefined }, () => {
+  assert.ok(CORPUS_ROOT)
   const { parents, skipped } = parentSessionsFromTrash(CORPUS_ROOT)
   // 语料必须是**整个**目录,不能是被 ENOBUFS 悄悄削掉的子集(见 ZSTD_MAX_BUFFER 注释)。
   assert.deepEqual(skipped, [], `解压失败被跳过的语料文件:\n${skipped.join('\n')}`)

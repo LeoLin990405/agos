@@ -1,4 +1,5 @@
 import { createFleetLedger, scrubSecrets } from './fleet-ledger.mjs'
+import { probeLocalRun } from './local-probe.mjs'
 
 export const RUN_STATUSES = Object.freeze([
   'waking', 'queued', 'running', 'detached',
@@ -61,6 +62,9 @@ export class FleetRuntime {
     this.hostFailures = new Map()
     this.activityListeners = new Set()
     this.pumpListeners = new Set()
+    // Local subagents exist only in this process. Hydrate never re-adds them;
+    // markStart in this instance does. Restart orphans therefore probe lost.
+    this.heldLocalRuns = new Set()
     if (typeof options.onActivity === 'function') this.activityListeners.add(options.onActivity)
     if (typeof options.onPump === 'function') this.pumpListeners.add(options.onPump)
     this.timer = null
@@ -235,6 +239,8 @@ export class FleetRuntime {
     }
     Object.assign(base, runtime.patch && typeof runtime.patch === 'object' ? scrubSecrets(runtime.patch) : {})
     this.runs.set(runId, base)
+    if (TERMINAL_RUN_STATUSES.has(base.status)) this.heldLocalRuns.delete(runId)
+    else if (event.ev === 'start' && runtime.hydrating !== true && this._looksLocal(base)) this.heldLocalRuns.add(runId)
     const batch = this._batch(base.batchId, event)
     if (!batch.runIds.includes(runId)) batch.runIds.push(runId)
     if (!TERMINAL_RUN_STATUSES.has(base.status)) {
@@ -251,6 +257,7 @@ export class FleetRuntime {
   async hydrate() {
     this._ensureOpen()
     const events = await this.ledger.load()
+    this.heldLocalRuns.clear()
     this.runs.clear(); this.batches.clear(); this.runControllers.clear(); this.batchControllers.clear()
     const dispatched = new Set()
     for (const event of events) {
@@ -402,6 +409,11 @@ export class FleetRuntime {
       if (TERMINAL_RUN_STATUSES.has(run.status)) return { cancelled: false, reason: 'terminal', run: clone(run) }
       // A queued/waking run has no process; an empty runDir denotes the local
       // in-process provider, whose controller is the real cancellation handle.
+      if (this._heldInProcessLocal(run)) {
+        const pending = await this._markCancelPendingLocked(run, reason, 'local cancellation awaiting cleanup')
+        try { this.runControllers.get(run.runId)?.abort(reason) } catch {}
+        return { cancelled: false, reason: 'controller', pending: true, run: pending }
+      }
       let controllerOnly = false
       try { controllerOnly = this.isLocalExecution(clone(run)) === true } catch {}
       if (controllerOnly || (run.status !== 'running' && run.status !== 'detached')) {
@@ -509,6 +521,29 @@ export class FleetRuntime {
     return event
   }
 
+  _looksLocal(run) {
+    try { return this.isLocalRun(run) === true } catch { return false }
+  }
+
+  _heldInProcessLocal(run) {
+    if (!run || !this._looksLocal(run)) return false
+    if (this.heldLocalRuns.has(run.runId)) return true
+    try { return this.hasLiveController(run) === true } catch { return false }
+  }
+
+  _probeReplyFor(run) {
+    if (this._looksLocal(run)) {
+      return probeLocalRun({
+        run,
+        liveSet: this.heldLocalRuns,
+        controllerLookup: (candidate) => {
+          try { return this.hasLiveController(candidate) === true } catch { return false }
+        },
+      })
+    }
+    return undefined
+  }
+
   async _readSettledOutput(run) {
     if (typeof this.readOutput !== 'function') return { ok: false, error: 'readOutput is unavailable' }
     try {
@@ -562,10 +597,13 @@ export class FleetRuntime {
       let run = this.runs.get(runId)
       if (!run || TERMINAL_RUN_STATUSES.has(run.status)) return this.getRun(runId)
       if (run.status !== 'running' && run.status !== 'detached' && run.recoveryCandidate !== true) return clone(run)
-      if (typeof this.probeRun !== 'function') return clone(run)
-      let reply
-      try { reply = await this.probeRun(clone(run)) }
-      catch (error) { reply = { ok: false, error: text(error?.message ?? error) } }
+      const localReply = this._probeReplyFor(run)
+      if (typeof this.probeRun !== 'function' && !localReply) return clone(run)
+      let reply = localReply
+      if (!reply) {
+        try { reply = await this.probeRun(clone(run)) }
+        catch (error) { reply = { ok: false, error: text(error?.message ?? error) } }
+      }
       const parsed = parseProbeReply(reply)
       if (parsed.kind === 'error') {
         const failures = (this.hostFailures.get(run.host) || 0) + 1
@@ -592,6 +630,7 @@ export class FleetRuntime {
         return this._appendAndApply({ ev: 'reattach', runId, batchId: run.batchId, state: parsed.kind })
       }
       if (parsed.kind === 'alive') {
+        if (this._heldInProcessLocal(run) && (run.cancelPending || run.timeoutPending)) return clone(run)
         if (run.status === 'detached' || run.reattached !== true || run.pid !== parsed.pid) {
           await this._appendAndApply({ ev: 'reattach', runId, batchId: run.batchId, state: 'alive', pid: parsed.pid })
           run = this.runs.get(runId)
@@ -606,6 +645,16 @@ export class FleetRuntime {
           return killed.run
         }
         const overdue = run.startedAt && run.timeoutMs && this.now() - run.startedAt > run.timeoutMs
+        if (overdue && this._heldInProcessLocal(run)) {
+          // Keep the slot until runLocal has awaited both result and dispose.
+          // Do not await that settlement while holding the per-run ledger lock.
+          const pending = await this._appendAndApply({
+            ev: 'detach', runId, batchId: run.batchId, reason: 'local timeout awaiting cleanup',
+            timeoutPending: true,
+          })
+          try { this.runControllers.get(run.runId)?.abort('TIMEOUT') } catch {}
+          return pending
+        }
         if (overdue && typeof this.onTimeout === 'function') {
           try {
             const result = await this.onTimeout(clone(run), { probe: parsed })

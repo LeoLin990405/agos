@@ -5,6 +5,20 @@ export const MEMORY_UNCOLLECTED_COPY = '本跳回注未采集';
 export const SKILLS_UNCOLLECTED_COPY = '本跳技能目录未采集';
 export const PLUGINS_UNCOLLECTED_COPY = '当前进程未采集';
 
+export type TurnEvidenceId = string | number;
+
+export interface TurnEvidenceBinding {
+  turn: TurnEvidenceId;
+  step: TurnEvidenceId;
+}
+
+/** Keep host identifiers, including zero; absence must not select session-latest. */
+export function turnEvidenceId(value: unknown): string | null {
+  if (typeof value === 'number' && Number.isSafeInteger(value)) return String(value);
+  if (typeof value === 'string' && value.trim() !== '') return value.trim();
+  return null;
+}
+
 export type TurnEvidenceImpressionMethod =
   | 'lexical+posterior'
   | 'importance-recency'
@@ -41,8 +55,14 @@ export interface TurnEvidenceLane {
 
 export interface TurnEvidence {
   sessionId: string;
+  turn: string | null;
+  step: string | null;
   at: string | null;
   collected: boolean;
+  observed: boolean;
+  persisted: boolean | null;
+  durable: boolean | null;
+  persistError: string | null;
   copy: string;
   memory: TurnEvidenceLane;
   skills: TurnEvidenceLane;
@@ -100,13 +120,31 @@ export function parseTurnEvidence(value: unknown): TurnEvidence {
   const row = value as Record<string, unknown>;
   return {
     sessionId: typeof row.sessionId === 'string' ? row.sessionId : '',
+    turn: turnEvidenceId(row.turn),
+    step: turnEvidenceId(row.step),
     at: typeof row.at === 'string' ? row.at : null,
     collected: row.collected === true,
+    observed: row.observed === true,
+    persisted: typeof row.persisted === 'boolean' ? row.persisted : null,
+    durable: typeof row.durable === 'boolean' ? row.durable : null,
+    persistError: typeof row.persistError === 'string' ? row.persistError : null,
     copy: typeof row.copy === 'string' && row.copy.trim() !== '' ? row.copy : TURN_UNCOLLECTED_COPY,
     memory: lane(row.memory, MEMORY_UNCOLLECTED_COPY),
     skills: lane(row.skills, SKILLS_UNCOLLECTED_COPY),
     plugins: lane(row.plugins, PLUGINS_UNCOLLECTED_COPY),
   };
+}
+
+export function turnEvidenceMatches(
+  evidence: TurnEvidence,
+  sessionId: string,
+  binding: TurnEvidenceBinding,
+): boolean {
+  const turn = turnEvidenceId(binding.turn);
+  const step = turnEvidenceId(binding.step);
+  return sessionId.trim() !== '' && turn !== null && step !== null
+    && evidence.sessionId === sessionId.trim()
+    && evidence.turn === turn && evidence.step === step;
 }
 
 export function turnEvidenceChips(evidence: TurnEvidence): string[] {

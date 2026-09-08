@@ -6,12 +6,13 @@
 // 目的不是验模型输出质量,是验编排与接线。
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, readFileSync, readdirSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const tmp = mkdtempSync(join(tmpdir(), 'dsh-cn-plan-'))
 process.env.DSH_CN_PLAN_DIR = join(tmp, 'plans')
+process.env.DSH_CN_COUNCIL_LOG = join(tmp, 'council.jsonl')
 const PLAN_DIR = process.env.DSH_CN_PLAN_DIR
 
 // ⚠️ env 必须在 import 之前设好:PLAN_DIR 在 apply() 时读一次
@@ -198,6 +199,21 @@ const toolResult = (callId, text, isError) => ({
   type: 'tool/result',
   data: { turn: 1, step: 1, message: { id: 'm-' + callId, role: 'user', source: { kind: 'tool', callId }, content: [{ type: 'tool-result', toolCallId: callId, content: [{ type: 'text', text }], isError }] } },
 })
+const sessionWithApproval = (planMd, sessionId = 'sess-1') => {
+  const events = [
+    toolCall('c-ok', 'exit_plan_mode', { plan: planMd }),
+    toolResult('c-ok', 'Plan approved — plan mode exited; carry out the plan starting with your next step.', false),
+  ]
+  return {
+    id: sessionId,
+    snapshotEvents() { return events },
+    ownEvents() { return events },
+  }
+}
+const execWithApproval = (planMd, sessionId = 'sess-1') => {
+  const session = sessionWithApproval(planMd, sessionId)
+  return { agent: { session, id: sessionId }, signal: new AbortController().signal, callId: 'call-plan-1' }
+}
 
 test('A3: exit_plan_mode 批准 → dsh-plan 块落盘;拒绝 / 无块 / 重复结果 → 不落盘', async () => {
   const { ctx, handlers } = fakeCtx({})
@@ -258,7 +274,7 @@ test('A4: plan_run approve=true(plan JSON 直传)→ 复用 A3 落的文件 → 
   const t = tools.get('plan_run')
   assert.deepEqual(t.output.schema, { type: 'string' })
 
-  const out = await t.execute({ approve: true, plan: JSON.stringify({ steps: STEPS }) }, exec)
+  const out = await t.execute({ approve: true, plan: JSON.stringify({ steps: STEPS }) }, execWithApproval(PLAN_MD, 's-a3'))
   assert.equal(typeof out, 'string')
   assert.match(out, /<agent_swarm_result>/)
   assert.equal((out.match(/<subagent /g) || []).length, 3)
@@ -334,7 +350,9 @@ test('A4: 裸 JSON 即使 approve 也只落盘;planFile 批准后执行并记录
   assert.match(staged, /approve=true, planFile=/)
   assert.equal(sub.started.length, 0)
   const file = join(PLAN_DIR, after[after.length - 1])
-  const out = await t.execute({ planFile: file, approve: true, executor: 'doubao' }, exec)
+  const cyclicMd = '# 环与悬空依赖\n\n```dsh-plan\n' + JSON.stringify({ steps: plan.steps }) + '\n```\n'
+  const approvedExec = execWithApproval(cyclicMd)
+  const out = await t.execute({ planFile: file, approve: true, executor: 'doubao' }, approvedExec)
   assert.match(out, /依赖不存在的 zzz/)
   assert.match(out, /重复/)
   assert.match(out, /依赖成环/)
@@ -361,10 +379,26 @@ test('A4: 裸 JSON 即使 approve 也只落盘;planFile 批准后执行并记录
   assert.equal(meta0.subagents.length, 0)
   assert.match(meta0.description, /尚未执行/)
   const n0 = sub.started.length
-  const out2 = await t.execute({ planFile: file, approve: true }, exec)
+  const out2 = await t.execute({ planFile: file, approve: true }, approvedExec)
   assert.equal((out2.match(/<subagent /g) || []).length, 3)
   assert.ok(sub.started.length > n0)
   assert.equal(listPlans().length, after.length, 'planFile 路径不新建文件')
+})
+
+test('A4 note: approve=true / approvedAt 不是宿主批准(evaluatePlanApproval 保持 UNWIRED/UNAPPROVED)', async () => {
+  const { evaluatePlanApproval } = await import('../lib/plan-approval.mjs')
+  const plan = { steps: STEPS }
+  const noHost = evaluatePlanApproval({ sessionId: 'sess-1', plan })
+  assert.equal(noHost.ok, false)
+  assert.equal(noHost.code, 'UNWIRED')
+  const stamped = evaluatePlanApproval({
+    sessionId: 'sess-1',
+    plan,
+    approvalRecord: { approvedAt: '2026-09-08T10:00:00.000Z', steps: STEPS },
+  })
+  assert.equal(stamped.ok, false)
+  assert.equal(stamped.code, 'UNAPPROVED')
+  assert.equal(stamped.reason, 'approvedAt-is-not-authorization')
 })
 
 test('plan phase: 无 goal 报错;计划者返回 JSON → 存盘 → 返回 markdown 表(零行)', async () => {
@@ -387,6 +421,74 @@ test('plan phase: 无 goal 报错;计划者返回 JSON → 存盘 → 返回 mar
   assert.equal(meta.plan, null)
   // 计划者子代理用的是 planner 默认 deepseek-official
   assert.equal(sub.started[0].agentOptions.provider, 'deepseek-official')
+})
+
+test('production approval does not relabel inherited parent events as current-session approval', async () => {
+  const sub = fakeSubagents(async () => { throw new Error('must not start') })
+  const { ctx, tools } = fakeCtx({ subagents: sub })
+  apply(ctx)
+  const parent = sessionWithApproval(PLAN_MD, 'parent')
+  const child = { id: 'child', snapshotEvents: () => parent.snapshotEvents(), ownEvents: () => [] }
+  const output = await tools.get('plan_run').execute({ approve: true, plan: JSON.stringify({ steps: STEPS }) },
+    { ...exec, agent: { session: child } })
+  assert.match(output, /未执行/)
+  assert.equal(sub.started.length, 0)
+})
+
+test('production council malformed arbiter structure renders inconclusive rather than a fabricated disagreement', async () => {
+  const sub = fakeSubagents(async (rec) => rec.label === 'council:stepfun' ? '{}' : '独立答案')
+  const { ctx, tools } = fakeCtx({ subagents: sub })
+  apply(ctx)
+  const tool = tools.get('council')
+  const result = await tool.execute({ question: 'fixture', panel: ['qwen', 'doubao'], arbiter: 'stepfun' }, exec)
+  assert.equal(result.consensus, false)
+  assert.equal(result.inconclusive, true)
+  const rendered = tool.output.render({}, result).map((block) => block.text).join('\n')
+  assert.match(rendered, /未能核验/)
+  assert.doesNotMatch(rendered, /各家一致|存在分歧/)
+  const saved = JSON.parse(readFileSync(process.env.DSH_CN_COUNCIL_LOG, 'utf8').trim().split('\n').at(-1))
+  assert.equal(saved.parsedOk, false)
+  assert.equal(saved.consensus, false)
+})
+
+test('plan execution never writes old results over steps edited during execution', async () => {
+  mkdirSync(PLAN_DIR, { recursive: true })
+  const file = join(PLAN_DIR, 'plan-9100000000001.json')
+  writeFileSync(file, JSON.stringify({ sessionId: 'changed-plan', steps: STEPS }))
+  let edited = false
+  const sub = fakeSubagents(async (rec) => {
+    if (rec.label.startsWith('plan:') && !edited) {
+      edited = true
+      writeFileSync(file, JSON.stringify({ sessionId: 'changed-plan', steps: [{ ...STEPS[0], detail: 'new unapproved instruction' }] }))
+    }
+    return 'completed output'
+  })
+  const { ctx, tools } = fakeCtx({ subagents: sub })
+  apply(ctx)
+  const output = await tools.get('plan_run').execute({ approve: true, planFile: file }, execWithApproval(PLAN_MD, 'changed-plan'))
+  assert.match(output, /persisted="0"/)
+  assert.match(output, /结果未持久化/)
+  assert.match(output, /completed output/)
+  const after = JSON.parse(readFileSync(file, 'utf8'))
+  assert.equal(after.steps[0].detail, 'new unapproved instruction')
+  assert.equal(after.results, undefined)
+})
+
+test('missing plan at writeback preserves returned execution results and reports persistence failure', async () => {
+  const file = join(PLAN_DIR, 'plan-9100000000002.json')
+  writeFileSync(file, JSON.stringify({ sessionId: 'deleted-plan', steps: STEPS }))
+  let removed = false
+  const sub = fakeSubagents(async (rec) => {
+    if (rec.label.startsWith('plan:') && !removed) { removed = true; unlinkSync(file) }
+    return 'completed output'
+  })
+  const { ctx, tools } = fakeCtx({ subagents: sub })
+  apply(ctx)
+  const output = await tools.get('plan_run').execute({ approve: true, planFile: file }, execWithApproval(PLAN_MD, 'deleted-plan'))
+  assert.match(output, /persisted="0"/)
+  assert.match(output, /结果未持久化/)
+  assert.match(output, /completed output/)
+  assert.throws(() => readFileSync(file), /ENOENT/)
 })
 
 test.after(() => { try { rmSync(tmp, { recursive: true, force: true }) } catch {} })

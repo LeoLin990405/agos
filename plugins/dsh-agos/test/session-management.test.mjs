@@ -127,7 +127,16 @@ test('GET session meta soft-degrades when host archive is unavailable', async (t
   })
 })
 
-test('apply disposes every route and starts reconciliation only once across injection reruns', async () => {
+test('apply scopes fixture state to an explicit home and disposes each route across injection reruns', async (t) => {
+  const home = await mkdtemp(join(tmpdir(), 'dsh-agos-apply-test-'))
+  t.after(async () => { await rm(home, { recursive: true, force: true }) })
+  const agosRoot = join(home, '.dsh', 'agos')
+  await mkdir(agosRoot, { recursive: true })
+  await writeFile(join(agosRoot, 'turn-evidence.jsonl'), JSON.stringify({
+    sessionId: 'apply-fixture', turn: 7, step: 2,
+    memory: { enabled: true, prepended: 1, itemCount: 1, copy: 'synthetic fixture evidence' },
+  }) + '\n')
+  await writeFile(join(agosRoot, 'session-meta.json'), JSON.stringify({ pinned: ['fixture-pinned'], archived: [] }))
   const registrations = []
   let routeDisposals = 0
   let fiberDisposals = 0
@@ -197,10 +206,18 @@ test('apply disposes every route and starts reconciliation only once across inje
     },
   }
 
-  const dispose = apply(ctx)
+  const dispose = apply(ctx, { home })
   assert.equal(typeof dispose, 'function')
   assert.equal(registrations.length, 21)
   assert.equal(persistenceLists, 0)
+  const routes = new Map(registrations.map(({ path, handler }) => [path, handler]))
+  const evidenceUrl = '/api/agos/turn-evidence?sessionId=apply-fixture&turn=7&step=2'
+  routes.set(evidenceUrl, routes.get('/api/agos/turn-evidence'))
+  const fixtureEvidence = await invoke(routes, evidenceUrl, 'GET')
+  assert.equal(fixtureEvidence.json.memory.copy, 'synthetic fixture evidence')
+  assert.equal(fixtureEvidence.json.persisted, true)
+  const fixtureMeta = await invoke(routes, '/api/agos/session-meta', 'GET')
+  assert.deepEqual(fixtureMeta.json.pinned, ['fixture-pinned'])
   // Simulate Cordis satisfying the nested dependency injection after the
   // web routes are already live, then replacing a dependency implementation.
   signalReady(ready)

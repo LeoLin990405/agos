@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { scrubString } from '../../dsh-agos/lib/secrets-gate.js'
+import {
+  assertHttpBodyBytes,
+  validateHttpDispatchBody,
+  InputLimitError,
+} from '../../dsh-agos/lib/input-limits.js'
 
-const MAX_BODY_BYTES = 512 * 1024
-const MAX_ITEMS = 32
-const MAX_ITEM_CHARS = 8000
-const MAX_TIMEOUT_MS = 3_600_000
-const MAX_LABEL_CHARS = 120
 const DEFAULT_LIMIT = 30
 const MAX_LIMIT = 100
 
@@ -46,53 +46,19 @@ function scrubTree(value, scrubSecrets = defaultScrubSecrets, seen = new WeakSet
   return clean
 }
 
-function validateDispatchBody(body) {
-  if (!plainObject(body)) throw new FleetHttpError(400, 'INVALID_BODY', 'body must be a JSON object')
-  if (!Array.isArray(body.items) || body.items.length < 1 || body.items.length > MAX_ITEMS) {
-    throw new FleetHttpError(400, 'INVALID_ITEMS', `items must contain 1..${MAX_ITEMS} strings`)
+function limitToHttp(error) {
+  if (error instanceof InputLimitError) {
+    throw new FleetHttpError(error.status, error.code, error.message, error.detail)
   }
-  const items = body.items.map((item, index) => {
-    if (typeof item !== 'string' || item.trim().length === 0) {
-      throw new FleetHttpError(400, 'INVALID_ITEM', `items[${index}] must be a non-empty string`)
-    }
-    if (item.length > MAX_ITEM_CHARS) {
-      throw new FleetHttpError(400, 'ITEM_TOO_LONG', `items[${index}] exceeds ${MAX_ITEM_CHARS} characters`)
-    }
-    return item
-  })
+  throw error
+}
 
-  let hosts
-  if (body.hosts !== undefined) {
-    if (!Array.isArray(body.hosts) || body.hosts.length === 0 || body.hosts.some((host) => typeof host !== 'string' || !host.trim())) {
-      throw new FleetHttpError(400, 'INVALID_HOSTS', 'hosts must be a non-empty array of names')
-    }
-    hosts = [...new Set(body.hosts.map((host) => host.trim()))]
+function validateDispatchBody(body) {
+  try {
+    return validateHttpDispatchBody(body)
+  } catch (error) {
+    limitToHttp(error)
   }
-  let tag
-  if (body.tag !== undefined) {
-    if (typeof body.tag !== 'string' || !body.tag.trim() || body.tag.length > 64) {
-      throw new FleetHttpError(400, 'INVALID_TAG', 'tag must be a non-empty string of at most 64 characters')
-    }
-    tag = body.tag.trim()
-  }
-  if (body.wake !== undefined && typeof body.wake !== 'boolean') {
-    throw new FleetHttpError(400, 'INVALID_WAKE', 'wake must be boolean')
-  }
-  let label
-  if (body.label !== undefined) {
-    if (typeof body.label !== 'string' || !body.label.trim() || body.label.length > MAX_LABEL_CHARS) {
-      throw new FleetHttpError(400, 'INVALID_LABEL', `label must be a non-empty string of at most ${MAX_LABEL_CHARS} characters`)
-    }
-    label = body.label.trim()
-  }
-  let timeoutMs
-  if (body.timeoutMs !== undefined) {
-    if (!Number.isSafeInteger(body.timeoutMs) || body.timeoutMs < 1 || body.timeoutMs > MAX_TIMEOUT_MS) {
-      throw new FleetHttpError(400, 'INVALID_TIMEOUT', `timeoutMs must be an integer from 1 to ${MAX_TIMEOUT_MS}`)
-    }
-    timeoutMs = body.timeoutMs
-  }
-  return { items, hosts, tag, wake: body.wake !== false, label, timeoutMs, pinned: hosts !== undefined }
 }
 
 function normalizeHosts(hosts) {
@@ -329,7 +295,7 @@ async function readJsonBody(req) {
   for await (const chunk of req) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     bytes += buffer.length
-    if (bytes > MAX_BODY_BYTES) throw new FleetHttpError(413, 'BODY_TOO_LARGE', `body exceeds ${MAX_BODY_BYTES} bytes`)
+    try { assertHttpBodyBytes(bytes) } catch (error) { limitToHttp(error) }
     chunks.push(buffer)
   }
   if (!bytes) throw new FleetHttpError(400, 'EMPTY_BODY', 'body must not be empty')

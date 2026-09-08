@@ -6,7 +6,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const tmp = mkdtempSync(join(tmpdir(), 'dsh-fleet-'))
-process.env.DSH_FLEET_LEDGER_PATH = join(tmp, 'runs.jsonl')
 process.env.DSH_FLEET_SSH_STATE_DIR = join(tmp, 'ssh-state')
 // stub ssh:读 stdin 当 prompt,回 "OK[<host>] <prompt前20字>"。host = 最后一个非 -o 参数。
 const stubSsh = join(tmp, 'ssh')
@@ -41,9 +40,21 @@ const HOSTS = [
   { name: 'w2', kind: 'remote', ssh: 'w2', model: 'x', tags: ['tool-heavy'], maxConcurrency: 2, enabled: true },
 ]
 
-test('fleet_run dispatches remote items across w1/w2, aggregates', async () => {
+let caseSeq = 0
+function beginCase(t, hosts = HOSTS) {
+  const dir = mkdtempSync(join(tmp, `case-${++caseSeq}-`))
+  process.env.DSH_FLEET_LEDGER_PATH = join(dir, 'runs.jsonl')
+  process.env.DSH_FLEET_SSH_STATE_DIR = join(dir, 'ssh-state')
   const { ctx, tools } = fakeCtx()
-  apply(ctx, Config({ hosts: HOSTS }))
+  const dispose = apply(ctx, Config({ hosts }))
+  t.after(async () => {
+    await dispose()
+  })
+  return { ctx, tools, dispose }
+}
+
+test('fleet_run dispatches remote items across w1/w2, aggregates', async (t) => {
+  const { tools } = beginCase(t)
   const out = await tools.get('fleet_run').execute({ items: ['任务甲要做的事', '任务乙要做的事', '任务丙要做的事', '任务丁要做的事'] }, exec)
   assert.match(out, /<agent_swarm_result>/)
   const meta = tools.get('fleet_run').output.presentationMeta({ items: ['a','b','c','d'] }, out)
@@ -55,26 +66,23 @@ test('fleet_run dispatches remote items across w1/w2, aggregates', async () => {
   assert.equal(meta.fleet.total, '4'); assert.equal(meta.fleet.done, '4')
 })
 
-test('fleet_run include_local puts some work on the in-process host', async () => {
-  const { ctx, tools } = fakeCtx()
-  apply(ctx, Config({ hosts: HOSTS }))
+test('fleet_run include_local puts some work on the in-process host', async (t) => {
+  const { tools } = beginCase(t)
   const out = await tools.get('fleet_run').execute({ items: ['x1','x2','x3','x4','x5','x6'], include_local: true }, exec)
   const meta = tools.get('fleet_run').output.presentationMeta({ items: [1,2,3,4,5,6] }, out)
   assert.equal(meta.subagents.length, 6)
   assert.ok(meta.subagents.some((r) => r.modelLabel === 'local'), 'local 也分到了活')
 })
 
-test('fleet_run tag filter restricts hosts', async () => {
-  const { ctx, tools } = fakeCtx()
-  apply(ctx, Config({ hosts: HOSTS }))
+test('fleet_run tag filter restricts hosts', async (t) => {
+  const { tools } = beginCase(t)
   const out = await tools.get('fleet_run').execute({ items: ['a','b'], tag: 'tool-heavy' }, exec)
   const meta = tools.get('fleet_run').output.presentationMeta({ items: ['a','b'] }, out)
   assert.ok(meta.subagents.every((r) => r.modelLabel === 'w1' || r.modelLabel === 'w2'))
 })
 
-test('fleet_run surfaces a host failure as a failed row, others still complete', async () => {
-  const { ctx, tools } = fakeCtx()
-  apply(ctx, Config({ hosts: [{ name: 'boom', kind: 'remote', ssh: 'boom', tags: [], maxConcurrency: 1, enabled: true }, HOSTS[1]] }))
+test('fleet_run surfaces a host failure as a failed row, others still complete', async (t) => {
+  const { tools } = beginCase(t, [{ name: 'boom', kind: 'remote', ssh: 'boom', tags: [], maxConcurrency: 1, enabled: true }, HOSTS[1]])
   const out = await tools.get('fleet_run').execute({ items: ['t1','t2','t3','t4'] }, exec)
   const meta = tools.get('fleet_run').output.presentationMeta({ items: ['t1','t2','t3','t4'] }, out)
   const boomRows = meta.subagents.filter((r) => r.modelLabel === 'boom')
@@ -82,9 +90,8 @@ test('fleet_run surfaces a host failure as a failed row, others still complete',
   assert.ok(meta.subagents.some((r) => r.modelLabel === 'w1' && r.status === 'completed'), 'w1 仍成功')
 })
 
-test('fleet_hosts reports health via probe', async () => {
-  const { ctx, tools } = fakeCtx()
-  apply(ctx, Config({ hosts: HOSTS }))
+test('fleet_hosts reports health via probe', async (t) => {
+  const { tools } = beginCase(t)
   // probe 的 stub ssh 会回 "OK[w1] " —— 不是版本号,但 exit 0 且非 NO_DSH → ok:true(stub 不模拟 dsh --version)
   const r = await tools.get('fleet_hosts').execute({}, exec)
   assert.equal(r.hosts.length, 3)

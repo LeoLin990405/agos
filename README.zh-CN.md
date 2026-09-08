@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/界面-12%20个面-gold?style=for-the-badge" />
   <img src="https://img.shields.io/badge/插件-5-crimson?style=for-the-badge" />
   <img src="https://img.shields.io/badge/HTTP%20API%20路由-48-blue?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/单元测试-651-purple?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/测试通过-833-purple?style=for-the-badge" />
   <img src="https://img.shields.io/badge/浏览器回归-41%20项-blueviolet?style=for-the-badge" />
   <img src="https://img.shields.io/badge/License-MIT-yellowgreen?style=for-the-badge" />
 </p>
@@ -170,7 +170,7 @@ flowchart LR
 |---|---|
 | **`dsh-agos`** | 控制台核心：技能审计/工作室/进化/裁剪、概览、会话元数据、回收站、会话记忆回注与相关账本、记忆甲板、本跳证据、插件清单、SPA 静态服务 |
 | **`dsh-agos-router`** | 模型路由：CN 候选上的 LLM 选择器、规则回退、route-outcome JSONL、喂给 planner/implementer/reviewer `assemble()` 的分配后验、确认后的纯文本试跑、影子选择器 |
-| **`cn-capabilities`** | 国产模型能力层：视觉工具、语音、生图、委派、带盲仲裁的**读图议会**、`plan_run` 计划库、浏览器/CLI 工具、只读用量 |
+| **`cn-capabilities`** | 国产模型能力层：**19** 个已注册工具、视觉、语音、生图、委派、带盲仲裁的**读图议会**、`plan_run` 计划库、浏览器/CLI 工具、只读用量 |
 | **`dsh-fleet`** | homelab 多机并发：远端 `dsh --profile headless`、进程内本地子代理、显式选择的 Codex SDK 主机、网络唤醒、健康探针、每机并发、改道、产物取回、擦除后的事件台账 |
 | **`dsh-mcp-bridge`** | 最小 MCP Streamable HTTP（协议 2025-03-26），五个工具：`agos_sessions`、`agos_prompt`、`agos_result`、`agos_swarm_status`、`agos_memory_search`。只有 `agos_prompt` 会烧模型 |
 
@@ -201,13 +201,13 @@ agos/
 
 ### 4.4 钉死的宿主契约
 
-SPA 通过 `frontend/src/contract/api/` 与 DSH 宿主说话，由 `UPSTREAM.pin` 钉版本。`npm run verify` 含 `vendor:diff`。本树对准 DSH `0.1.2-rc.1`。不要静默升级 harness。
+SPA 通过 `frontend/src/contract/api/` 与 DSH 宿主说话，由 `UPSTREAM.pin` 钉在 `deepseek-harness @ a66e470204`（`0.1.2-rc.1`）。`npm run verify` 含 `vendor:diff`，比较的是**该 pin 的 git 对象**（只读 `git show` / `git archive`），不是另一个 checkout 的 live HEAD。线协议常量（`REMOTE_STREAM_MUX_PATH` = `/api/remote.mux` 与 `$events` 端点）必须与 pin 字节相等；膜上 19 个文件通过 `contract-baseline.sha256` 冻结到本轮审查的原始提交内容；这不构成完整类型兼容证明。这些文件是适配集合，不是后来 `packages/host/apiproxy/src/api` 的整树拷贝。不要静默升级 harness，也不要挪 pin。
 
 ### 4.5 甲板消费但不随仓发布的源
 
 | 消费源 | 由谁生产 | 用来做什么 |
 |---|---|---|
-| `/api/events.mux`、`/api/respond`、会话 RPC | DSH 宿主核心 | 对话流、批准、会话矩阵 |
+| `/api/remote.mux`（一个路由名；客户端仍为每条逻辑流各开一条 WebSocket）、`/api/$events/result`、会话 RPC | DSH 宿主核心 | 对话流、批准、会话矩阵 |
 | `/api/swarm/progress`、`/api/swarm/history` | 外部 swarm 插件 | 谱系树与历史 |
 | `/api/trace/sessions` | 外部 trace 插件 | 轨迹时间条 |
 | `/api/memory/*` | 外部记忆插件 | 记忆工作台星图 |
@@ -223,7 +223,7 @@ SPA 通过 `frontend/src/contract/api/` 与 DSH 宿主说话，由 `UPSTREAM.pin
 
 ### 5.1 对话流
 
-多模态会话，侧栏分钉选 / 最近 / 归档。批准是一等 UI。权限裁决注解挂在工具卡上。语音走 Web-Audio VAD 与 `POST /api/cn/asr`。删除进审计回收站。`events.mux` 断了，新建会话按钮禁用并写明原因。
+多模态会话，侧栏分钉选 / 最近 / 归档。批准是一等 UI。权限裁决注解挂在工具卡上。语音走 Web-Audio VAD 与 `POST /api/cn/asr`。删除进审计回收站。`/api/remote.mux` 断了，新建会话按钮禁用并写明原因。屏上 ReplayScrubber 只是对已 fold 快照做切片，不是事件回放。
 
 每一跳可以有**本跳证据条**：只描述这一跳的记忆回注曝光与技能目录裁剪。lane 整段替换，不 deep-merge。没有 pre-step 写成未采集，不编零。证据条不发明第一条「记有用 / 误召回」。
 
@@ -371,17 +371,17 @@ SPA 通过 `frontend/src/contract/api/` 与 DSH 宿主说话，由 `UPSTREAM.pin
 
 2026-09-08 对本树清点。零模型调用。
 
-| 包 | 测试 | 运行器 |
-|---|---|---|
-| `frontend/` | 306 | `node:test` via tsx |
-| `plugins/dsh-agos` | 121 | `node --test` |
-| `plugins/dsh-agos-router` | 78 | `node --test` |
-| `plugins/dsh-fleet` | 113 通过 / 列出 114 | `fleet.fake.test.mjs` 有已知的测后 ledger rename 拆台 flake，不当作产品回归 |
-| `plugins/cn-capabilities` | 29 | `node --test` |
-| `plugins/dsh-mcp-bridge` | 4 | `node --test` |
-| **通过合计** | **651** | `scripts/test-all.sh` |
+| 包 | 通过 / 失败 / 跳过 | 验证范围 |
+|---|---:|---|
+| `frontend/` | 365 / 0 / 1 | `npm run verify`：版本、类型、测试、构建、pin 与适配文件内容检查 |
+| `plugins/dsh-agos` | 154 / 0 / 2 | `node --test test/*.mjs`，包含 3 项性能检查 |
+| `plugins/dsh-agos-router` | 91 / 0 / 0 | HTTP、反馈与影子关联 |
+| `plugins/dsh-fleet` | 137 / 0 / 0 | 完整套件、真实多进程锁、清理生命周期 |
+| `plugins/cn-capabilities` | 82 / 0 / 0 | 计划、隔离验证与真实 macOS 沙箱 |
+| `plugins/dsh-mcp-bridge` | 4 / 0 / 0 | fake MCP |
+| **合计** | **833 / 0 / 3** | 三项私有语料检查明确跳过；另有 6 项浏览器组件交互检查 |
 
-静态锁与浏览器回归见英文 README [§10.2–10.3](README.md#102-static-locks)。最近一次完整浏览器回归 41/41。锚点必须是页面 404 就会变红的文本。
+静态锁与浏览器回归见英文 README [§10.2–10.3](README.md#102-static-locks)。本轮真实 Chrome 组件夹具 6/6 通过；未运行真实宿主端到端回归。完整命令、日志和限制见 [最终验收](docs/engineering/agos-hardening-20260908/VERIFICATION.md)。部署 dry-run 因尚未部署而报告漂移。
 
 ---
 
@@ -435,7 +435,7 @@ scripts/dev-links.sh   # 一次：给仓内插件测试用的 gitignore 软链
 scripts/test-all.sh    # 前端 verify + 五个插件套件 + 部署漂移
 ```
 
-`test-all.sh` 零模型调用。记忆尺套件在本地语料不在时自动跳过。
+`test-all.sh` 零模型调用，并保留 `npm run verify` 与各插件 `node --test` 的真实退出码（grep 只过滤显示）。私有语料检查仅在显式设置 `SESSION_MEMORY_CORPUS_DIR` 时读取，本轮明确跳过；`mine.mjs` 也要求显式路径。`npm run replay` 需要 `AGOS_CORPUS`（历史上默认 392 条回收站会话）。语料不在是环境不满足，不是通过；不要把往年的「392 会话通过」抄成本次结果。仓内没有跟踪 `.github/workflows`。
 
 插件必须拷贝部署的原因、以及 `iterate.sh` / `deploy-plugins.sh` / `dev-links.sh` / `test-all.sh` 的行为，见英文 README [§12](README.md#12-development)。
 
@@ -453,14 +453,14 @@ scripts/test-all.sh    # 前端 verify + 五个插件套件 + 部署漂移
 6. **分配不派活。** 后验只给组装提案和短名单排序，不挑本跳会话模型。
 7. **台账规模是 homelab 规模。** 读时 fold JSONL 对几千行快，对几百万行不快。
 8. **国产模型工具按国产供应商来。** 换供应商要改 `cn-capabilities`。
-9. **`dsh-fleet` 的 fake 套件** 可能在断言已经通过之后，因为测后 ledger rename 报文件级失败。那是已知的测试拆台竞态，不是对现网派活的断言。
+9. **Fleet 生命周期验证。** 本轮修复了已观察到的测后 ledger rename 竞态，并通过完整 137 项 Fleet 测试；真实部署派活仍未纳入本轮验收。
 
 ---
 
 ## 许可与致谢
 
 - [MIT](LICENSE)。
-- `frontend/src/contract/` 下的 API 契约从 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 迁入（MIT, © DeepSeek），由 `npm run vendor:diff` 保持零漂移。
+- `frontend/src/contract/` 下的 API 契约是对准 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)（MIT, © DeepSeek）pin `a66e470204` 的 AgOS 膜。`npm run vendor:diff` 核的是该 pin 对象，不是任意 checkout 的 HEAD。
 - 跑在 DeepSeek Harness 插件运行时（`cordis`）上；宿主包（`@deepseek-ai/*`）由你的 DSH 安装提供。
 - 浏览器回归经 [OpenCLI](https://github.com/jackwener/opencli) 的浏览器桥驱动。
 - 本树发布为 [`LeoLin990405/agos`](https://github.com/LeoLin990405/agos)。

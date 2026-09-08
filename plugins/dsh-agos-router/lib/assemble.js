@@ -6,6 +6,7 @@ import { applyOutcome, rankAgents } from './allocation-score.js'
 import { STATIC_FALLBACK } from './fallback.js'
 import { foldLedger } from './ledger.js'
 import { normalizeRole } from './roles.js'
+import { filterLedgerForPosterior } from './feedback-bind.mjs'
 
 // 冻结文案与同仓 frontend/src/components/console/routes-assemble.ts 逐字镜像;
 // 两边各自用单测钉住字面量。类别句(这东西是什么),不是时态句 —— 「尚未试跑」那种
@@ -53,7 +54,7 @@ const DAY_MS = 24 * 60 * 60 * 1000
  * 时间取 outcomeAt(胜负落账时刻),缺了退回决策 ts;两个都缺(不该发生)按权重 1 计,不编年龄。
  */
 export function allocationStateFromLedger(rows, opts = {}) {
-  const { decisions } = foldLedger(Array.isArray(rows) ? rows : [])
+  const { decisions } = foldLedger(filterLedgerForPosterior(rows))
   const halfLife = Number.isFinite(opts.halfLifeDays) && opts.halfLifeDays > 0 ? opts.halfLifeDays : 0
   const now = Number.isFinite(opts.now) ? opts.now : Date.now()
   let state = []
