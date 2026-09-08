@@ -129,6 +129,23 @@ F2 审计 `lib/turn-evidence.js` 后**没有加任何清理**，这个结论是�
 4. **`dsh-fleet` 与 pin 的宿主线不兼容**（主控本轮新发现，见 `DEPENDENCIES.md`）。`escapeXml` → swarm → `installSettingsSection` 这条链只存在于 rc.6 及更早，而 `dsh-settings@0.1.0-rc.6` 的 peer 属 rc.6 线、与 pin 的 0.1.2-rc.1 冲突（`npm install` 实测 ERESOLVE）。不是补一个导出能解决的，是版本线选择问题：要么改 `dsh-fleet` 不再依赖那条链，要么把 pin 移到 rc.6（后者须先审计）。
 5. **web profile 上会话删除被永久 503 挡住**（上一节 I4，本轮未改）。`host.describe` 已从 pin 宿主完全移除，契约研究者独立确认（对整棵已装宿主 `rg` 命中 0），并额外指出操作者自己的 `@dsh-local/agos` 插件仍在调 `/api/host.describe`。
 
+## 下一轮 P2（独立验证追加，2026-09-09）
+
+- **14 个历史遗留文件含操作者绝对路径**（`/Users/<name>`）。本轮已把**自己引入的** 28 处清零
+  （产物目录忽略、`dependency-surface.json` 写盘层脱敏、`host-env.mjs` 改 `homedir()` 推导、文档占位），
+  实测本轮引入项为 **0**；但基线里就有的 14 个未动：上一轮文档 6 个、前端测试 5 个、
+  `plugins/dsh-agos/test/{plugins-inventory,session-trash}.test.mjs`、`plugins/dsh-fleet/lib/index.js`。
+  未动的原因是它们不在本轮所有权范围内，且前端测试那几处改动需重跑前端闸。
+
+- **`host-env.mjs` 的 `PLAYWRIGHT_MODULE` 默认值仍指向 live `web` profile 内部。**
+  本轮只解决了「写死个人路径」（已改 `homedir()` 推导），**没有**解决「默认去操作者 live profile
+  里借 playwright」这件事本身 —— 它与该文件自己「从不读写 `~/.dsh`」的声明仍然矛盾。
+  正确做法是把 playwright 装进 `frontend/` 的隔离依赖树，或要求显式提供路径而不给默认值。
+
+- **`--floors=none` 是新增的逃生阀，需要防它变成习惯用法。** 本轮把计数下限门改成 fail-closed
+  （缺基线退 78）后，`--floors=none` 是唯一的绕过方式且会醒目自报。下一轮若要更严，
+  可以让 CI 层直接拒绝带该参数的调用。
+
 ## 下一轮 P2（接线审查追加，2026-09-09）
 
 以下四条来自第三名独立审查者对**主控自己的接线与修复**的复核（报告见 [REVIEW-CONTROLLER.md](REVIEW-CONTROLLER.md)）。
