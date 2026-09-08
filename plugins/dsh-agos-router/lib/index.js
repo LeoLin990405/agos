@@ -6,8 +6,8 @@
  */
 import { composeSelectorSystemPrompt, createSelector, resolveCachedSelector } from './selector-llm.js'
 import { fallbackPick } from './fallback.js'
-import { appendLine, buildAnnotateRecord, buildDecisionRecord, buildOutcomeRecord, listRoutes as listRoutesFromLedger, readLedgerLines, foldLedger } from './ledger.js'
-import { shadowDecide, buildShadowLinkRecord, shadowLinks, fleetBatchRuns, backfillShadowOutcomes, attachShadowLinks, isShadowDecisionRef } from './shadow.js'
+import { appendLine, buildAnnotateRecord, buildDecisionRecord, listRoutes as listRoutesFromLedger, readLedgerLines, foldLedger } from './ledger.js'
+import { shadowDecide, fleetBatchRuns, backfillShadowOutcomes, attachShadowLinks } from './shadow.js'
 import { ASSEMBLE_COPY as ASM_COPY, ASSEMBLE_EMPTY_COPY, allocationStateFromLedger, assembleLive, defaultPoolCandidates, LIVE_DISPATCH_OFF_COPY as LIVE_OFF } from './assemble.js'
 import { DISPATCH_COPY, DISPATCH_EMPTY_COPY, dispatchTeam, streamRoleText } from './dispatch.js'
 import { candidatesForRoute, semanticLabel } from './labels.js'
@@ -17,6 +17,7 @@ import { REASON_LIMIT, sanitizePreview } from './sanitize.js'
 import { normalizeConfig } from './config.js'
 import { homedir } from 'node:os'
 import { coverageGrid, deriveOutcomeRows, readOutcomeSources, readFleetRuns } from './outcomes.js'
+import { bindOrdinaryOutcome, bindShadowLink, validatedShadowLinks } from './feedback-bind.mjs'
 
 export const name = '@dsh-local/agos-router'
 export const inject = ['llm', 'settings']
@@ -246,20 +247,34 @@ export function apply(ctx, rawConfig) {
   }
 
   function shadowLink(body) {
-    const rec = buildShadowLinkRecord(body ?? {})
-    appendLine(effectiveConfig().auditFile, rec)
-    return rec
+    const cfg = effectiveConfig()
+    const rows = readLedgerLines(cfg.auditFile)
+    const bound = bindShadowLink({
+      ref: body && body.ref,
+      batchId: body && body.batchId,
+      hosts: body && body.hosts,
+      rows,
+      decisions: foldLedger(rows).decisions,
+      batches: fleetBatchRuns(readFleetRuns(homedir())),
+    })
+    if (!bound.ok) {
+      const error = new Error(bound.error)
+      error.code = bound.code
+      throw error
+    }
+    if (!bound.idempotent) appendLine(cfg.auditFile, bound.record)
+    return bound.record
   }
 
   /** W17:GET 时回填影子决策的批次终态(只对 已挂 batchId + outcome 空 + fleet 批次已终态 的行追加 outcome 行)。 */
   function backfillShadow(cfg) {
     try {
       const rows = readLedgerLines(cfg.auditFile)
-      const links = shadowLinks(rows)
+      const batches = fleetBatchRuns(readFleetRuns(homedir()))
+      const links = validatedShadowLinks(rows, batches)
       if (links.size === 0) return 0
       const { decisions } = foldLedger(rows)
-      const runs = readFleetRuns(homedir())
-      const pending = backfillShadowOutcomes({ decisions, links, batchRuns: fleetBatchRuns(runs) })
+      const pending = backfillShadowOutcomes({ decisions, links, batchRuns: batches })
       for (const rec of pending) appendLine(cfg.auditFile, rec)
       return pending.length
     } catch (err) {
@@ -273,10 +288,14 @@ export function apply(ctx, rawConfig) {
     const cfg = effectiveConfig()
     backfillShadow(cfg)
     const listed = listRoutesFromLedger(cfg.auditFile, limit)
-    const links = shadowLinks(readLedgerLines(cfg.auditFile))
-    listed.decisions = attachShadowLinks(listed.decisions, links, links.size > 0 ? fleetBatchRuns(readFleetRuns(homedir())) : new Map())
+    const batches = fleetBatchRuns(readFleetRuns(homedir()))
+    const links = validatedShadowLinks(readLedgerLines(cfg.auditFile), batches)
+    listed.decisions = attachShadowLinks(listed.decisions, links, batches)
     // 后验的分母写进载荷:真实观测条数与格子数,由台账算出。前端不得自称「后验再填三角色」而不给数(审查 P2-5)。
-    const state = allocationStateFromLedger(readLedgerLines(cfg.auditFile), { halfLifeDays: cfg.posteriorHalfLifeDays })
+    const state = allocationStateFromLedger(
+      readLedgerLines(cfg.auditFile),
+      { halfLifeDays: cfg.posteriorHalfLifeDays },
+    )
     listed.stats.posterior = {
       // 衰减开着时这是有效证据量(可为小数),关着时就是行数——口径由 halfLifeDays 一并携带。
       // 正数不许被凑成 0:0 意味着「暂无观测」,与同载荷 cells>0 会互相打脸(对抗审查 P3)。
@@ -299,16 +318,20 @@ export function apply(ctx, rawConfig) {
   }
 
   function recordOutcome(body) {
-    const rec = buildOutcomeRecord(body)
     const file = effectiveConfig().auditFile
-    // W17:影子行的 outcome 只来自 fleet-end 回填;手工写入会把人工胜负记到建议头上
-    if (isShadowDecisionRef(readLedgerLines(file), rec.ref)) {
-      const error = new Error('影子决策行只接受 fleet 终态回填,不接受手工胜负')
-      error.code = 'SHADOW_MANUAL_OUTCOME'
+    const bound = bindOrdinaryOutcome({
+      authority: 'operator',
+      body,
+      rows: readLedgerLines(file),
+    })
+    if (!bound.ok) {
+      const error = new Error(bound.error)
+      error.code = bound.code
       throw error
     }
-    appendLine(file, rec)
-    return rec
+    if (bound.idempotent) return bound.record
+    appendLine(file, bound.record)
+    return bound.record
   }
 
   async function assembleLiveRequest(body) {

@@ -39,8 +39,12 @@ function unicodeSlice(value, limit = MAX_TEXT_CODEPOINTS) {
   return [...value].slice(0, limit).join('')
 }
 
+function whitespaceNormalized(value) {
+  return String(value).replace(/\s+/gu, ' ').trim()
+}
+
 function normalizedText(value) {
-  return unicodeSlice(String(value).replace(/\s+/gu, ' ').trim())
+  return unicodeSlice(whitespaceNormalized(value))
 }
 
 function deepFreeze(value, seen = new Set()) {
@@ -158,7 +162,7 @@ export function pinSessionMemoryItem(input, options = {}) {
   if (!KINDS.has(kind)) {
     return { ok: false, status: 400, code: 'INVALID_KIND', error: 'kind 必须是 fact、constraint、preference 或 rejected' }
   }
-  const text = normalizedText(input.text ?? '')
+  const text = whitespaceNormalized(input.text ?? '')
   if (text === '' || [...text].length > MAX_TEXT_CODEPOINTS) {
     return { ok: false, status: 400, code: 'INVALID_TEXT', error: '正文未采集或超过 200 码点' }
   }

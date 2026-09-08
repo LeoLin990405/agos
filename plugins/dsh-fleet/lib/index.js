@@ -34,6 +34,8 @@ import {
 import { createFleetPower } from './fleet-power.mjs'
 import { DEFAULT_CODEX_WORKSPACE, createCodexHostRunner } from './fleet-codex.mjs'
 import { FLEET_GUIDANCE } from '../../dsh-agos/lib/agent-prompts.js'
+import { validateFleetItems, InputLimitError } from '../../dsh-agos/lib/input-limits.js'
+import { probeLocalRun } from './local-probe.mjs'
 
 const name = '@dsh-local/fleet'
 const inject = ['tools', 'subagents', 'commands', 'systemPrompt']
@@ -106,7 +108,7 @@ function apply(ctx, config, dependencies = {}) {
   const PROBES = new Map()   // name → 正在进行的 probe Promise，冷缓存并发请求只发一次 ssh
   const EXECUTIONS = new Map() // runId → 本进程中可启动/等待结算的完整 prompt 与承诺
   const LIVE_RUNS = new Set() // runner 已真正挂上 abort listener 的 runId
-  const CODEX_SETTLEMENTS = new Map() // runId → plugin dispose 必须等待的本机 SDK 执行
+  const LOCAL_SETTLEMENTS = new Map() // runId → plugin dispose 必须等待的本机子代理/SDK 执行
   const WAKE_WAITS = new Map()
   const STARTING_RUNS = new Map() // runId → host，关闭 markStart fsync 窗口的重入间隙
   let runtime = null
@@ -302,16 +304,25 @@ function apply(ctx, config, dependencies = {}) {
 
   const runLocal = async (host, prompt, signal, exec) => {
     const t0 = Date.now()
-    let run
+    let run, outcome, cleanupError
     try {
       run = await ctx.subagents.start('spawn', { parent: exec.agent, prompt: [{ type: 'text', text: prompt }], signal, label: 'fleet:local' })
-    } catch (e) { return { ok: false, text: '', error: String(e?.message ?? e), ms: Date.now() - t0, host: host.name } }
-    try {
       const res = await run.result
       const text = textOf(res).trim()
-      return { ok: !!text, text, error: text ? '' : ('无输出(' + res.stopReason + ')'), ms: Date.now() - t0, host: host.name }
-    } catch (e) { return { ok: false, text: '', error: String(e?.message ?? e), ms: Date.now() - t0, host: host.name } }
-    finally { try { await run.dispose() } catch {} }
+      outcome = { ok: !!text, text, error: text ? '' : ('无输出(' + res.stopReason + ')') }
+    } catch (error) {
+      outcome = { ok: false, text: '', error: String(error?.message ?? error) }
+    } finally {
+      try { await run?.dispose() } catch (error) { cleanupError = String(error?.message ?? error) }
+    }
+    const base = { host: host.name, ms: Date.now() - t0 }
+    if (cleanupError) return { ...base, ok: false, text: '', error: 'local cleanup failed: ' + cleanupError }
+    if (signal?.aborted) {
+      return String(signal.reason) === 'TIMEOUT'
+        ? { ...base, ok: false, text: '', timedOut: true, error: 'TIMEOUT' }
+        : { ...base, ok: false, text: '', cancelled: true, error: '已取消' }
+    }
+    return { ...base, ...outcome }
   }
 
   const runOnHost = (host, prompt, signal, exec, assignment = {}) =>
@@ -497,7 +508,14 @@ function apply(ctx, config, dependencies = {}) {
       // markDispatchStarted awaits the shared host power lock. Cancellation can
       // win during that wait, so re-read durable state and signal immediately
       // before the synchronous spawn continuation.
-      if (!current || TERMINAL_RUN_STATUSES.has(current.status) || controller.signal.aborted) return
+      if (!current || TERMINAL_RUN_STATUSES.has(current.status)) return
+      if (controller.signal.aborted) {
+        // Cancellation may win after markStart but before there is any runner.
+        // No process needs cleanup in this window, so settle the pending intent.
+        if (String(controller.signal.reason) === 'TIMEOUT') await runtime.markEnd(queued.runId, { ok: false, error: 'TIMEOUT' })
+        else await runtime.confirmRemoteCancelled(queued.runId, current.cancelReason || '已取消（未启动）')
+        return
+      }
       publishExecution(current, 'running')
       LIVE_RUNS.add(queued.runId)
       try {
@@ -566,10 +584,10 @@ function apply(ctx, config, dependencies = {}) {
               await runtime.markEnd(queued.runId, { ok: false, error: scrubSecrets(error?.message ?? error) })
             }
           }).finally(() => {
-            CODEX_SETTLEMENTS.delete(queued.runId)
+            LOCAL_SETTLEMENTS.delete(queued.runId)
             queuePump()
           })
-          if (hostByName(queued.host)?.kind === 'codex') CODEX_SETTLEMENTS.set(queued.runId, settlement)
+          if (['local', 'codex'].includes(hostByName(queued.host)?.kind)) LOCAL_SETTLEMENTS.set(queued.runId, settlement)
           void settlement
         }
       } while (pumpAgain)
@@ -658,8 +676,13 @@ function apply(ctx, config, dependencies = {}) {
     timeoutMs: 3600000,
     isConcurrencySafe: () => true,
     async execute(args, exec) {
-      const items = (Array.isArray(args.items) ? args.items : []).map((x) => String(x || '').trim()).filter(Boolean)
-      if (!items.length) throw new Error('fleet_run 需要至少一个 items')
+      let items
+      try {
+        items = validateFleetItems(args.items)
+      } catch (error) {
+        if (error instanceof InputLimitError) throw new Error(error.message)
+        throw error
+      }
       const goal = clip(items.join(' | '), 200)
       const tasks = items.map((it, i) => ({ item: '#' + (i + 1), prompt: it }))
       // 宿主 Job Panel 是软依赖：服务缺席、start 抛错或没有 owner 时，仍走原执行路径。
@@ -897,7 +920,13 @@ function apply(ctx, config, dependencies = {}) {
         // A local in-process subagent cannot survive plugin/process restart.
         // Treat its durable orphan as lost instead of detached, which would
         // otherwise reserve a global slot forever with no remote pid to probe.
-        if (host.kind === 'local') return { ok: true, out: 'MISSING' }
+        if (host.kind === 'local') {
+          return probeLocalRun({
+            run,
+            liveSet: LIVE_RUNS,
+            controllerLookup: () => STARTING_RUNS.has(run.runId),
+          })
+        }
         if (host.kind === 'codex') return { ok: true, out: LIVE_RUNS.has(run.runId) ? 'ALIVE' : 'MISSING' }
         return probeRemoteRun(host, run)
       },
@@ -930,6 +959,7 @@ function apply(ctx, config, dependencies = {}) {
         if (host.kind !== 'remote') return { ok: false, error: 'host has no remote process' }
         return remoteKill(host, run.runDir)
       },
+      isLocalRun: (run) => hostByName(run.host)?.kind === 'local',
       isLocalExecution: (run) => hostByName(run.host)?.kind === 'local' || STARTING_RUNS.has(run.runId),
       hasLiveController: (run) => LIVE_RUNS.has(run.runId),
       clearControlSockets: async () => {
@@ -1379,13 +1409,19 @@ function apply(ctx, config, dependencies = {}) {
     await Promise.allSettled(drains)
     try { await runtimeReady } catch {}
     // Remote jobs intentionally survive plugin churn and reconcile later. A local
-    // Codex SDK child cannot be reattached, so abort and await only those runs
+    // subagent or Codex SDK child cannot be reattached, so abort and await them
     // before the runtime/ledger handles are released.
     if (runtime) {
-      const liveCodex = runtime.listRuns().filter((run) =>
-        hostByName(run.host)?.kind === 'codex' && !TERMINAL_RUN_STATUSES.has(run.status))
-      await Promise.allSettled(liveCodex.map((run) => runtime.cancelRun(run.runId, 'plugin disposed')))
-      await Promise.allSettled(liveCodex.map((run) => CODEX_SETTLEMENTS.get(run.runId)).filter(Boolean))
+      const liveLocal = runtime.listRuns().filter((run) =>
+        ['local', 'codex'].includes(hostByName(run.host)?.kind) && !TERMINAL_RUN_STATUSES.has(run.status))
+      await Promise.allSettled(liveLocal.map((run) => runtime.cancelRun(run.runId, 'plugin disposed')))
+      // The pump is stopped during shutdown; queued cancellations still need
+      // their waiting tool promises resolved even though no active slot changed.
+      for (const run of runtime.listRuns()) settleExecution(run)
+      await Promise.allSettled(liveLocal.map((run) => LOCAL_SETTLEMENTS.get(run.runId)).filter(Boolean))
+      // A pre-spawn cancellation can become terminal only while awaiting the
+      // settlement above. Sweep again because the shutdown pump is disabled.
+      for (const run of runtime.listRuns()) settleExecution(run)
     }
     try { await runtime?.shutdown?.() } catch {}
     try { await ledger.drain() } catch {}

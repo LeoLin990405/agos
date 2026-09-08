@@ -1,0 +1,10 @@
+⚠️  dsh-agos ↔ ~/.dsh/profiles/desktop/plugins/dsh-agos/ 漂移 15 项
+⚠️  dsh-agos ↔ ~/.dsh/profiles/web/plugins/dsh-agos/ 漂移 15 项
+⚠️  dsh-agos-router ↔ ~/.dsh/profiles/desktop/plugins/dsh-agos-router/ 漂移 9 项
+⚠️  dsh-agos-router ↔ ~/.dsh/profiles/web/plugins/dsh-agos-router/ 漂移 9 项
+✅ dsh-mcp-bridge ↔ ~/.dsh/profiles/desktop/plugins/dsh-mcp-bridge/ 零漂移
+✅ dsh-mcp-bridge ↔ ~/.dsh/profiles/web/plugins/dsh-mcp-bridge/ 零漂移
+⚠️  cn-capabilities ↔ ~/.dsh/profiles/desktop/plugins/cn-capabilities/ 漂移 13 项
+⚠️  cn-capabilities ↔ ~/.dsh/profiles/web/plugins/cn-capabilities/ 漂移 13 项
+⚠️  dsh-fleet ↔ ~/.dsh/profiles/desktop/plugins/dsh-fleet/ 漂移 13 项
+⚠️  dsh-fleet ↔ ~/.dsh/profiles/web/plugins/dsh-fleet/ 漂移 13 项

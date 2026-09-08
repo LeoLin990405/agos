@@ -1368,23 +1368,47 @@ export function bindSessionMemoryObserver(ctx, sessionMemory) {
   }
 }
 
-export function apply(ctx) {
-  const evolveStore = createSkillEvolveStore()
-  const sessionMemory = createSessionMemoryStore()
-  const turnEvidence = createTurnEvidenceStore({ home: homedir() })
-  const memoryRelevance = createSessionMemoryRelevanceStore()
+/** Skills is visible only inside its Cordis injection fiber. */
+export function bindRuntimeSkillCatalogTrim(ctx, options = {}) {
+  let skills = null
+  let disposeSkills
+  if (typeof ctx?.inject === 'function') {
+    disposeSkills = ctx.inject(['skills'], (ready) => {
+      const service = contextService(ready, 'skills')
+      skills = service
+      return () => { if (skills === service) skills = null }
+    })
+  }
+  const disposeTrim = bindCatalogTrim(ctx, {
+    ...options,
+    snapshot: async (event) => {
+      const agent = event?.agent
+      const cwd = agent?.session?.header?.cwd
+      if (!agent || typeof cwd !== 'string' || cwd.trim() === '' || typeof skills?.snapshot !== 'function') return null
+      return skills.snapshot({ cwd, signal: event.signal, scope: agent })
+    },
+  })
+  return () => {
+    disposeTrim()
+    if (typeof disposeSkills === 'function') disposeSkills()
+    skills = null
+  }
+}
+
+export function apply(ctx, options = {}) {
+  const home = options.home ?? homedir()
+  const dshRoot = join(home, '.dsh')
+  const evolveStore = createSkillEvolveStore({ home })
+  const sessionMemory = createSessionMemoryStore({ dshRoot })
+  const turnEvidence = createTurnEvidenceStore({ home })
+  const memoryRelevance = createSessionMemoryRelevanceStore({ home })
   if (typeof ctx.on === 'function') {
-    bindCatalogTrim(ctx, {
+    bindRuntimeSkillCatalogTrim(ctx, {
+      home,
       store: evolveStore,
       evidence: turnEvidence,
-      catalog: async () => {
-        const cached = SKILLS_CACHE && SKILLS_CACHE.data && Array.isArray(SKILLS_CACHE.data.catalog)
-          ? SKILLS_CACHE.data.catalog
-          : analyzeShadowing(defaultSkillRootDefs().filter((def) => existsSync(def.path))).catalog
-        return cached.filter((row) => row.servedToModel !== false)
-      },
     })
-    bindSessionMemoryInject(ctx, { store: sessionMemory, rank: memoryRelevance, evidence: turnEvidence })
+    bindSessionMemoryInject(ctx, { home, store: sessionMemory, rank: memoryRelevance, evidence: turnEvidence })
   }
   return ctx.inject(['webServer'], (c) => {
     const disposers = []
@@ -1398,6 +1422,7 @@ export function apply(ctx) {
     // 把它捕获下来给剪枝闭包用。
     let domainCtx
     const sessionManager = createAgosSessionManager({
+      dshRoot,
       readHostArchived: () => hostArchivedFromContext(c),
       readRunning: (sessionId) => runningFromContext(c, sessionId),
       readAttached: (sessionId) => attachedFromContext(c, sessionId),
@@ -1412,7 +1437,7 @@ export function apply(ctx) {
       }],
       ['/api/agos/skills/draft', async (req, res) => {
         if (req.method !== 'POST') { sendJson(res, 405, { error: 'POST only' }, { allow: 'POST' }); return }
-        const result = await createSkillDraft(await readJsonBody(req), { home: homedir() })
+        const result = await createSkillDraft(await readJsonBody(req), { home })
         if (!result.ok) {
           sendJson(res, result.status, { created: false, error: result.error, code: result.code })
           return
@@ -1431,7 +1456,7 @@ export function apply(ctx) {
       ['/api/agos/skills/studio', async (req, res) => {
         if (req.method !== 'GET') { sendJson(res, 405, { error: 'GET only' }, { allow: 'GET' }); return }
         const name = new URL(req.url, 'http://x').searchParams.get('name') ?? ''
-        const result = await readStudioSkill(name, { home: homedir() })
+        const result = await readStudioSkill(name, { home })
         if (!result.ok) {
           sendJson(res, result.status, { error: result.error, code: result.code })
           return
@@ -1440,7 +1465,7 @@ export function apply(ctx) {
       }],
       ['/api/agos/skills/description', async (req, res) => {
         if (req.method !== 'POST') { sendJson(res, 405, { error: 'POST only' }, { allow: 'POST' }); return }
-        const result = await patchSkillDescription(await readJsonBody(req), { home: homedir() })
+        const result = await patchSkillDescription(await readJsonBody(req), { home })
         if (!result.ok) {
           sendJson(res, result.status, { error: result.error, code: result.code })
           return
@@ -1487,7 +1512,7 @@ export function apply(ctx) {
       }],
       ['/api/agos/skills/trim', async (req, res) => {
         if (req.method === 'GET') {
-          const trim = catalogTrimConfig()
+          const trim = catalogTrimConfig(home)
           sendJson(res, 200, {
             enabled: trim.enabled,
             maxEntries: trim.maxEntries,
@@ -1499,7 +1524,7 @@ export function apply(ctx) {
           sendJson(res, 405, { error: 'GET or POST' }, { allow: 'GET, POST' })
           return
         }
-        const result = await writeCatalogTrimConfig(await readJsonBody(req))
+        const result = await writeCatalogTrimConfig(await readJsonBody(req), { home })
         sendJson(res, result.ok ? 200 : result.status, result)
       }],
       ['/api/agos/session-memory/relevance', async (req, res) => {
@@ -1556,20 +1581,20 @@ export function apply(ctx) {
               itemCount = Array.isArray(document?.items) ? document.items.length : 0
             } catch { itemCount = null }
           }
-          sendJson(res, 200, describeSessionMemoryInject(homedir(), itemCount))
+          sendJson(res, 200, describeSessionMemoryInject(home, itemCount))
           return
         }
         if (req.method !== 'POST') {
           sendJson(res, 405, { error: 'GET or POST' }, { allow: 'GET, POST' })
           return
         }
-        const result = await writeSessionMemoryInjectConfig(await readJsonBody(req))
+        const result = await writeSessionMemoryInjectConfig(await readJsonBody(req), { home })
         sendJson(res, result.ok ? 200 : result.status, result)
       }],
       ['/api/agos/memory/desk', async (req, res) => {
         const invokeMemorySubmit = memorySubmitInvokerFromCtx(ctx)
         if (req.method === 'GET') {
-          sendJson(res, 200, await listMemoryDesk({ civAvailable: typeof invokeMemorySubmit === 'function' }))
+          sendJson(res, 200, await listMemoryDesk({ home, civAvailable: typeof invokeMemorySubmit === 'function' }))
           return
         }
         if (req.method !== 'POST') {
@@ -1577,18 +1602,23 @@ export function apply(ctx) {
           return
         }
         const result = await writeMemoryDesk(await readJsonBody(req), {
+          home,
           invokeMemorySubmit,
         })
         sendJson(res, result.ok ? 200 : result.status, result)
       }],
       ['/api/agos/plugins', async (req, res) => {
         if (req.method !== 'GET') { sendJson(res, 405, { error: 'GET only' }, { allow: 'GET' }); return }
-        sendJson(res, 200, buildPluginsInventory())
+        sendJson(res, 200, buildPluginsInventory({ home }))
       }],
       ['/api/agos/turn-evidence', async (req, res) => {
         if (req.method !== 'GET') { sendJson(res, 405, { error: 'GET only' }, { allow: 'GET' }); return }
-        const sessionId = new URL(req.url, 'http://x').searchParams.get('sessionId') ?? ''
-        sendJson(res, 200, describeTurnEvidence(sessionId, turnEvidence, buildPluginsInventory()))
+        const url = new URL(req.url, 'http://x')
+        const sessionId = url.searchParams.get('sessionId') ?? ''
+        sendJson(res, 200, describeTurnEvidence(sessionId, turnEvidence, buildPluginsInventory({ home }), {
+          turn: url.searchParams.get('turn'),
+          step: url.searchParams.get('step'),
+        }))
       }],
       ['/api/agos/overview', async (req, res) => {
         if (req.method !== 'GET') { sendJson(res, 405, { error: 'GET only' }, { allow: 'GET' }); return }

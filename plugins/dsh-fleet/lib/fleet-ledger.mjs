@@ -3,6 +3,10 @@ import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { scrubSecrets as redactSecrets } from '../../dsh-agos/lib/secrets-gate.js'
+import { createFleetLock, lockPathFor } from './fleet-lock.mjs'
+import { taskFingerprint } from '../../dsh-agos-router/lib/task-fingerprint.mjs'
+
+export { createFleetLock, lockPathFor, FleetLockError } from './fleet-lock.mjs'
 
 export const DEFAULT_FLEET_LEDGER_PATH = join(homedir(), '.dsh', 'logs', 'fleet', 'runs.jsonl')
 export const FLEET_LEDGER_VERSION = 1
@@ -25,6 +29,10 @@ function eventForDisk(input, now) {
   const source = scrubSecrets(input && typeof input === 'object' ? input : {})
   const event = { ...source, v: FLEET_LEDGER_VERSION, at: Number.isFinite(Number(source.at)) ? Number(source.at) : now }
   if (event.ev === 'dispatch') {
+    // Match evidence, never authorization. Compute from full raw input before
+    // scrubbing/preview clipping, and never trust a caller-supplied fingerprint.
+    event.taskFingerprint = input.itemTruncated === true || input.promptTruncated === true
+      ? null : taskFingerprint(input.prompt ?? input.item)
     const fullPrompt = String(source.prompt ?? source.item ?? '')
     event.prompt = clip(fullPrompt, 400)
     event.promptTruncated = source.itemTruncated === true || fullPrompt.length > 400
@@ -96,6 +104,13 @@ export class FleetLedger {
     this.retentionMs = options.retentionMs ?? DEFAULT_LEDGER_RETENTION_MS
     this.minEvents = options.minEvents ?? DEFAULT_LEDGER_MIN_EVENTS
     this.autoCompact = options.autoCompact !== false
+    this.lockPath = options.lockPath ?? lockPathFor(this.path)
+    this.lock = options.lock ?? createFleetLock({
+      path: this.lockPath,
+      fs: this.fs,
+      timeoutMs: options.lockTimeoutMs,
+      logger: this.logger,
+    })
     this.writeTail = Promise.resolve()
     this.ready = this._initialize()
   }
@@ -116,7 +131,7 @@ export class FleetLedger {
 
   async _initialize() {
     await this._mkdir()
-    if (this.autoCompact) await this._compactUnlocked()
+    if (this.autoCompact) await this._withLock(() => this._compactUnlocked())
     else {
       try { await this.fs.chmod(this.path, 0o600) } catch (error) { if (error?.code !== 'ENOENT') throw error }
     }
@@ -126,6 +141,11 @@ export class FleetLedger {
     const result = this.writeTail.then(operation, operation)
     this.writeTail = result.catch(() => {})
     return result
+  }
+
+  async _withLock(operation) {
+    if (this.lock && typeof this.lock.withLock === 'function') return this.lock.withLock(operation)
+    return operation()
   }
 
   async _appendUnlocked(event) {
@@ -144,7 +164,7 @@ export class FleetLedger {
   async append(input) {
     await this.ready
     const event = eventForDisk(input, this.now())
-    return this._enqueue(() => this._appendUnlocked(event))
+    return this._enqueue(() => this._withLock(() => this._appendUnlocked(event)))
   }
 
   /**
@@ -156,7 +176,7 @@ export class FleetLedger {
     await this.ready
     const events = (Array.isArray(inputs) ? inputs : []).map((input) => eventForDisk(input, this.now()))
     if (!events.length) return []
-    return this._enqueue(async () => {
+    return this._enqueue(() => this._withLock(async () => {
       await this._mkdir()
       let existing = ''
       try { existing = await this.fs.readFile(this.path, 'utf8') }
@@ -181,7 +201,7 @@ export class FleetLedger {
         try { await this.fs.unlink(temporary) } catch {}
         throw error
       }
-    })
+    }))
   }
 
   /** A named durability barrier used to make dispatch-before-spawn auditable. */
@@ -198,7 +218,7 @@ export class FleetLedger {
   async load() {
     await this.ready
     await this.writeTail
-    return this._readUnlocked()
+    return this._withLock(() => this._readUnlocked())
   }
 
   async _syncDirectory() {
@@ -240,7 +260,7 @@ export class FleetLedger {
 
   async compact() {
     await this.ready
-    return this._enqueue(() => this._compactUnlocked())
+    return this._enqueue(() => this._withLock(() => this._compactUnlocked()))
   }
 
   async drain() {

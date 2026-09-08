@@ -260,7 +260,44 @@ exit 0
   assert.equal(stored.filter((event) => event.ev === 'detach' && event.runId === 'r-offline').at(-1).cancelPending, true)
 })
 
-test('early ssh exit with a 100KB prompt is detached without an unhandled stdin EPIPE', async (t) => {
+test('fleet_run rejects a 100KB item instead of sending it to ssh', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'fleet-reject-large-'))
+  const oldLedger = process.env.DSH_FLEET_LEDGER_PATH
+  const oldState = process.env.DSH_FLEET_SSH_STATE_DIR
+  process.env.DSH_FLEET_LEDGER_PATH = join(root, 'runs.jsonl')
+  process.env.DSH_FLEET_SSH_STATE_DIR = join(root, 'ssh-state')
+  t.after(() => {
+    if (oldLedger === undefined) delete process.env.DSH_FLEET_LEDGER_PATH
+    else process.env.DSH_FLEET_LEDGER_PATH = oldLedger
+    if (oldState === undefined) delete process.env.DSH_FLEET_SSH_STATE_DIR
+    else process.env.DSH_FLEET_SSH_STATE_DIR = oldState
+    rmSync(root, { recursive: true, force: true })
+  })
+  const tools = new Map()
+  const ctx = {
+    tools: { register(tool) { tools.set(tool.name, tool); return () => tools.delete(tool.name) } },
+    commands: { register: () => () => {} }, systemPrompt: { section: () => () => {} },
+    subagents: { registerProvider() {}, list: () => [] },
+    get() { return undefined }, inject: () => {},
+  }
+  const dispose = apply(ctx, Config({
+    hosts: [{ name: 'worker', kind: 'remote', ssh: 'worker', enabled: true, maxConcurrency: 1, workspace: '~/work' }],
+    powerNodes: {},
+  }))
+  try {
+    await assert.rejects(
+      () => tools.get('fleet_run').execute(
+        { items: ['x'.repeat(100 * 1024)] },
+        { agent: { id: 'agent', session: { id: 'session' } }, signal: new AbortController().signal, callId: 'too-big' },
+      ),
+      /items\[0\] exceeds 8000 characters/,
+    )
+  } finally {
+    await dispose()
+  }
+})
+
+test('early ssh exit with a max-legal prompt is detached without an unhandled stdin EPIPE', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'dsh-fleet-epipe-'))
   const ledger = join(root, 'runs.jsonl')
   const stubSsh = join(root, 'ssh')
@@ -302,7 +339,7 @@ exit 0
   })
 
   const run = tools.get('fleet_run').execute(
-    { items: ['x'.repeat(100 * 1024)] },
+    { items: ['x'.repeat(8000)] },
     { agent: { id: 'agent', session: { id: 'session' } }, signal: new AbortController().signal, callId: 'epipe' },
   )
   await waitUntil(() => {

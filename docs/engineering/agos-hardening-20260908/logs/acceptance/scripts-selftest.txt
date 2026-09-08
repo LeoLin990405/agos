@@ -1,0 +1,61 @@
+▸ syntax
+PASS: zsh -n test-all.sh
+PASS: zsh -n iterate.sh
+PASS: sh -n vendor-diff.sh
+PASS: sh -n upgrade-dsh.sh
+▸ extract helpers (no deploy / no verify)
+PASS: test-all helpers sourced
+PASS: test-all preserves exit 7 and failure diagnostics
+PASS: test-all unmatched filter preserves success
+PASS: iterate helpers sourced
+▸ (a) failing producer piped through grep: old green, new red
+PASS: old pipe+grep masks exit 7 as 0
+PASS: agos_keep_exit preserves producer exit 7
+PASS: empty grep does not fail a successful producer
+▸ (b) vendor-diff without pin object
+PASS: missing pin object → exit 2 + explains pin SHA
+PASS: missing harness dir → exit 2
+▸ vendor-diff against real pin object (not live HEAD)
+== pin:           a66e470204 (0.1.2-rc.1) → a66e4702047846cdaa10c66c9d3df3951f5ea70d
+== harness repo:  /Users/leo/Projects/deepseek-harness
+== pin object:    verified (read-only git show/archive)
+== not compared:  /Users/leo/Projects/deepseek-harness worktree HEAD b150a551b8 (live checkout is not the pin)
+== vendored:      /Users/leo/Projects/agos-cursor-hardening-20260908/frontend/src/contract/api
+== adapters:      agent-presets.schema.ts agent-presets.ts credentials.schema.ts credentials.ts index.ts llm.schema.ts llm.ts rpc-map.ts rpc.schema.ts rpc.ts session-search.ts sessions.schema.ts sessions.ts settings.schema.ts settings.ts skills.schema.ts skills.ts workspace.schema.ts workspace.ts 
+== adapter rule:  reviewed local baseline; names and content must match
+src/contract/api/agent-presets.schema.ts: OK
+src/contract/api/agent-presets.ts: OK
+src/contract/api/credentials.schema.ts: OK
+src/contract/api/credentials.ts: OK
+src/contract/api/index.ts: OK
+src/contract/api/llm.schema.ts: OK
+src/contract/api/llm.ts: OK
+src/contract/api/rpc-map.ts: OK
+src/contract/api/rpc.schema.ts: OK
+src/contract/api/rpc.ts: OK
+src/contract/api/session-search.ts: OK
+src/contract/api/sessions.schema.ts: OK
+src/contract/api/sessions.ts: OK
+src/contract/api/settings.schema.ts: OK
+src/contract/api/settings.ts: OK
+src/contract/api/skills.schema.ts: OK
+src/contract/api/skills.ts: OK
+src/contract/api/workspace.schema.ts: OK
+src/contract/api/workspace.ts: OK
+== adapter content: reviewed baseline unchanged (not a full host compatibility proof)
+== wire source:   git show a66e470204:packages/api/gateway/src/stream-protocol.ts
+== BYTE_EQUAL:    REMOTE_STREAM_MUX_PATH = '/api/remote.mux'
+== BYTE_EQUAL:    REMOTE_EVENT_STREAM_ENDPOINT = '$events'
+== BYTE_EQUAL:    REMOTE_EVENT_RESULT_ENDPOINT = '$events/result'
+== BYTE_EQUAL:    REMOTE_EVENT_STREAM_PAYLOAD = { args: {} } as const
+== pin tree:      packages/host/apiproxy/src/api absent at a66e470204 (0.1.2-rc.1 layout) — no wholesale dump; adapters + wire BYTE_EQUAL only
+== pin wire constants + reviewed adapter baseline verified: a66e470204 (0.1.2-rc.1) ==
+PASS: pin-scoped vendor-diff exit 0
+▸ upgrade-dsh --check (read-only, no pin move)
+upgrade-dsh: pin 0.1.2-rc.1 matches host 0.1.2-rc.1
+PASS: upgrade-dsh --check
+▸ adapter mutation must fail even with unchanged wire constants
+PASS: changed adapter contents fail the gate
+▸ failing rsync must not be reported as zero deployment drift
+PASS: rsync failure is a failed check, never zero drift
+▸ selftest OK

@@ -183,6 +183,7 @@ async function call(handler, method, url, body) {
 }
 
 test('apply():POST /routes/shadow 未配置选择器时写 fallback 行(零模型);/shadow/link 追加关联;GET /routes 回填并带 batchRef 与 stats.shadow', async (t) => {
+  const { taskFingerprint } = await import('../lib/task-fingerprint.mjs')
   const dir = await mkdtemp(join(tmpdir(), 'agos-shadow-'))
   const audit = join(dir, 'route-outcome.jsonl')
   const runsFile = join(dir, 'runs.jsonl')
@@ -207,13 +208,16 @@ test('apply():POST /routes/shadow 未配置选择器时写 fallback 行(零模�
   assert.equal('task' in made.body, false)
   const id = made.body.id
 
+  const batchId = 'b-f785f00d-8463-4369-9a02-4bf6dc7e3024'
+  const secondBatchId = 'b-f785f00d-8463-4369-9a02-4bf6dc7e3025'
+  const firstRun = { ev: 'dispatch', batchId, runId: 'r-1', host: 'leo-01', at: made.body.ts + 1, index: 1, taskFingerprint: taskFingerprint('写 README') }
+  await writeFile(runsFile, JSON.stringify(firstRun) + '\n')
   const bad = await call(routes.get('/api/agos/routes/shadow/link'), 'POST', '/api/agos/routes/shadow/link', { ref: id, batchId: 'nope' })
   assert.equal(bad.status, 400)
   const linked = await call(routes.get('/api/agos/routes/shadow/link'), 'POST', '/api/agos/routes/shadow/link', { ref: id, batchId: 'b-f785f00d-8463-4369-9a02-4bf6dc7e3024', hosts: ['leo-01'] })
   assert.equal(linked.status, 200); assert.equal(linked.body.ev, 'shadow-link'); assert.deepEqual(linked.body.hosts, ['leo-01'])
 
   // 批次还没终态 → GET 不回填,但带 batchRef / actualHosts / adopted(回落行 pick null → adopted null)
-  await writeFile(runsFile, JSON.stringify({ ev: 'dispatch', batchId: 'b-f785f00d-8463-4369-9a02-4bf6dc7e3024', runId: 'r-1', host: 'leo-01', at: 1 }) + '\n')
   let listed = await call(routes.get('/api/agos/routes'), 'GET', '/api/agos/routes?limit=10')
   assert.equal(listed.status, 200)
   const row = listed.body.decisions.find((d) => d.id === id)
@@ -224,11 +228,14 @@ test('apply():POST /routes/shadow 未配置选择器时写 fallback 行(零模�
   // 手工放一条「选择器成功且被采用」的影子行 + 关联,终态到了 → GET 回填 ok;回落行永远不回填
   const okId = 'dec-1787400000000-0badc0de'
   const { appendFile } = await import('node:fs/promises')
-  await appendFile(audit, JSON.stringify({ id: okId, ts: 1787400000000, mode: 'shadow', taskType: 'fleet-dispatch', role: 'implementer', candidates: ['leo-01'], pick: 'leo-01', confidence: 0.7, reason: 'r', label: 'fleet-dispatch', source: 'selector', outcome: null, shadow: { chosen: ['leo-01'], agreed: true, tag: '', label: '', items: 1 } }) + '\n')
-  await call(routes.get('/api/agos/routes/shadow/link'), 'POST', '/api/agos/routes/shadow/link', { ref: okId, batchId: 'b-f785f00d-8463-4369-9a02-4bf6dc7e3024', hosts: ['leo-01'] })
+  await appendFile(audit, JSON.stringify({ id: okId, ts: 1787400000000, mode: 'shadow', taskType: 'fleet-dispatch', role: 'implementer', candidates: ['leo-01'], pick: 'leo-01', confidence: 0.7, reason: 'r', label: 'fleet-dispatch', source: 'selector', outcome: null, shadow: { chosen: ['leo-01'], agreed: true, tag: '', label: '', items: 1, taskFingerprints: [taskFingerprint('second task')] } }) + '\n')
+  const secondRun = { ...firstRun, runId: 'r-2', batchId: secondBatchId, taskFingerprint: taskFingerprint('second task') }
+  await appendFile(runsFile, JSON.stringify(secondRun) + '\n')
+  const secondLink = await call(routes.get('/api/agos/routes/shadow/link'), 'POST', '/api/agos/routes/shadow/link', { ref: okId, batchId: secondBatchId, hosts: ['leo-01'] })
+  assert.equal(secondLink.status, 200)
   await writeFile(runsFile, [
-    { ev: 'dispatch', batchId: 'b-f785f00d-8463-4369-9a02-4bf6dc7e3024', runId: 'r-1', host: 'leo-01', at: 1 },
-    { ev: 'end', batchId: 'b-f785f00d-8463-4369-9a02-4bf6dc7e3024', runId: 'r-1', ok: true, exit: 0, at: 2 },
+    firstRun, secondRun,
+    { ev: 'end', batchId: secondBatchId, runId: 'r-2', ok: true, exit: 0, at: Date.now() },
   ].map((r) => JSON.stringify(r)).join('\n') + '\n')
   listed = await call(routes.get('/api/agos/routes'), 'GET', '/api/agos/routes?limit=10')
   const filled = listed.body.decisions.find((d) => d.id === okId)

@@ -20,7 +20,7 @@ import { SwarmBatchCard } from '@/components/chat/SwarmBatchCard';
 import { ApprovalPanel } from '@/components/chat/ApprovalPanel';
 import { TodoBar } from '@/components/chat/TodoBar';
 import type { StateLamp } from '@/design-system/tokens';
-import { conversationStore, respondApproval } from '@/stores/live';
+import { approvalView, conversationStore, respondApproval } from '@/stores/live';
 import type { ConversationItem, FoldedConversation, ToolItem } from '@/fold/model';
 import type { OptimisticImageAttachment } from '@/components/chat/ImageAttachments';
 import { extractMultimodalMessageId, stripImagePlaceholder, stripMultimodalMessageMarker } from '@/components/chat/CommandDeck';
@@ -637,9 +637,9 @@ function renderItem(
       </div>
     );
   }
+  const approval = approvalView(item.callId ?? item.id, sessionId)
   const respond = (outcome: 'allowed-once' | 'rejected') => {
-    // 0.1.2: answer the live $events waterfall keyed by the tool callId.
-    respondApproval(item.callId ?? item.id, outcome);
+    void respondApproval(item.callId ?? item.id, outcome, sessionId);
   };
   return (
     <div className="message-wrap tl-enter" key={key}>
@@ -649,6 +649,11 @@ function renderItem(
         actionSummary={item.reason ?? item.callId ?? item.id}
         diffSnippet={[]}
         readOnly={readOnly}
+        status={approval.status}
+        error={approval.error}
+        busy={approval.busy}
+        decision={approval.decision}
+        canRetry={approval.canRetry}
         onAllow={readOnly ? undefined : () => respond('allowed-once')}
         onReject={readOnly ? undefined : () => respond('rejected')}
       />

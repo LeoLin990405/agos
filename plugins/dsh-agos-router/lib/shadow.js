@@ -19,6 +19,7 @@
 //   关联行:{ev:'shadow-link', ref:<dec-id>, batchId, at};回填行:{kind:'outcome', ref, result, source:'fleet-end'}。
 import { buildDecisionRecord, buildOutcomeRecord } from './ledger.js'
 import { sanitizePreview, REASON_LIMIT } from './sanitize.js'
+import { taskFingerprint } from './task-fingerprint.mjs'
 
 export const SHADOW_MODE = 'shadow'
 export const SHADOW_LINK_EV = 'shadow-link'
@@ -107,6 +108,8 @@ export function buildShadowRecord(input, decision, meta = {}) {
       itemsTotal: Array.isArray(meta.items) ? meta.items.length : 0,
       // 候选与其 ok/inflight/model 是调用方自述(UI 路径 = fleet store 60s 快照),后端不对照 fleet 主机表
       hostsFrom: 'client',
+      // Full task identities are server-computed before summary truncation; never accept client hashes.
+      taskFingerprints: (Array.isArray(meta.items) ? meta.items : []).map(taskFingerprint).filter(Boolean),
     },
   }
   if (meta.fallbackReason) record.fallbackReason = meta.fallbackReason
@@ -186,7 +189,12 @@ export function fleetBatchRuns(runRows) {
     if (!r || typeof r !== 'object' || typeof r.batchId !== 'string' || typeof r.runId !== 'string') continue
     const b = byBatch.get(r.batchId) ?? new Map()
     const cur = b.get(r.runId) ?? { host: undefined, ended: false, ok: false }
-    if (r.ev === 'dispatch') { if (typeof r.host === 'string') cur.host = r.host }
+    if (r.ev === 'dispatch') {
+      if (typeof r.host === 'string') cur.host = r.host
+      if (typeof r.taskFingerprint === 'string') cur.taskFingerprint = r.taskFingerprint
+      if (Number.isInteger(r.index)) cur.index = r.index
+      if (Number.isFinite(r.at)) cur.dispatchedAt = r.at
+    }
     else if (r.ev === 'reroute') { if (typeof r.host === 'string') cur.host = r.host }
     else if (r.ev === 'end') { cur.ended = true; cur.ok = r.ok === true }
     else if (r.ev === 'cancel') { cur.ended = true; cur.ok = false }

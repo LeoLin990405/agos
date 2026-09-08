@@ -16,6 +16,7 @@ import { ASSEMBLE_EMPTY_COPY, LIVE_DISPATCH_OFF_COPY } from './assemble.js'
 import { sanitizePreview } from './sanitize.js'
 import { classifyStream, streamError } from './stream-outcome.js'
 import { foldLedger as foldLedgerRows } from './ledger.js'
+import { bindOrdinaryOutcome, gateReviewerVerdictFeed } from './feedback-bind.mjs'
 
 export const DISPATCH_COPY = '本次是三角色试跑，未换本跳会话模型'
 export const DISPATCH_NO_TOOLS_COPY = '三角色只出文本，不改仓库'
@@ -187,9 +188,21 @@ export async function dispatchTeam(assemble, input, deps = {}) {
   const turns = []
   // 判定必须从评审「原文」解析:sanitizePreview 会把换行压成空格,整行判定在净文里已不可辨。
   let reviewerRawText = ''
+  let reviewBlocked = null
   for (const row of assemble.roles) {
     const role = row && row.role
     const model = row && row.model
+    if (role === 'reviewer') {
+      const target = typeof deps.readRows === 'function'
+        ? foldLedgerRows(deps.readRows()).decisions.find((decision) => decision.id === assemble.ref)
+        : undefined
+      const independence = gateReviewerVerdictFeed({ assemble, turns, reviewer: model, candidates: target?.candidates })
+      if (!independence.feed) {
+        reviewBlocked = independence.verdictSkip || 'NOT_INDEPENDENT'
+        turns.push({ role, model, ok: false, error: reviewBlocked, text: '', learnable: false })
+        continue
+      }
+    }
     const route = resolveModelRoute(model)
     if (!route) {
       turns.push({
@@ -275,7 +288,8 @@ export async function dispatchTeam(assemble, input, deps = {}) {
     : parsed === 'ambiguous' ? 'AMBIGUOUS'
     : 'UNPARSEABLE'
   record.verdictFed = false
-  record.verdictSkip = null
+  record.verdictSkip = reviewBlocked
+  if (reviewBlocked) record.learnable = false
   if (verdict !== null) {
     if (!implementerFinal) {
       // 评审判的是「实现未采集」——判决属实但对象缺席,不喂(今天现网就发生过这种判)。
@@ -299,16 +313,36 @@ export async function dispatchTeam(assemble, input, deps = {}) {
         // 两者不是同一个模型时喂进去就是替人挨打/领功——归因有歧义就不喂,一分都不喂。
         record.verdictSkip = 'PICK_NOT_IMPLEMENTER'
       } else if (typeof deps.append === 'function') {
-        deps.append({
-          kind: 'outcome',
-          ref: assemble.ref,
-          result: verdict,
-          at: Date.now(),
-          source: 'reviewer-verdict',
-          judge: reviewerTurn.model,
-          judged: implementerTurn.model,
+        const independence = gateReviewerVerdictFeed({
+          assemble,
+          turns,
+          implementer: implementerTurn.model,
+          reviewer: reviewerTurn.model,
+          candidates: target.candidates,
         })
-        record.verdictFed = true
+        if (!independence.feed) {
+          record.verdictSkip = independence.verdictSkip || 'NOT_INDEPENDENT'
+        } else {
+          const bound = bindOrdinaryOutcome({
+            authority: 'dispatch',
+            body: { ref: assemble.ref, result: verdict },
+            rows: deps.readRows(),
+            assemble,
+            turns,
+            implementer: implementerTurn.model,
+            reviewer: reviewerTurn.model,
+            candidates: target.candidates,
+          })
+          if (!bound.ok) {
+            record.verdictSkip = bound.code
+          } else if (bound.idempotent) {
+            record.verdictFed = true
+          } else {
+            deps.append(bound.record)
+            record.verdictFed = bound.feed !== false
+            if (bound.feed === false) record.verdictSkip = bound.verdictSkip
+          }
+        }
       } else {
         record.verdictSkip = 'NO_LEDGER'
       }

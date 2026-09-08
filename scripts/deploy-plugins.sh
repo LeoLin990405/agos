@@ -27,7 +27,13 @@ for p in $PLUGINS; do
 			# 只比内容(--checksum),不比 mtime:git 检出的文件时间戳与部署副本天然不同。
 			# itemize 格式 YXcstpoguax:第 3 位 c = 校验和不同,+ = 新文件;*deleting = 目标多出来的;cd+ = 新目录。
 			# (第一版写成 ^[<>]f.c 看的是第 4 位——size 槽,内容改了也报零漂移,自己被自己的闸骗过一次。)
-			drift="$("${RSYNC[@]}" --checksum --dry-run --itemize-changes "$src" "$dst" | /usr/bin/grep -E '^[<>]f(c|\+)|^\*deleting|^cd\+' | /usr/bin/grep -c . || true)"
+			check_out="$("${RSYNC[@]}" --checksum --dry-run --itemize-changes "$src" "$dst" 2>&1)" || {
+				print -r -- "$check_out"
+				print "❌ 无法检查 $p → $dst"
+				rc=1
+				continue
+			}
+			drift="$(print -r -- "$check_out" | /usr/bin/grep -E '^[<>]f(c|\+)|^\*deleting|^cd\+' | /usr/bin/grep -c . || true)"
 			if [[ "$drift" == "0" ]]; then print "✅ $p ↔ ${dst/#$HOME/~} 零漂移"; else print "⚠️  $p ↔ ${dst/#$HOME/~} 漂移 $drift 项"; rc=1; fi
 		else
 			mkdir -p "$dst"
