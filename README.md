@@ -500,7 +500,7 @@ Counted on 2026-09-08 against this tree. Zero model calls.
 ### 11.2 Install and deploy
 
 ```bash
-git clone https://github.com/LeoLin990405/agos-agent && cd agos-agent
+git clone https://github.com/LeoLin990405/agos && cd agos
 
 cd frontend && npm install && npm run build && cd ..
 scripts/deploy-plugins.sh
@@ -595,4 +595,4 @@ Stated plainly, in the spirit of the thing:
 - The API contract under `frontend/src/contract/` is vendored from [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) (MIT, © DeepSeek) and kept drift-free by `npm run vendor:diff`.
 - Built to run on the DeepSeek Harness plugin runtime (`cordis`); host packages (`@deepseek-ai/*`) are provided by your DSH installation.
 - The browser regression is driven through [OpenCLI](https://github.com/jackwener/opencli)'s browser bridge.
-- Published from this tree as [`LeoLin990405/agos-agent`](https://github.com/LeoLin990405/agos-agent).
+- Published from this tree as [`LeoLin990405/agos`](https://github.com/LeoLin990405/agos).

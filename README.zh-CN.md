@@ -396,7 +396,7 @@ SPA 通过 `frontend/src/contract/api/` 与 DSH 宿主说话，由 `UPSTREAM.pin
 ### 11.2 安装与部署
 
 ```bash
-git clone https://github.com/LeoLin990405/agos-agent && cd agos-agent
+git clone https://github.com/LeoLin990405/agos && cd agos
 
 cd frontend && npm install && npm run build && cd ..
 scripts/deploy-plugins.sh
@@ -463,4 +463,4 @@ scripts/test-all.sh    # 前端 verify + 五个插件套件 + 部署漂移
 - `frontend/src/contract/` 下的 API 契约从 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 迁入（MIT, © DeepSeek），由 `npm run vendor:diff` 保持零漂移。
 - 跑在 DeepSeek Harness 插件运行时（`cordis`）上；宿主包（`@deepseek-ai/*`）由你的 DSH 安装提供。
 - 浏览器回归经 [OpenCLI](https://github.com/jackwener/opencli) 的浏览器桥驱动。
-- 本树发布为 [`LeoLin990405/agos-agent`](https://github.com/LeoLin990405/agos-agent)。
+- 本树发布为 [`LeoLin990405/agos`](https://github.com/LeoLin990405/agos)。
