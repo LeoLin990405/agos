@@ -1,0 +1,33 @@
+{
+  "schema": "agos-acceptance/expected-counts@1",
+  "note": "计数下限基线:抓\"删测试/清空测试文件把闸弄绿\"。只从全绿运行生成。并发新增测试后应由 controller 重新生成。",
+  "generatedAt": "2026-09-08T20:04:40.132Z",
+  "gitHead": "7e7e359801644b77b302835f374f035e2836926d",
+  "gitDirtyFiles": 39,
+  "floors": {
+    "dsh-agos": {
+      "minTests": 174,
+      "minPass": 172
+    },
+    "dsh-agos-router": {
+      "minTests": 124,
+      "minPass": 124
+    },
+    "dsh-mcp-bridge": {
+      "minTests": 4,
+      "minPass": 4
+    },
+    "cn-capabilities": {
+      "minTests": 114,
+      "minPass": 114
+    },
+    "dsh-fleet": {
+      "minTests": 148,
+      "minPass": 148
+    },
+    "frontend-verify": {
+      "minTests": 366,
+      "minPass": 365
+    }
+  }
+}

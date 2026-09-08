@@ -1,7 +1,7 @@
 // 国产模型能力插件(持久化):视觉 / 语音 / 生图 / 多模型委派 / ACP 委派。
 // 由动态插件 eyes-1 / voic-7 / delg-4 / dkim-8 固化而来。
 import z from '@deepseek-ai/schemastery'
-import { randomUUID } from 'node:crypto'
+import { randomInt, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createReadStream } from 'node:fs'
 import { appendFile, mkdir, open as openFile, readdir, readFile, realpath, stat, unlink, writeFile } from 'node:fs/promises'
@@ -372,6 +372,21 @@ function apply(ctx) {
   // PLAN_DIR 是 plan_run(出计划/写回结果)、exit_plan_mode 批准落盘(A3)与这条路由三方共用的
   // 唯一目录。DSH_CN_PLAN_DIR 只给离线测试指到临时目录用,默认值不变。
   const PLAN_DIR = process.env.DSH_CN_PLAN_DIR || join(homedir(), '.dsh', 'logs', 'plans')
+  // 计划文件名。原本是 `plan-${Date.now()}.json`,同一毫秒内建两份计划必然重名 ——
+  // writePlanObject 的 create:true 会 fail-closed 报「plan file already exists」而不是覆写
+  // (那道闸是对的,保留),但用户看到的是「计划保存失败」,一次正当操作被时钟精度挡掉。
+  // 这不是理论风险:本轮整合期 cn-capabilities 全套件三跑两绿一红,红的那次就是这个碰撞。
+  //
+  // 尾巴用**纯数字**而不是 hex,因为 plan-path.mjs 的 PLAN_NAME 是 /^plan-\d+\.json$/,
+  // 且 /api/cn/plans 与 plan_run 的 planFile 参数共用这道闸 —— 换成 hex 会让新建的计划
+  // 立刻通不过自己的路径校验。位数不限,所以直接接 6 位随机数字即可,契约不用动。
+  // 与 dsh-agos-router 的 asm-/dsp- 走的是同一条取舍(见 router lib/ids.js)。
+  // ⚠️ 尾数与时间戳之间**没有分隔符**(PLAN_NAME 的正则不允许第二个连字符),所以这个名字
+  // 不再是可解析的时间戳:Number(name.slice(5,-5)) 会得到纪元后约 5000 万年,且不报错。
+  // 任何要取时间的地方读文件内容里的时间字段(如 executedAt),不得解析文件名。
+  // 今天全仓没有这种消费者(接线审查者按 slice/substring/Number/replace 四种形状搜过),
+  // 这句是写给将来的。由接线审查者指出(C2)。
+  const planFileName = () => `${PLAN_DIR}/plan-${Date.now()}${String(randomInt(0, 1_000_000)).padStart(6, '0')}.json`
   // 计划 markdown 的第一个标题(与宿主 dsh-plan-mode 的 firstHeading 同一口径)
   const firstHeading = (md) => {
     for (const line of String(md || '').split('\n')) {
@@ -1922,7 +1937,7 @@ const PROVIDER_DEFAULT_MODEL = {
         if (!obj || !Array.isArray(obj.steps) || !obj.steps.length) {
           return '❌ 计划未按 JSON 返回,原文:\n' + pr.text.slice(0, 600)
         }
-        const file = PLAN_DIR + '/plan-' + Date.now() + '.json'
+        const file = planFileName()
         try {
           await writePlanObject(file, { goal: String(args.goal), planner, source: 'plan_run', steps: obj.steps }, { create: true })
         } catch (error) { return '❌ 计划保存失败: ' + String(error.message || error) }
@@ -1947,7 +1962,7 @@ const PROVIDER_DEFAULT_MODEL = {
       })
       if (!gate.ok) {
         if (!planFromFile && !planFile) {
-          const file = PLAN_DIR + '/plan-' + Date.now() + '.json'
+          const file = planFileName()
           try {
             await writePlanObject(file, { goal: String(args.goal || planObj.goal || ''), planner: String(planObj.planner || 'plan-mode'), source: String(planObj.source || 'plan-mode'), steps: planObj.steps }, { create: true })
             planFile = file
@@ -1980,7 +1995,11 @@ const PROVIDER_DEFAULT_MODEL = {
       if (!planFile) {
         if (matched) planFile = matched.file
         else {
-          planFile = PLAN_DIR + '/plan-' + Date.now() + '.json'
+          // 四处生成点里后果最重的一处:这里是「人已批准、马上要执行」那一步,同毫秒重名会让
+          // 一次已获批准的执行被时钟精度挡掉(下面的 create:true 是同一道 fail-closed EEXIST 闸)。
+          // 主控首轮只修了另外三处 —— 漏掉这里是因为按模板字面量 `plan-${Date.now()}` 搜索,
+          // 而这一行是字符串拼接写法,形状不同。由接线审查者独立发现。
+          planFile = planFileName()
           try {
             await writePlanObject(planFile, { goal: goalGiven, planner: plannerLabel, source, steps, sessionId }, { create: true })
           } catch (e) { return '❌ 计划落盘失败，未执行:' + String((e && e.message) || e) }
@@ -2240,7 +2259,7 @@ const PROVIDER_DEFAULT_MODEL = {
     try { obj = JSON.parse(m[1]) } catch { obj = parseFirstJsonObject(m[1]) }
     const steps = obj && Array.isArray(obj.steps) ? obj.steps : null
     if (!steps || !steps.length) return
-    const file = PLAN_DIR + '/plan-' + Date.now() + '.json'
+    const file = planFileName()
     writePlanObject(file, {
       goal: firstHeading(plan), planner: 'plan-mode', source: 'plan-mode', sessionId: session.id,
       approvedAt: new Date().toISOString(), markdown: plan, steps,

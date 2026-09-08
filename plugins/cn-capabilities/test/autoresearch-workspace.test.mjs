@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -442,8 +442,11 @@ test('real OS sandbox denies outside reads/writes, verifier writes, inherited se
   t.after(() => { delete process.env.AGOS_SYNTHETIC_SECRET })
   const sandbox = await verificationSandbox(evaluator)
   if (process.platform !== 'darwin') {
-    assert.equal(sandbox.ok, false)
-    assert.match(sandbox.reason, /verification-unavailable/)
+    // Seatbelt is the only boundary this suite can exercise. On any other host the
+    // contract is either a Linux backend (whose runtime is covered by a Linux runner,
+    // not here) or a fail-closed refusal.
+    if (sandbox.ok) assert.match(sandbox.kind, /^linux-(bubblewrap|unshare)$/)
+    else assert.match(sandbox.reason, /verification-unavailable/)
     return
   }
   assert.equal(sandbox.ok, true)
@@ -463,4 +466,102 @@ const s=net.connect({host:"127.0.0.1",port:${port}});s.on("connect",()=>{r.netwo
   assert.deepEqual(JSON.parse(result.stdout), { readOutside: true, writeOutside: true, writeVerifier: true, envClean: true, scratch: true, network: true })
   assert.equal(await readFile(outside, 'utf8'), 'outside must survive')
   assert.equal(await readFile(protectedFile, 'utf8'), 'trusted score')
+})
+
+/** ESRCH means gone; EPERM means it exists but belongs to someone else. */
+function processAlive(pid) {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return err.code === 'EPERM'
+  }
+}
+
+async function assertReaped(pid, label) {
+  const deadline = Date.now() + 8000
+  while (Date.now() < deadline) {
+    if (!processAlive(pid)) return
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  assert.fail(`${label} (pid ${pid}) survived the timeout kill`)
+}
+
+test('a sandboxed timeout reaps the whole process group and leaves no orphan', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agos-orphan-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const evaluator = join(root, 'evaluation')
+  await mkdir(evaluator)
+  const sandbox = await verificationSandbox(evaluator)
+  if (!sandbox.ok) {
+    assert.match(sandbox.reason, /verification-unavailable/)
+    return
+  }
+
+  // `sleep` is a grandchild: it outlives the shell unless the group itself is signalled.
+  // It is also short-lived, so a regression here cannot strand a process for minutes.
+  const command = 'sleep 45 & echo $! > "$AGOS_VERIFY_SCRATCH/grandchild.pid"; wait'
+  const running = execCommand(command, {
+    cwd: evaluator,
+    env: sandbox.env,
+    sandboxLauncher: sandbox.launcher,
+    timeoutMs: 1500,
+  })
+  // A surviving grandchild keeps the inherited stdio pipe open, so the promise would
+  // never settle. Bound the wait rather than hanging until the grandchild expires.
+  const watchdog = new Promise((resolve) => setTimeout(() => resolve('watchdog'), 20000).unref())
+  const result = await Promise.race([running, watchdog])
+  assert.notEqual(result, 'watchdog', 'timeout did not reap the child: execCommand never settled')
+  assert.notEqual(result.exitCode, 0, 'a timed-out command must never look successful')
+  assert.ok(result.pid > 0, 'the spawned pid must be reported')
+
+  const grandchild = Number((await readFile(join(sandbox.scratch, 'grandchild.pid'), 'utf8')).trim())
+  assert.ok(Number.isInteger(grandchild) && grandchild > 0, 'the grandchild must really have started')
+  assert.notEqual(grandchild, result.pid, 'the grandchild is a separate process')
+
+  await assertReaped(grandchild, 'orphaned grandchild')
+  // The wrapper is spawned detached, so its pid is also the process-group id.
+  await assertReaped(-result.pid, 'sandbox process group')
+})
+
+test('artifact export removes every temporary candidate and evaluator repo', async (t) => {
+  // Point mkdtemp at a private root so leftovers can be attributed to this test alone.
+  const privateTmp = await mkdtemp(join(tmpdir(), 'agos-ar-tmproot-'))
+  const previous = process.env.TMPDIR
+  process.env.TMPDIR = privateTmp
+  t.after(async () => {
+    if (previous === undefined) delete process.env.TMPDIR
+    else process.env.TMPDIR = previous
+    await rm(privateTmp, { recursive: true, force: true })
+  })
+
+  const repo = await makeTempRepo(t)
+  const { workspace } = await openWorkspace(t, repo)
+  assert.ok(workspace.workRoot.startsWith(privateTmp), 'workspace must land in the private temp root')
+
+  assert.equal((await measureIsolatedBaseline({ workspace, verifyCmd: VERIFY })).metric, 1)
+  assert.equal((await applyCandidatePatch(workspace, candidatePatch)).ok, true)
+  assert.equal((await runAutoresearchIteration({ workspace, verifyCmd: VERIFY })).status, 'improved')
+
+  // Export outside the source repo, so `originalIntact` stays a real signal.
+  const artifactDir = await mkdtemp(join(privateTmp, 'agos-ar-artifacts-'))
+  const artifacts = await saveAutoresearchArtifacts(workspace, artifactDir, {})
+  const { workRoot, isolatedDir, trustedDir } = workspace
+  const disposed = await disposeWorkspace(workspace)
+  assert.equal(disposed.cleaned, true)
+  assert.equal(disposed.originalIntact, true)
+
+  for (const dir of [workRoot, isolatedDir, trustedDir]) {
+    await assert.rejects(stat(dir), (err) => err.code === 'ENOENT', `${dir} must be removed`)
+  }
+  // Each verification also clones a throwaway evaluator; none of those may survive.
+  const leftovers = (await readdir(privateTmp)).filter((entry) => entry.startsWith('agos-autoresearch'))
+  assert.deepEqual(leftovers, [], `temporary repos survived: ${leftovers.join(', ')}`)
+
+  // The exported artifacts outlive the workspace they were produced in.
+  assert.match(await readFile(artifacts.patchPath, 'utf8'), /\+export const n = 8/)
+  const manifest = JSON.parse(await readFile(artifacts.manifestPath, 'utf8'))
+  assert.equal(manifest.bestMetric, 8)
+  assert.match(manifest.verificationBoundary, /^(macos-seatbelt|linux-bubblewrap|linux-unshare)$/)
+  assert.ok(manifest.verificationCapabilities.length > 0)
 })

@@ -394,6 +394,106 @@ test('a successful snapshot without removable globals does not claim a trim', as
   assert.equal(describeTurnEvidence('no-change', evidence, {}, { turn: 0, step: 0 }).skills.trimmed, false)
 })
 
+// Two snapshot rows can share a name *and* a description while their sources
+// disagree. A first-wins/last-wins winner map would then label the host row by
+// whichever copy it happened to keep; if that copy were the user-root one, the
+// row would be trimmed even though the project copy may be the live winner.
+// Ambiguity has to stay unknown, and unknown has to stay in the catalog.
+const collisionSkills = () => ({
+  inbox: runtimeSkill('inbox-triage', 'inbox cleanup', 'user-dsh'),
+  projectTwin: runtimeSkill('deploy', '部署当前项目', 'project-dsh'),
+  globalTwin: runtimeSkill('deploy', '部署当前项目', 'user-dsh'),
+  globalOnly: runtimeSkill('playwright', 'browser automation', 'user-agents'),
+  projectOnly: runtimeSkill('repo-lint', 'lint this repository', 'project-dsh'),
+})
+
+test('same-name same-description rows from different sources stay unknown and are kept', () => {
+  const { inbox, projectTwin, globalTwin, globalOnly, projectOnly } = collisionSkills()
+  // Host published entries carry {name, description} only — no source to read.
+  const entries = [inbox, projectTwin, globalOnly, projectOnly]
+    .map(({ name, description }) => ({ name, description }))
+  const collided = [inbox, projectTwin, globalTwin, globalOnly, projectOnly]
+  const kept = trimRuntimeCatalogEntries(entries, ['inbox-triage'], collided, {
+    snapshot: { complete: true, skills: collided },
+  })
+  assert.equal(kept.ok, true)
+  // playwright is an unambiguous global and goes; the collided name stays.
+  assert.deepEqual(kept.entries.map((entry) => entry.name), ['inbox-triage', 'deploy', 'repo-lint'])
+  assert.equal(kept.entries[1], entries[1])
+  assert.equal(kept.entries[1].source, undefined)
+  assert.equal(catalogEntryOrigin(kept.entries[1]), 'unknown')
+
+  // Snapshot order must not decide provenance.
+  const swapped = [inbox, globalTwin, projectTwin, globalOnly, projectOnly]
+  const keptSwapped = trimRuntimeCatalogEntries(entries, ['inbox-triage'], swapped, {
+    snapshot: { complete: true, skills: swapped },
+  })
+  assert.deepEqual(keptSwapped.entries.map((entry) => entry.name), ['inbox-triage', 'deploy', 'repo-lint'])
+
+  // Same name, same description, and both copies fold to global: still ambiguous,
+  // so still kept. Over-retention is the only safe direction here.
+  const bothGlobal = [inbox, globalTwin, { ...globalTwin, source: 'global-agents' }, projectOnly]
+  const keptBothGlobal = trimRuntimeCatalogEntries(entries, ['inbox-triage'], bothGlobal, {
+    snapshot: { complete: true, skills: bothGlobal },
+  })
+  assert.equal(keptBothGlobal.entries.some((entry) => entry.name === 'deploy'), true)
+
+  // Control: remove the collision and the very same row resolves to global and
+  // goes. The retention above is the ambiguity rule, not a trim that never fires.
+  const resolved = [inbox, globalTwin, globalOnly, projectOnly]
+  const trimmed = trimRuntimeCatalogEntries(entries, ['inbox-triage'], resolved, {
+    snapshot: { complete: true, skills: resolved },
+  })
+  assert.deepEqual(trimmed.entries.map((entry) => entry.name), ['inbox-triage', 'repo-lint'])
+})
+
+test('collided provenance keeps both host rows and never books a no-op as a dedup', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'agos-runtime-collision-'))
+  const evidence = createTurnEvidenceStore({ home })
+  const ctx = scopedSkillsContext()
+  bindRuntimeSkillCatalogTrim(ctx, { home, evidence })
+  const { inbox, projectTwin, globalTwin, globalOnly } = collisionSkills()
+  let skills = [inbox, projectTwin, globalTwin, globalOnly]
+  ctx.provide({ snapshot: async () => ({ complete: true, skills }) })
+  const agent = { id: 'collision-session', session: { header: { cwd: '/synthetic/project' } } }
+  const publish = (rows) => liveCatalog(rows.map(({ name, description }) => ({ name, description })))
+  const step = (id, decision) => ctx.handler({
+    agent, messages: [{ role: 'user', content: 'inbox' }], turn: 7, step: id,
+  }, async () => decision)
+
+  // The host may publish both copies. Neither may be dropped as a "duplicate",
+  // and nothing removable means the decision is returned untouched.
+  const both = publish([inbox, projectTwin, globalTwin])
+  const noop = await step(1, both)
+  assert.equal(noop, both)
+  assert.deepEqual(noop.messages[0].source.entries.map((entry) => entry.name), ['inbox-triage', 'deploy', 'deploy'])
+  assert.equal(noop.messages[0].source.trimmed, undefined)
+  const noopView = describeTurnEvidence(agent.id, evidence, {}, { turn: 7, step: 1 })
+  assert.equal(noopView.skills.trimmed, false)
+  assert.equal(noopView.skills.served, null)
+  assert.equal(noopView.skills.copy, '本跳目录未发生裁剪，保留宿主目录')
+  assert.equal(noopView.persisted, true)
+
+  // A real trim still fires beside the collision: the unambiguous global goes,
+  // both collided rows stay, and served counts exactly what survived.
+  const mixed = publish([inbox, projectTwin, globalTwin, globalOnly])
+  const trimmed = await step(2, mixed)
+  assert.notEqual(trimmed, mixed)
+  assert.deepEqual(trimmed.messages[0].source.entries.map((entry) => entry.name), ['inbox-triage', 'deploy', 'deploy'])
+  assert.doesNotMatch(trimmed.messages[0].content[0].text, /playwright/)
+  const trimmedView = describeTurnEvidence(agent.id, evidence, {}, { turn: 7, step: 2 })
+  assert.equal(trimmedView.skills.trimmed, true)
+  assert.deepEqual(trimmedView.skills.served, ['inbox-triage', 'deploy', 'deploy'])
+  assert.equal(trimmedView.skills.copy, '本跳进模型 3 个技能')
+
+  // Reversing the snapshot changes nothing: the loser is never silently dropped.
+  skills = [globalOnly, globalTwin, projectTwin, inbox]
+  const reversed = await step(3, publish([inbox, projectTwin, globalTwin, globalOnly]))
+  assert.deepEqual(reversed.messages[0].source.entries.map((entry) => entry.name), ['inbox-triage', 'deploy', 'deploy'])
+  assert.deepEqual(describeTurnEvidence(agent.id, evidence, {}, { turn: 7, step: 3 }).skills.served,
+    ['inbox-triage', 'deploy', 'deploy'])
+})
+
 test('operator pin rejects over-limit text instead of silent end-chop', () => {
   const over = pinSessionMemoryItem({ kind: 'constraint', text: '约'.repeat(201), confirm: true })
   assert.equal(over.ok, false)

@@ -76,7 +76,10 @@ const runDirPrelude = (workspace, runId, { stream = false } = {}) => {
 // The control files live at the run root, while .trace may contain credentials
 // in provider errors. Excluding matching basenames at every depth is deliberately
 // stricter than the old workspace browser.
-const artifactFind = "find . -maxdepth 6 -type f -not -name .trace -not -path '*/.trace/*' -not -name pid -not -name exit -not -name err.txt 2>/dev/null"
+// -links 1 is the remote counterpart of the local nlink check: find -type f
+// happily matches a hardlink, and a hardlink to a file outside the run root is
+// indistinguishable from a regular artifact by every other test available here.
+const artifactFind = "find . -maxdepth 6 -type f -links 1 -not -name .trace -not -path '*/.trace/*' -not -name pid -not -name exit -not -name err.txt 2>/dev/null"
 
 const dualStatShell = [
   `if size=$(stat -c '%s' \"$f\" 2>/dev/null); then mtime=$(stat -c '%Y' \"$f\" 2>/dev/null || printf 0)`,
@@ -171,19 +174,46 @@ const artifactLimitError = (manifest) => {
   }
 }
 
+// POSIX sh has no O_NOFOLLOW, so the closest available equivalent to opening
+// each component is to chdir into it and confirm the shell's *held* working
+// directory is the physical path we expected. `cd` is a chdir and `pwd -P`
+// reports the canonical name of the directory the process now holds, so a
+// directory swapped after the check cannot silently redirect the rest of the
+// command the way a re-resolved path prefix would. Only the leaf is left as a
+// name, and it is resolved relative to that pinned directory.
 const pathSegmentGuard = (path) => {
   const safe = safeRelPath(path)
   if (!safe || isExcludedArtifactPath(safe)) throw new TypeError('invalid artifact path')
-  // Disable globbing before splitting only on '/'. Every segment, including the
-  // leaf, is checked so a symlink cannot escape the pinned run directory.
-  return `p=${shq(safe)}; set -f; oldifs=$IFS; IFS=/; set -- $p; IFS=$oldifs; cur=.; ` +
-    `for seg do cur=\"$cur/$seg\"; [ ! -L \"$cur\" ] || { printf 'E\\tUNSAFE_PATH\\n'; exit 0; }; done`
+  const refuse = `{ printf 'E\\tUNSAFE_PATH\\n'; exit 0; }`
+  return [
+    `p=${shq(safe)}`,
+    // Disable globbing before splitting only on '/'.
+    `set -f; oldifs=$IFS; IFS=/; set -- $p; IFS=$oldifs`,
+    `seg_base=$(pwd -P) || ${refuse}`,
+    `leaf=`,
+    `while [ $# -gt 0 ]; do seg=$1; shift; ` +
+      `if [ $# -eq 0 ]; then leaf=$seg; break; fi; ` +
+      `[ -d \"$seg\" ] && [ ! -L \"$seg\" ] || ${refuse}; ` +
+      `cd \"$seg\" 2>/dev/null || ${refuse}; ` +
+      `seg_phys=$(pwd -P) || ${refuse}; ` +
+      `[ \"$seg_phys\" = \"$seg_base/$seg\" ] || ${refuse}; ` +
+      `seg_base=$seg_phys; done`,
+    `[ -n \"$leaf\" ] || ${refuse}`,
+    `[ ! -L \"$leaf\" ] || ${refuse}`,
+    // Link count, GNU then BSD then a POSIX `ls` fallback. There is no silent
+    // degradation: if none of the three can report it we refuse, because
+    // without a link count a hardlink to outside content is undetectable.
+    `if links=$(stat -c '%h' \"$leaf\" 2>/dev/null); then :; ` +
+      `elif links=$(stat -f '%l' \"$leaf\" 2>/dev/null); then :; ` +
+      `else links=$(ls -ldn -- \"$leaf\" 2>/dev/null | awk 'NR==1 { print $2 }'); fi`,
+    `case \"$links\" in 1) ;; *) ${refuse} ;; esac`,
+  ].join('; ')
 }
 
 const buildArtifactFileProbeCommand = ({ workspace, runId, path }) => {
   const safe = safeRelPath(path)
   return `${runDirPrelude(workspace, runId)}; ${pathSegmentGuard(safe)}; ` +
-    `[ -f \"$p\" ] || { printf 'E\\tFILE_NOT_FOUND\\n'; exit 0; }; f=$p; ${dualStatShell}; ` +
+    `[ -f \"$leaf\" ] || { printf 'E\\tFILE_NOT_FOUND\\n'; exit 0; }; f=$leaf; ${dualStatShell}; ` +
     `printf 'OK\\t%s\\t%s\\n' \"$mtime\" \"$size\"`
 }
 
@@ -202,8 +232,19 @@ const parseArtifactFileProbe = (output) => {
 
 const buildArtifactFileCommand = ({ workspace, runId, path }) => {
   const safe = safeRelPath(path)
+  // The leaf is still a name at `cat` time, which POSIX sh cannot avoid. Record
+  // its identity first, stream, then re-check: if the leaf was swapped under us
+  // the non-zero exit destroys the HTTP response instead of letting a clean 200
+  // imply the bytes were the artifact we validated.
   return `${runDirPrelude(workspace, runId, { stream: true })}; ${pathSegmentGuard(safe)}; ` +
-    `[ -f \"$p\" ] || exit 9; exec cat -- \"$p\"`
+    `[ -f \"$leaf\" ] || exit 9; ` +
+    `if before=$(stat -c '%d:%i:%h' \"$leaf\" 2>/dev/null); then :; ` +
+    `elif before=$(stat -f '%d:%i:%l' \"$leaf\" 2>/dev/null); then :; else before=; fi; ` +
+    `[ -n \"$before\" ] || exit 9; ` +
+    `cat -- \"$leaf\" || exit 9; ` +
+    `if after=$(stat -c '%d:%i:%h' \"$leaf\" 2>/dev/null); then :; ` +
+    `elif after=$(stat -f '%d:%i:%l' \"$leaf\" 2>/dev/null); then :; else after=; fi; ` +
+    `[ \"$after\" = \"$before\" ] || exit 9`
 }
 
 const buildArtifactTgzCommand = ({ workspace, runId }) => {
@@ -238,113 +279,271 @@ const inside = (root, candidate) => {
   return rel === '' || (rel !== '..' && !rel.startsWith('..' + sep))
 }
 
-const localRunRoot = async (target, fsApi = fs) => {
-  try {
-    const workspaceStat = await fsApi.lstat(target.workspace)
-    if (!workspaceStat.isDirectory() || workspaceStat.isSymbolicLink()) return null
-    const workspaceReal = await fsApi.realpath(target.workspace)
-    const tasks = join(target.workspace, 'tasks')
-    const tasksStat = await fsApi.lstat(tasks)
-    if (!tasksStat.isDirectory() || tasksStat.isSymbolicLink()) return null
-    const tasksReal = await fsApi.realpath(tasks)
-    if (tasksReal !== join(workspaceReal, 'tasks')) return null
-    const run = join(tasks, target.runId)
-    const runStat = await fsApi.lstat(run)
-    if (!runStat.isDirectory() || runStat.isSymbolicLink()) return null
-    const runReal = await fsApi.realpath(run)
-    if (runReal !== join(tasksReal, target.runId) || !inside(tasksReal, runReal)) return null
-    return runReal
-  } catch { return null }
+// ---------------------------------------------------------------------------
+// Local (Codex host) artifact reads.
+//
+// Every guarantee here is a syscall guarantee bound to a file object, never a
+// comparison of two path strings resolved at two different instants:
+//   * each component is opened with O_NOFOLLOW, so the kernel refuses a symlink
+//     anywhere in the chain (ELOOP) instead of us lstat-ing and hoping
+//   * non-leaf components add O_DIRECTORY, so a component swapped for a regular
+//     file is ENOTDIR at open time rather than a surprise later
+//   * size/mtime/mode come from fstat THROUGH the returned handle, and bytes are
+//     read from that same handle. The leaf is never reopened by path
+//   * nlink must be 1. realpath() reports a hardlink under its inside name, so
+//     nlink is the only way to prove the inode has no name outside the run root
+// ---------------------------------------------------------------------------
+
+class ArtifactRefusal extends Error {
+  constructor(reason, { status = 404, capability = false, tamper = false } = {}) {
+    super(reason)
+    this.name = 'ArtifactRefusal'
+    this.reason = reason
+    this.status = status
+    this.capability = capability
+    this.tamper = tamper
+  }
 }
 
-const localArtifactFile = async (target, rawPath, fsApi = fs) => {
-  const path = safeRelPath(rawPath)
-  if (!path || isExcludedCodexArtifactPath(path)) return null
-  const runReal = await localRunRoot(target, fsApi)
-  if (!runReal) return null
-  let current = runReal
-  const parts = path.split('/')
-  for (let index = 0; index < parts.length; index++) {
-    current = join(current, parts[index])
-    let stat
-    try { stat = await fsApi.lstat(current) } catch { return null }
-    if (stat.isSymbolicLink()) return null
-    if (index < parts.length - 1 && !stat.isDirectory()) return null
-    if (index === parts.length - 1 && !stat.isFile()) return null
+const isArtifactRefusal = (error) => error instanceof ArtifactRefusal || error?.name === 'ArtifactRefusal'
+
+// Fail closed. A platform that cannot express "open exactly this name, never a
+// symlink" cannot be served safely, and quietly degrading to lstat-then-open is
+// the whole class of bug this module exists to prevent.
+const noFollowFlags = (constants = fsConstants) => {
+  const missing = ['O_NOFOLLOW', 'O_DIRECTORY']
+    .filter((name) => !Number.isInteger(constants?.[name]) || constants[name] === 0)
+  if (missing.length) {
+    throw new ArtifactRefusal(
+      `platform cannot guarantee symlink-safe artifact reads (missing ${missing.join(', ')})`,
+      { status: 500, capability: true },
+    )
   }
-  try {
-    const real = await fsApi.realpath(current)
-    if (!inside(runReal, real)) return null
-    const stat = await fsApi.lstat(real)
-    if (!stat.isFile() || stat.isSymbolicLink()) return null
-    return { path, absolute: real, runReal, stat }
-  } catch { return null }
+  const read = Number(constants.O_RDONLY) || 0
+  return {
+    file: read | constants.O_NOFOLLOW,
+    directory: read | constants.O_NOFOLLOW | constants.O_DIRECTORY,
+  }
 }
+
+// Read the flags from the same fs surface that will issue the syscalls, so an
+// injected or reduced surface is gated by the same fail-closed check.
+const flagsFor = (fsApi) => noFollowFlags(fsApi?.constants ?? fsConstants)
 
 const sameFile = (left, right) => Number(left?.dev) === Number(right?.dev) && Number(left?.ino) === Number(right?.ino)
 
-const openLocalArtifactFile = async (target, rawPath, fsApi = fs) => {
-  const before = await localArtifactFile(target, rawPath, fsApi)
-  if (!before) return null
-  let handle
-  try {
-    handle = await fsApi.open(before.absolute, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0))
-    const opened = await handle.stat()
-    if (!opened.isFile() || !sameFile(opened, before.stat)) { await handle.close(); return null }
-    // Revalidate every parent after open. If a directory was swapped to a
-    // symlink between validation and open, the canonical leaf or inode differs.
-    const after = await localArtifactFile(target, rawPath, fsApi)
-    if (!after || after.absolute !== before.absolute || !sameFile(opened, after.stat)) { await handle.close(); return null }
-    return { ...after, stat: opened, handle }
-  } catch {
-    try { await handle?.close() } catch {}
-    return null
+const closeQuietly = async (...handles) => {
+  await Promise.allSettled(handles.filter(Boolean).map((handle) => handle.close()))
+}
+
+// The name we resolved must still be its own canonical form and must still name
+// the exact object we validated. A component swapped to a symlink fails the
+// first check; a swap that was reverted fails the second.
+const assertPinnedName = async (fsApi, path, pinned, label) => {
+  let canonical
+  try { canonical = await fsApi.realpath(path) }
+  catch { throw new ArtifactRefusal(`${label} disappeared during validation`, { tamper: true }) }
+  if (canonical !== path) throw new ArtifactRefusal(`${label} is not its own canonical path`, { tamper: true })
+  let byName
+  try { byName = await fsApi.lstat(path) }
+  catch { throw new ArtifactRefusal(`${label} disappeared during validation`, { tamper: true }) }
+  if (byName.isSymbolicLink() || !sameFile(byName, pinned)) {
+    throw new ArtifactRefusal(`${label} was replaced during validation`, { tamper: true })
   }
 }
 
-const localFileBinary = async (path, fsApi = fs) => {
-  const handle = await fsApi.open(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0))
+// ELOOP means the component is a symlink and ENOTDIR means it is not a
+// directory. Both decisions are made by the kernel inside this one open, not by
+// a stat that something else could invalidate afterwards.
+const openDirectoryHandle = async (fsApi, flags, path, label) => {
+  let handle
+  try { handle = await fsApi.open(path, flags.directory) }
+  catch (error) { throw new ArtifactRefusal(`${label} is not a plain directory (${error?.code || 'EOPEN'})`) }
   try {
-    const bytes = Buffer.allocUnsafe(4096)
-    const read = await handle.read(bytes, 0, bytes.length, 0)
-    return bytes.subarray(0, read.bytesRead).includes(0)
-  } finally { await handle.close() }
+    const stat = await handle.stat()
+    if (!stat.isDirectory()) throw new ArtifactRefusal(`${label} is not a directory`)
+    return { handle, stat }
+  } catch (error) {
+    await closeQuietly(handle)
+    throw error
+  }
+}
+
+const openLocalRunRoot = async (target, fsApi = fs) => {
+  const flags = flagsFor(fsApi)
+  const runId = String(target?.runId ?? '')
+  if (!validateRunId(runId)) throw new ArtifactRefusal('invalid run id')
+  const workspace = String(target?.workspace ?? '').trim().replace(/\/+$/, '')
+  if (!workspace) throw new ArtifactRefusal('workspace is required')
+
+  let workspaceHandle
+  let tasksHandle
+  let runHandle
+  try {
+    workspaceHandle = await openDirectoryHandle(fsApi, flags, workspace, 'workspace')
+    // The configured workspace may legitimately be a non-canonical spelling
+    // (/var vs /private/var), so pin it by inode rather than by string. Every
+    // path below is built from the canonical form and must stay canonical.
+    let workspaceReal
+    try { workspaceReal = await fsApi.realpath(workspace) }
+    catch { throw new ArtifactRefusal('workspace disappeared during validation', { tamper: true }) }
+    const workspaceByName = await fsApi.lstat(workspaceReal)
+    if (workspaceByName.isSymbolicLink() || !sameFile(workspaceByName, workspaceHandle.stat)) {
+      throw new ArtifactRefusal('workspace was replaced during validation', { tamper: true })
+    }
+
+    const tasksPath = join(workspaceReal, 'tasks')
+    tasksHandle = await openDirectoryHandle(fsApi, flags, tasksPath, 'tasks directory')
+    await assertPinnedName(fsApi, tasksPath, tasksHandle.stat, 'tasks directory')
+
+    const runPath = join(tasksPath, runId)
+    runHandle = await openDirectoryHandle(fsApi, flags, runPath, 'run directory')
+    await assertPinnedName(fsApi, runPath, runHandle.stat, 'run directory')
+    if (!inside(tasksPath, runPath)) throw new ArtifactRefusal('run directory escapes the tasks directory', { tamper: true })
+
+    const root = { runReal: runPath, handle: runHandle.handle, stat: runHandle.stat }
+    runHandle = null
+    return root
+  } finally {
+    await closeQuietly(workspaceHandle?.handle, tasksHandle?.handle, runHandle?.handle)
+  }
+}
+
+const openLocalArtifactFile = async (target, rawPath, fsApi = fs, { root = null } = {}) => {
+  const flags = flagsFor(fsApi)
+  const path = safeRelPath(rawPath)
+  if (!path || isExcludedCodexArtifactPath(path)) throw new ArtifactRefusal('invalid artifact path')
+  const runRoot = root ?? await openLocalRunRoot(target, fsApi)
+  const chain = [{ path: runRoot.runReal, stat: runRoot.stat, label: 'run directory' }]
+  const directories = []
+  let handle
+  try {
+    const parts = path.split('/')
+    let current = runRoot.runReal
+    for (let index = 0; index < parts.length - 1; index++) {
+      current = join(current, parts[index])
+      const label = `artifact directory ${parts[index]}`
+      const opened = await openDirectoryHandle(fsApi, flags, current, label)
+      directories.push(opened.handle)
+      await assertPinnedName(fsApi, current, opened.stat, label)
+      chain.push({ path: current, stat: opened.stat, label })
+    }
+    const absolute = join(current, parts[parts.length - 1])
+    try { handle = await fsApi.open(absolute, flags.file) }
+    catch (error) { throw new ArtifactRefusal(`artifact is not a plain file (${error?.code || 'EOPEN'})`) }
+    const stat = await handle.stat()
+    if (!stat.isFile()) throw new ArtifactRefusal('artifact is not a regular file')
+    if (Number(stat.nlink) !== 1) {
+      throw new ArtifactRefusal(
+        `artifact has ${Number(stat.nlink)} hard links, so it may alias content outside the run root`,
+        { tamper: true },
+      )
+    }
+    // Bind the opened object to the name we used, then re-verify every ancestor.
+    // A directory swapped to a symlink and swapped back would pass the
+    // descent-time checks but not this inode comparison.
+    await assertPinnedName(fsApi, absolute, stat, 'artifact')
+    if (!inside(runRoot.runReal, absolute)) throw new ArtifactRefusal('artifact escapes the run root', { tamper: true })
+    for (const link of chain) await assertPinnedName(fsApi, link.path, link.stat, link.label)
+    return { path, absolute, runReal: runRoot.runReal, stat, handle }
+  } catch (error) {
+    await closeQuietly(handle)
+    throw error
+  } finally {
+    await closeQuietly(...directories)
+    if (!root) await closeQuietly(runRoot.handle)
+  }
+}
+
+// Read the sniff window from the handle we already validated. Reopening by path
+// here was the manifest's TOCTOU: the second resolution could differ.
+const handleBinary = async (handle) => {
+  const bytes = Buffer.allocUnsafe(4096)
+  const read = await handle.read(bytes, 0, bytes.length, 0)
+  return bytes.subarray(0, read.bytesRead).includes(0)
+}
+
+const readLocalArtifactFile = async (target, rawPath, { maxBytes = 200000, fsApi = fs } = {}) => {
+  const file = await openLocalArtifactFile(target, rawPath, fsApi)
+  try {
+    const size = Number(file.stat.size) || 0
+    const limit = Math.min(size, Math.max(1, Number(maxBytes) || 200000))
+    if (limit <= 0) return Buffer.alloc(0)
+    const bytes = Buffer.allocUnsafe(limit)
+    const read = await file.handle.read(bytes, 0, limit, 0)
+    return bytes.subarray(0, read.bytesRead)
+  } finally { await closeQuietly(file.handle) }
 }
 
 const localArtifactManifest = async (target, { signal, fsApi = fs } = {}) => {
-  const runReal = await localRunRoot(target, fsApi)
-  if (!runReal) return { ok: false, status: 404, error: 'run not found' }
+  const flags = flagsFor(fsApi)
+  let root
+  try { root = await openLocalRunRoot(target, fsApi) }
+  catch (error) {
+    if (isArtifactRefusal(error) && !error.capability && !error.tamper) return { ok: false, status: 404, error: 'run not found' }
+    throw error
+  }
   const details = []
   let count = 0
   let totalBytes = 0
-  const walk = async (directory, prefix = '', depth = 0) => {
+  const walk = async (directory, pinned, prefix, depth) => {
     if (signal?.aborted) throw signal.reason || new Error('aborted')
     if (depth >= 6) return
+    // readdir resolves `directory` by path, so pin the name to the object we
+    // opened on both sides of the listing.
+    await assertPinnedName(fsApi, directory, pinned, 'artifact directory')
     const entries = await fsApi.readdir(directory, { withFileTypes: true })
+    await assertPinnedName(fsApi, directory, pinned, 'artifact directory')
     for (const entry of entries) {
       if (signal?.aborted) throw signal.reason || new Error('aborted')
       if (entry.isSymbolicLink()) continue
       const path = prefix ? `${prefix}/${entry.name}` : entry.name
       if (!safeRelPath(path) || isExcludedCodexArtifactPath(path)) continue
       const absolute = join(directory, entry.name)
-      const stat = await fsApi.lstat(absolute)
-      if (stat.isSymbolicLink()) continue
-      if (stat.isDirectory()) { await walk(absolute, path, depth + 1); continue }
-      if (!stat.isFile()) continue
-      count += 1
-      totalBytes += stat.size
-      if (details.length < ARTIFACT_DETAIL_SENTINEL) {
-        details.push({ path, size: stat.size, mtime: Math.floor(stat.mtimeMs / 1000), binary: await localFileBinary(absolute, fsApi) })
+      if (entry.isDirectory()) {
+        let opened
+        try { opened = await openDirectoryHandle(fsApi, flags, absolute, 'artifact directory') }
+        catch (error) {
+          if (isArtifactRefusal(error) && !error.capability && !error.tamper) continue
+          throw error
+        }
+        try { await walk(absolute, opened.stat, path, depth + 1) }
+        finally { await closeQuietly(opened.handle) }
+        continue
       }
+      if (!entry.isFile()) continue
+      // readdir is only a candidate generator. Every candidate must re-prove
+      // itself through the same handle-bound opener the download path uses, and
+      // its size/mtime/binary flag come from that handle's fstat — never from a
+      // path lstat that a swap could have redirected.
+      let file
+      try { file = await openLocalArtifactFile(target, path, fsApi, { root }) }
+      catch (error) {
+        if (isArtifactRefusal(error) && !error.capability && !error.tamper) continue
+        throw error
+      }
+      try {
+        count += 1
+        totalBytes += Number(file.stat.size) || 0
+        if (details.length < ARTIFACT_DETAIL_SENTINEL) {
+          details.push({
+            path: file.path,
+            size: file.stat.size,
+            mtime: Math.floor(file.stat.mtimeMs / 1000),
+            binary: await handleBinary(file.handle),
+          })
+        }
+      } finally { await closeQuietly(file.handle) }
     }
   }
-  await walk(runReal)
+  try { await walk(root.runReal, root.stat, '', 0) }
+  finally { await closeQuietly(root.handle) }
   return {
     ok: true,
     value: {
       host: String(target.host?.name ?? target.host ?? ''),
       runId: String(target.runId ?? ''),
-      runDir: runReal,
+      runDir: root.runReal,
       files: details.slice(0, ARTIFACT_MAX_FILES),
       totalBytes,
       count,
@@ -369,9 +568,30 @@ const sendJson = (res, status, body, extraHeaders = {}) => {
 
 const defaultScrubSecrets = (value) => scrubString(value)
 
-const createArtifactHandlers = ({ hostsOf, wsOf, sshRead, spawnSsh, spawnLocal = spawn, onStreamError, scrubSecrets = defaultScrubSecrets } = {}) => {
+const createArtifactHandlers = ({ hostsOf, wsOf, sshRead, spawnSsh, spawnLocal = spawn, onStreamError, scrubSecrets = defaultScrubSecrets, fsApi = fs } = {}) => {
   if (typeof hostsOf !== 'function' || typeof wsOf !== 'function' || typeof sshRead !== 'function' || typeof spawnSsh !== 'function') {
     throw new TypeError('hostsOf, wsOf, sshRead and spawnSsh are required')
+  }
+
+  // A refusal is never a 500-by-accident: capability gaps are reported verbatim
+  // so an operator sees the platform reason, detected tampering gets its own
+  // status and reason, and an ordinary miss stays an indistinguishable 404 so
+  // the route is not an existence oracle for paths outside the run.
+  const refusal = (target, kind, error) => {
+    const reason = isArtifactRefusal(error) ? error.reason : String(error?.message ?? error)
+    try {
+      onStreamError?.({
+        host: target?.host?.name ?? String(target?.host ?? ''),
+        runId: target?.runId ?? '',
+        kind,
+        refused: true,
+        error: scrubSecrets(reason).slice(0, 2000),
+      })
+    } catch {}
+    if (!isArtifactRefusal(error)) return null
+    if (error.capability) return { status: error.status, error: reason }
+    if (error.tamper) return { status: 409, error: `artifact refused: ${reason}` }
+    return { status: 404, error: 'artifact not found' }
   }
 
   const resolveTarget = (url) => {
@@ -387,8 +607,12 @@ const createArtifactHandlers = ({ hostsOf, wsOf, sshRead, spawnSsh, spawnLocal =
 
   const readManifest = async (target, { signal } = {}) => {
     if (target.host.kind === 'codex') {
-      try { return await localArtifactManifest(target, { signal }) }
-      catch (error) { return { ok: false, status: signal?.aborted ? 499 : 502, error: scrubSecrets(error?.message ?? error) } }
+      try { return await localArtifactManifest(target, { signal, fsApi }) }
+      catch (error) {
+        const refused = refusal(target, 'manifest', error)
+        if (refused) return { ok: false, ...refused }
+        return { ok: false, status: signal?.aborted ? 499 : 502, error: scrubSecrets(error?.message ?? error) }
+      }
     }
     let reply
     try {
@@ -506,8 +730,7 @@ const createArtifactHandlers = ({ hostsOf, wsOf, sshRead, spawnSsh, spawnLocal =
     try {
       snapshot = await fs.mkdtemp(snapshotPrefix)
       for (const detail of manifest.files) {
-        const file = await openLocalArtifactFile(target, detail.path)
-        if (!file) throw new Error('artifact set changed')
+        const file = await openLocalArtifactFile(target, detail.path, fsApi)
         actualBytes += Number(file.stat.size) || 0
         if (paths.length + 1 > ARTIFACT_MAX_FILES || actualBytes > ARTIFACT_MAX_BYTES) {
           try { await file.handle.close() } catch {}
@@ -533,7 +756,10 @@ const createArtifactHandlers = ({ hostsOf, wsOf, sshRead, spawnSsh, spawnLocal =
       }
     } catch (error) {
       await cleanup()
-      sendJson(res, Number(error?.statusCode) || 404, { error: error?.statusCode === 413 ? 'artifact set too large' : 'artifact set changed' })
+      if (error?.statusCode === 413) { sendJson(res, 413, { error: 'artifact set too large' }); return }
+      const refused = refusal(target, 'tgz', error)
+      if (refused && refused.status !== 404) { sendJson(res, refused.status, { error: refused.error }); return }
+      sendJson(res, 404, { error: 'artifact set changed' })
       return
     }
     let child
@@ -597,9 +823,16 @@ const createArtifactHandlers = ({ hostsOf, wsOf, sshRead, spawnSsh, spawnLocal =
         const path = safeRelPath(url.searchParams.get('path'))
         if (!path || isExcludedArtifactPath(path)) { sendJson(res, 400, { error: 'invalid artifact path' }); return }
         if (target.host.kind === 'codex') {
-          const file = await openLocalArtifactFile(target, path)
-          if (clientClosed || res.destroyed) { try { await file?.handle?.close() } catch {}; return }
-          if (!file) { sendJson(res, 404, { error: 'artifact not found' }); return }
+          let file
+          try { file = await openLocalArtifactFile(target, path, fsApi) }
+          catch (error) {
+            const refused = refusal(target, 'file', error)
+            if (!refused) throw error
+            if (clientClosed || res.destroyed) return
+            sendJson(res, refused.status, { error: refused.error })
+            return
+          }
+          if (clientClosed || res.destroyed) { await closeQuietly(file.handle); return }
           const basename = path.split('/').at(-1) || 'artifact'
           streamLocalFile(req, res, target, file, {
             'content-type': 'application/octet-stream',
@@ -649,6 +882,8 @@ export {
   ARTIFACT_DETAIL_SENTINEL,
   ARTIFACT_MAX_BYTES,
   ARTIFACT_MAX_FILES,
+  ArtifactRefusal,
+  CODEX_INTERNAL_ARTIFACTS,
   EXCLUDED_ARTIFACTS,
   RUN_ID_RE,
   artifactLimitError,
@@ -659,10 +894,17 @@ export {
   buildArtifactTgzCommand,
   contentDisposition,
   createArtifactHandlers,
+  isArtifactRefusal,
   isCrossSite,
   isExcludedArtifactPath,
+  isExcludedCodexArtifactPath,
+  localArtifactManifest,
+  noFollowFlags,
+  openLocalArtifactFile,
+  openLocalRunRoot,
   parseArtifactFileProbe,
   parseArtifactManifest,
+  readLocalArtifactFile,
   safeDownloadFilename,
   safeRelPath,
   validateRunId,

@@ -11,6 +11,7 @@ import {
   SHADOW_MODE, SHADOW_LINK_EV, SHADOW_OUTCOME_SOURCE,
 } from '../lib/shadow.js'
 import { foldLedger, summarizeOutcomes, readLedgerLines } from '../lib/ledger.js'
+import { entropyBitsOf, hasEntropyTail } from '../lib/ids.js'
 import { allocationStateFromLedger } from '../lib/assemble.js'
 import { apply } from '../lib/index.js'
 
@@ -53,7 +54,11 @@ test('buildShadowRecord:选择器成功 → mode shadow + agreed 三态;失败 �
   assert.equal(ok.mode, SHADOW_MODE); assert.equal(ok.source, 'selector'); assert.equal(ok.pick, 'leo-01')
   assert.deepEqual(ok.candidates, ['agent-m4', 'leo-01', 'knowledge-m4'])
   assert.equal(ok.shadow.agreed, true); assert.equal(ok.taskType, 'fleet-dispatch'); assert.equal(ok.label, 'fleet-dispatch')
-  assert.match(ok.id, /^dec-\d+-[a-f0-9]{8}$/)
+  // C2: the tail must carry real entropy, not a fixed 8 nibbles. Still a dec- id,
+  // so shadow.js DEC_ID_RE and sanitize.js DECISION_ID keep matching.
+  assert.match(ok.id, /^dec-\d+-[a-f0-9]+$/)
+  assert.equal(hasEntropyTail(ok.id), true)
+  assert.equal(entropyBitsOf(ok.id), 128)
   const disagree = buildShadowRecord(input, { pick: 'knowledge-m4', role: 'implementer', confidence: 0.5, reason: 'r' }, { source: 'selector', chosen: ['leo-01'] })
   assert.equal(disagree.shadow.agreed, false)
   const noChoice = buildShadowRecord(input, { pick: 'knowledge-m4', role: 'implementer', confidence: 0.5, reason: 'r' }, { source: 'selector', chosen: [] })

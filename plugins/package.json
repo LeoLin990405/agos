@@ -1,0 +1,19 @@
+{
+  "name": "agos-plugin-host-deps",
+  "version": "0.0.0",
+  "private": true,
+  "description": "宿主包的可复现隔离依赖树。插件源码的裸 import 由 Node 从 plugins/<name>/lib 向上走到 plugins/node_modules 解析,取代 scripts/dev-links.sh 指向 ~/.dsh/profiles 的软链。版本全部钉死到 UPSTREAM.pin 的 0.1.2-rc.1 宿主线,不用 range、不用 latest: registry 的 latest tag 停在 0.0.1-rc.1,不显式钉住整条 peer 链就会被拉回旧版并产生 ERESOLVE 级联。dsh-kimicode-swarm 只有 0.1.0/0.1.2 两版,peer 全为 *,按 ~/.dsh/profiles/<name> 实装取 0.1.0。@deepseek-ai/dsh-agent 不在这一层,装在唯一消费者 plugins/dsh-mcp-bridge/,复刻真实宿主的两层 node_modules 分隔。不使用 --force / --legacy-peer-deps。schemastery 取 3.18.2 而非各插件 package.json 声明的 3.18.1: pin 的 @deepseek-ai/dsh-settings@0.1.2-rc.1 声明 peer ^3.18.2,真实 ~/.dsh/profiles/web 实装也是 3.18.2,插件声明相对 pin 已过时(见 REVIEW.md 漂移发现项)。 ⚠️ 这份清单**不能**由 `npm ci` 复现出可用的树,不要把它当成可复现性的凭据:dsh-kimicode-swarm 的 registry 版本(0.1.0/0.1.1/0.1.2)都不导出 dsh-fleet 需要的 publishProgress/parseResultsXml/escapeXml/textOf,磁盘那份是操作者从 ~/.dsh/profiles/desktop/plugins/kimicode-swarm-aligned 提供的本机构建产物;@deepseek-ai/dsh-settings 磁盘实装是 0.1.0-rc.6 而非此处声明的 0.1.2-rc.1(npm ls 因此恒报 invalid,属预期稳态),因为只有 rc.6 及更早才导出 installSettingsSection,而该版本的 peer 属 rc.6 线、与本树其余七个包的 ^0.1.2-rc.1 冲突,无法在不使用 --force 的前提下改声明。树的真实性由 `node scripts/acceptance/verify-host-tree.mjs` 按内容摘要校验,在 plugins/ 里跑 npm ci 会把这两个包换成 registry 内容并让套件变红。详见 docs/engineering/agos-round2-20260908/DEPENDENCIES.md 的校正记录。",
+  "dependencies": {
+    "@deepseek-ai/dsh-commands": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-host-webserver": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-llm": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-session": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-settings": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-subagent": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-tools": "0.1.2-rc.1",
+    "@deepseek-ai/schemastery": "3.18.2",
+    "@openai/codex-sdk": "0.147.0",
+    "dsh-kimicode-swarm": "0.1.0",
+    "react": "^18.3.1"
+  }
+}

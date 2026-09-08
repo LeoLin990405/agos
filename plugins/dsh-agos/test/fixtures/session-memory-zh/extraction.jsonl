@@ -1,0 +1,59 @@
+{"id":"zh-q-01","category":"question","text":"我们现在用的是 pnpm 还是 npm？","expect":{"kind":null,"scope":null,"sensitive":false,"ambiguous":false,"why":"选择型问句，问的人自己都还没定，不是事实"}}
+{"id":"zh-q-02","category":"question","text":"记忆库每次都要推送到 NAS9 吗","expect":{"kind":null,"scope":null,"sensitive":false,"ambiguous":false,"why":"带「都要」但整句是问句；难例：约束词出现在问句里"}}
+{"id":"zh-q-03","category":"question","text":"为什么这个脚本在打包时会超时","expect":{"kind":null,"scope":null,"sensitive":false,"ambiguous":false,"why":"无问号的疑问句"}}
+{"id":"zh-q-04","category":"question","text":"构建产物应该放在哪个目录","expect":{"kind":null,"scope":null,"sensitive":false,"ambiguous":false,"why":"疑问词在句中，句尾无标点"}}
+{"id":"zh-q-05","category":"question","text":"你能否确认一下记忆库的写入路径","expect":{"kind":null,"scope":null,"sensitive":false,"ambiguous":false,"why":"祈使外壳的问句；「路径」是名词不是陈述"}}
+{"id":"zh-q-06","category":"question","text":"端口 8443 是给桌面端用的还是给 web 用的？","expect":{"kind":null,"scope":null,"sensitive":false,"ambiguous":false,"why":"难例：句子形状是「端口 X 是 Y」的事实句，但整句是选择问句"}}
+{"id":"zh-q-07","category":"question","text":"以后不要再问我为什么要用 pnpm，默认就是 pnpm。","expect":{"kind":"constraint","scope":"persistent","sensitive":false,"ambiguous":false,"why":"难负例：句中含「为什么」但整句是持久规矩，不是问句"},"mustContainInText":["不要"]}
+{"id":"zh-quote-01","category":"quotation","text":"同事说他们更喜欢用 tabs 缩进。","expect":{"kind":null,"scope":null,"sensitive":false,"ambiguous":false,"why":"别人的偏好不是用户的偏好；转述不得变成用户自己的 preference"}}
+{"id":"zh-quote-02","category":"quotation","text":"群里有人反馈这套流程太慢。","expect":{"kind":null,"scope":null,"sensitive":false,"ambiguous":false,"why":"转述的评价，既不是事实也不是规矩"}}
+{"id":"zh-quote-03","category":"quotation","text":"同事说他习惯把日志放在 /tmp 下面。","expect":{"kind":null,"scope":null,"sensitive":false,"ambiguous":false,"why":"「习惯」是同事的习惯，署名必须留在别人身上"}}
+{"id":"zh-quote-04","category":"quotation","text":"他们认为 B7 是唯一的构建机。","expect":{"kind":null,"scope":null,"sensitive":false,"ambiguous":false,"why":"别人的判断不是已核实事实"}}
+{"id":"zh-quote-05","category":"quotation","text":"我自己定的规矩是所有对外文档都必须先过一遍事实核对。","expect":{"kind":"constraint","scope":"persistent","sensitive":false,"ambiguous":false,"why":"难负例：形状像引用（「…的规矩是…」），但主体是用户自己"}}
+{"id":"zh-quote-06","category":"quotation","text":"文档里写的是「不要在生产环境直接改配置」。","expect":{"kind":"constraint","scope":"persistent","sensitive":false,"ambiguous":true,"why":"两种读法都成立：转述文档（null）／用户援引文档来立规矩（constraint）。诚实记为两难"}}
+{"id":"zh-quote-07","category":"quotation","text":"客户要求所有导出文件都必须带水印。","expect":{"kind":"constraint","scope":"persistent","sensitive":false,"ambiguous":true,"why":"两种读法都成立：转述客户的话（null）／用户转达为项目硬要求（constraint）"}}
+{"id":"zh-neg-01","category":"negation","text":"以后一律不要用 npm 装依赖，统一用 pnpm。","expect":{"kind":"constraint","scope":"persistent","sensitive":false,"ambiguous":false,"why":"持久禁令该收；存下来必须仍是「不要用 npm」"},"mustContainInText":["不要用 npm"]}
+{"id":"zh-neg-02","category":"negation","text":"不要把会话归档复制到公开仓库。","expect":{"kind":"constraint","scope":"persistent","sensitive":false,"ambiguous":false,"why":"持久禁令"},"mustContainInText":["不要"]}
+{"id":"zh-neg-03","category":"negation","text":"这次不要并行执行，一个一个来。","expect":{"kind":null,"scope":"turn","sensitive":false,"ambiguous":false,"why":"只管本轮执行方式的否定，不是长期规矩"}}
+{"id":"zh-neg-04","category":"negation","text":"不是不能用 npm，只是默认必须走 pnpm。","expect":{"kind":"constraint","scope":"persistent","sensitive":false,"ambiguous":false,"why":"双重否定：存下来不许被读成「不能用 npm」，正文必须原样"},"mustContainInText":["不是不能用 npm"]}
+{"id":"zh-neg-05","category":"negation","text":"别把构建缓存提交进仓库。","expect":{"kind":"constraint","scope":"persistent","sensitive":false,"ambiguous":false,"why":"口语否定祈使句，与「不要」同义"},"mustContainInText":["别"]}
+{"id":"zh-neg-06","category":"negation","text":"禁止把 dist 目录写进版本库。","expect":{"kind":"constraint","scope":"persistent","sensitive":false,"ambiguous":false,"why":"显式禁令；正文必须保留「禁止」"},"mustContainInText":["禁止"]}
+{"id":"zh-cond-01","category":"conditional","text":"如果测试超时，就把并发降到 2。","expect":{"kind":null,"scope":null,"sensitive":false,"ambiguous":false,"why":"条件句；「把并发降到 2」不是无条件事实"}}
+{"id":"zh-cond-02","category":"conditional","text":"如果 B7 是构建机，产物就放本地。","expect":{"kind":null,"scope":null,"sensitive":false,"ambiguous":false,"why":"条件句里的「X 是 Y」是假设不是事实，绝不能变成 fact"}}
+{"id":"zh-cond-03","category":"conditional","text":"一旦 B7 离线，就改用 NAS9 上的备份。","expect":{"kind":null,"scope":null,"sensitive":false,"ambiguous":false,"why":"条件句"}}
+{"id":"zh-cond-04","category":"conditional","text":"要是 dist 目录不存在，就先跑一次构建。","expect":{"kind":null,"scope":null,"sensitive":false,"ambiguous":false,"why":"条件句"}}
+{"id":"zh-cond-05","category":"conditional","text":"必须在 CI 全绿之后再合并，如果是红的就先回滚。","expect":{"kind":"constraint","scope":"persistent","sensitive":false,"ambiguous":false,"why":"难负例：主句是无条件规矩，条件只挂在从句上"}}
+{"id":"zh-cond-06","category":"conditional","text":"如果 CI 是红的，就不要合并。","expect":{"kind":"constraint","scope":"persistent","sensitive":false,"ambiguous":true,"why":"两难：条件句（null）／「红就不合」本身是长期规矩（constraint）。收的前提是正文保留「如果」"},"mustContainInText":["如果"]}
+{"id":"zh-cond-07","category":"conditional","text":"如果要动记忆库，就必须先跑一遍 verify。","expect":{"kind":"constraint","scope":"persistent","sensitive":false,"ambiguous":true,"why":"两难：条件是规矩的适用范围而不是一次性前提。收的前提是正文保留「如果」"},"mustContainInText":["如果"]}
+{"id":"zh-cond-08","category":"conditional","text":"B7 是默认的构建机。","expect":{"kind":"fact","scope":"persistent","sensitive":false,"ambiguous":false,"why":"难负例：同形的无条件陈述必须照收，条件否决不许把它一起打掉"}}
+{"id":"zh-once-01","category":"oneshot","text":"这次只回复 done，不要解释。","expect":{"kind":null,"scope":"turn","sensitive":false,"ambiguous":false,"why":"本轮输出格式指令"}}
+{"id":"zh-once-02","category":"oneshot","text":"先用 bash 跑一遍 sleep 5，不要并行。","expect":{"kind":null,"scope":"turn","sensitive":false,"ambiguous":false,"why":"本轮工具执行指令"}}
+{"id":"zh-once-03","category":"oneshot","text":"把刚才那份报告再读一遍，读完立刻回答。","expect":{"kind":null,"scope":"turn","sensitive":false,"ambiguous":false,"why":"本轮任务描述"}}
+{"id":"zh-once-04","category":"oneshot","text":"现在帮我把 dist 目录清空。","expect":{"kind":null,"scope":"turn","sensitive":false,"ambiguous":false,"why":"一次性任务，不是规矩"}}
+{"id":"zh-once-05","category":"oneshot","text":"这一轮先不用管 lint，下一轮再说。","expect":{"kind":null,"scope":"turn","sensitive":false,"ambiguous":false,"why":"显式限定本轮"}}
+{"id":"zh-once-06","category":"oneshot","text":"以后每次提交前都要跑一遍单测。","expect":{"kind":"constraint","scope":"persistent","sensitive":false,"ambiguous":false,"why":"难负例：同样是「跑一遍」，但「以后每次」把它变成持久规矩"}}
+{"id":"zh-once-07","category":"oneshot","text":"我这次想先看看日志。","expect":{"kind":null,"scope":"turn","sensitive":false,"ambiguous":false,"why":"第一人称的一次性意图，不是关于用户的持久事实"}}
+{"id":"zh-pref-01","category":"preference","text":"我更喜欢用 pnpm 管理依赖。","expect":{"kind":"preference","scope":"persistent","sensitive":false,"ambiguous":false,"why":"显式持久偏好"}}
+{"id":"zh-pref-02","category":"preference","text":"我希望所有报告都用中文写。","expect":{"kind":"preference","scope":"persistent","sensitive":false,"ambiguous":false,"why":"显式持久偏好"}}
+{"id":"zh-pref-03","category":"preference","text":"我习惯把工作目录放在 ~/work 下面。","expect":{"kind":"preference","scope":"persistent","sensitive":false,"ambiguous":false,"why":"习惯即偏好"}}
+{"id":"zh-pref-04","category":"preference","text":"我们团队倾向于先写测试再写实现。","expect":{"kind":"preference","scope":"persistent","sensitive":false,"ambiguous":false,"why":"团队级持久偏好"}}
+{"id":"zh-pref-05","category":"preference","text":"我不喜欢在 PR 里夹带无关重构。","expect":{"kind":"preference","scope":"persistent","sensitive":false,"ambiguous":false,"why":"否定式偏好；正文必须保留「不喜欢」"},"mustContainInText":["不喜欢"]}
+{"id":"zh-pref-06","category":"preference","text":"以后写文档默认用中文，不用英文。","expect":{"kind":"preference","scope":"persistent","sensitive":false,"ambiguous":false,"why":"无偏好动词的持久偏好（「以后…默认…」），召回难例"}}
+{"id":"zh-corr-01","category":"correction","text":"B7 的构建目录是 build。","expect":{"kind":"fact","scope":"persistent","sensitive":false,"ambiguous":false,"why":"被纠正前的原值；说出口时它是事实"}}
+{"id":"zh-corr-02","category":"correction","text":"更正：B7 的构建目录是 dist，不是 build。","expect":{"kind":"fact","scope":"persistent","sensitive":false,"ambiguous":false,"why":"纠正后的新值该收；旧值的处置见召回评测"}}
+{"id":"zh-corr-03","category":"correction","text":"说错了，记忆推送脚本要跑的是 push 而不是 sync。","expect":{"kind":"fact","scope":"persistent","sensitive":false,"ambiguous":false,"why":"纠正句，主句前有一个前置小句"}}
+{"id":"zh-corr-04","category":"correction","text":"改成 dist 就行。","expect":{"kind":null,"scope":"turn","sensitive":false,"ambiguous":false,"why":"难负例：纠正上下文里的祈使片段，不是陈述"}}
+{"id":"zh-corr-05","category":"correction","text":"刚才说的 8080 作废，现在是 8443。","expect":{"kind":"fact","scope":"persistent","sensitive":false,"ambiguous":false,"why":"纠正后的新值该收"}}
+{"id":"zh-out-01","category":"outdated","text":"旧版 B7 的目录是 build。","expect":{"kind":null,"scope":null,"sensitive":false,"ambiguous":false,"why":"「旧版」明说不是当前值；系统没有 stale 标记通道，只能不收，绝不能静默当成当前事实"}}
+{"id":"zh-out-02","category":"outdated","text":"B7 以前用的是 npm。","expect":{"kind":null,"scope":null,"sensitive":false,"ambiguous":false,"why":"「以前」明说不是当前值"}}
+{"id":"zh-out-03","category":"outdated","text":"pnpm 是现在的默认包管理器。","expect":{"kind":"fact","scope":"persistent","sensitive":false,"ambiguous":false,"why":"难负例：带时间词但说的是当前值，必须照收"}}
+{"id":"zh-out-04","category":"outdated","text":"上个月的默认端口是 8080。","expect":{"kind":null,"scope":null,"sensitive":false,"ambiguous":false,"why":"过时值"}}
+{"id":"zh-out-05","category":"outdated","text":"以前踩过坑，以后一律不要直接改生产配置。","expect":{"kind":"constraint","scope":"persistent","sensitive":false,"ambiguous":false,"why":"难负例：过时词只在从句里，主句是持久规矩，过时否决不许打掉规矩"},"mustContainInText":["不要"]}
+{"id":"zh-out-06","category":"outdated","text":"当时定的规矩是构建产物只放 dist。","expect":{"kind":"constraint","scope":"persistent","sensitive":false,"ambiguous":true,"why":"两难：过去定的规矩可能仍然有效（constraint），也可能已废（null）。文本上分不开"}}
+{"id":"zh-sec-01","category":"sensitive","text":"记忆库的写入密码是 占位口令示例请勿使用。","expect":{"kind":null,"scope":null,"sensitive":true,"ambiguous":false,"why":"含口令值，整条拒收"},"mustNotAppear":["占位口令示例","写入密码"]}
+{"id":"zh-sec-02","category":"sensitive","text":"登录 NAS9 的账号是 示例账号请勿使用。","expect":{"kind":null,"scope":null,"sensitive":true,"ambiguous":false,"why":"含账号值，整条拒收"},"mustNotAppear":["示例账号","NAS9 的账号"]}
+{"id":"zh-sec-03","category":"sensitive","text":"记忆库里绝对不要写任何口令 占位示例，这是死规矩。","expect":{"kind":null,"scope":null,"sensitive":true,"ambiguous":false,"why":"同一句里既有真规矩又有口令值：必须整条拒收，不许把规矩部分留下当片段"},"mustNotAppear":["占位示例","不要写任何口令","死规矩"]}
+{"id":"zh-sec-04","category":"sensitive","text":"拉取地址是 https://示例用户:占位口令@example.invalid/demo.git。","expect":{"kind":null,"scope":null,"sensitive":true,"ambiguous":false,"why":"URL 里带口令，整条拒收"},"mustNotAppear":["占位口令","example.invalid"]}
+{"id":"zh-sec-05","category":"sensitive","text":"不要在记忆库里写任何凭据或密钥。","expect":{"kind":null,"scope":null,"sensitive":true,"ambiguous":true,"why":"两难：这是真规矩本该收，但「凭据或密钥」触发宁滥勿缺的拒收。设计上选了拒收，代价是丢一条真规矩"}}
+{"id":"zh-sec-06","category":"sensitive","text":"不要在记忆库里写任何凭据。","expect":{"kind":"constraint","scope":"persistent","sensitive":false,"ambiguous":false,"why":"难负例：只提概念、后面没有值，不算敏感，规矩必须收得到"}}
+{"id":"zh-sec-07","category":"sensitive","text":"dist 目录不要提交进仓库。","expect":{"kind":"constraint","scope":"persistent","sensitive":false,"ambiguous":false,"why":"对照组：普通规矩不许被密钥门误拒，ASCII 路径不许触发熵检测"}}

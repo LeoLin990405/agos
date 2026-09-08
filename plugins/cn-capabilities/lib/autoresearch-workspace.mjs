@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve, dirname } from 'node:path'
 
 import { compareMetric, extractStructuredMetric } from './autoresearch-metrics.mjs'
+import { chooseIsolationBackend, linuxVerificationSandbox } from './autoresearch-sandbox.mjs'
 
 export { compareMetric, extractStructuredMetric }
 
@@ -132,16 +133,24 @@ function killProcessGroup(child, sig) {
   }
 }
 
-export function execCommand(command, { cwd, signal, timeoutMs = 120000, env, sandboxProfile } = {}) {
+/**
+ * `sandboxLauncher` is the platform-neutral form: the child is spawned as
+ * `launcher.file [...launcher.before, command]`. `sandboxProfile` is the macOS
+ * shorthand that expands to the same thing. Either one also means the child gets
+ * exactly the supplied env, with nothing inherited from this process.
+ */
+export function execCommand(command, { cwd, signal, timeoutMs = 120000, env, sandboxProfile, sandboxLauncher } = {}) {
   const started = Date.now()
+  const launcher = sandboxLauncher
+    || (sandboxProfile ? { file: '/usr/bin/sandbox-exec', before: ['-p', sandboxProfile, '/bin/bash', '-c'] } : null)
   return new Promise((resolve) => {
     const state = { done: false, timer: null, killTimer: null, signal, onAbort: null }
     let stdout = ''
     let stderr = ''
-    const child = spawn(sandboxProfile ? '/usr/bin/sandbox-exec' : '/bin/bash',
-      sandboxProfile ? ['-p', sandboxProfile, '/bin/bash', '-c', String(command)] : ['-c', String(command)], {
+    const child = spawn(launcher ? launcher.file : '/bin/bash',
+      launcher ? [...launcher.before, String(command)] : ['-c', String(command)], {
       cwd,
-      env: sandboxProfile ? env : { ...gitEnv(), ...env },
+      env: launcher ? env : { ...gitEnv(), ...env },
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
     })
@@ -155,6 +164,7 @@ export function execCommand(command, { cwd, signal, timeoutMs = 120000, env, san
       elapsedMs: Date.now() - started,
       cancelled: extra.cancelled === true,
       signal: extra.signal || null,
+      pid: child.pid ?? null,
     })
 
     state.onAbort = () => {
@@ -180,9 +190,21 @@ export function execCommand(command, { cwd, signal, timeoutMs = 120000, env, san
   })
 }
 
-/** Only the installed OS sandbox is trusted. Unsupported hosts fail closed. */
-export async function verificationSandbox(evaluator) {
-  if (process.platform !== 'darwin' || !await stat('/usr/bin/sandbox-exec').catch(() => null)) {
+/**
+ * Only an OS-enforced boundary is trusted. The backend is chosen by capability
+ * detection, and a host that cannot supply one fails closed as
+ * `verification-unavailable` rather than falling back to a weaker check.
+ */
+export async function verificationSandbox(evaluator, { platform = process.platform, probe } = {}) {
+  const backend = chooseIsolationBackend(platform)
+  if (!backend) {
+    return {
+      ok: false,
+      reason: `verification-unavailable: no OS isolation backend for platform ${platform};`
+        + ' macOS sandbox-exec or Linux namespaces required',
+    }
+  }
+  if (backend === 'macos-seatbelt' && !await stat('/usr/bin/sandbox-exec').catch(() => null)) {
     return { ok: false, reason: 'verification-unavailable: macOS sandbox-exec is required' }
   }
   const root = await realpath(evaluator)
@@ -190,6 +212,9 @@ export async function verificationSandbox(evaluator) {
   await mkdir(scratch, { recursive: true })
   const node = await realpath(process.execPath)
   const nodePrefix = dirname(dirname(node))
+  if (backend === 'linux-namespaces') {
+    return linuxVerificationSandbox({ evaluator: root, scratch, nodeBinDir: dirname(node), nodePrefix, probe, platform })
+  }
   const quote = (s) => JSON.stringify(s)
   const libraryRoots = ['/usr/bin', '/usr/lib', '/usr/libexec', '/usr/share', '/System', '/bin', '/sbin',
     '/Library/Apple/System', '/opt/homebrew/Cellar', '/opt/homebrew/opt', '/usr/local/Cellar', '/usr/local/opt', nodePrefix]
@@ -200,7 +225,8 @@ export async function verificationSandbox(evaluator) {
   // No inherited provider tokens, proxies, NODE_OPTIONS, BASH_ENV or HOME.
   const env = { PATH: dirname(node) + ':/usr/bin:/bin:/usr/sbin:/sbin', AGOS_VERIFY_SCRATCH: scratch,
     TMPDIR: scratch, TMP: scratch, TEMP: scratch, LANG: 'C.UTF-8', LC_ALL: 'C', TZ: 'UTC', OPENSSL_CONF: '/dev/null' }
-  return { ok: true, profile, env, scratch, kind: 'macos-seatbelt' }
+  const launcher = { file: '/usr/bin/sandbox-exec', before: ['-p', profile, '/bin/bash', '-c'] }
+  return { ok: true, profile, launcher, env, scratch, kind: 'macos-seatbelt' }
 }
 
 export function gitCommand(cwd, args, { signal, timeoutMs = 60000 } = {}) {
@@ -548,6 +574,7 @@ async function verifyCandidate(workspace, verifyCmd, signal) {
     const sandbox = await verificationSandbox(evaluator)
     if (!sandbox.ok) return { ...failure(sandbox.reason), unavailable: true }
     workspace.verificationBoundary = sandbox.kind
+    workspace.verificationCapabilities = sandbox.capabilities || [sandbox.kind]
     const materials = async () => {
       const snapshot = {}
       for (const rel of await walkRelPaths(evaluator)) {
@@ -559,7 +586,7 @@ async function verifyCandidate(workspace, verifyCmd, signal) {
       return snapshot
     }
     const before = await materials()
-    const verified = await execCommand(verifyCmd, { cwd: evaluator, signal, sandboxProfile: sandbox.profile, env: sandbox.env })
+    const verified = await execCommand(verifyCmd, { cwd: evaluator, signal, sandboxLauncher: sandbox.launcher, env: sandbox.env })
     if (!filesEqual(before, await materials())) return failure('verification-materials-changed-during-evaluation')
     return verified
   } finally { await rm(root, { recursive: true, force: true }) }
@@ -579,6 +606,7 @@ export async function saveAutoresearchArtifacts(workspace, artifactDir, details 
     baselineMetric: workspace.baselineMetric, bestMetric: workspace.bestMetric,
     sourceAllowlist: workspace.sourceAllowlist, verificationCommand: workspace.verifyCmd,
     verificationBoundary: workspace.verificationBoundary || 'unavailable',
+    verificationCapabilities: workspace.verificationCapabilities || [],
     patchSha256: createHash('sha256').update(await readFile(patchPath)).digest('hex'),
     at: new Date().toISOString() }
   await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n')

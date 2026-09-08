@@ -7,6 +7,8 @@ import { STATIC_FALLBACK } from './fallback.js'
 import { foldLedger } from './ledger.js'
 import { normalizeRole } from './roles.js'
 import { filterLedgerForPosterior } from './feedback-bind.mjs'
+import { mintAssembleId } from './ids.js'
+import { isTaskFingerprint } from './task-fingerprint.mjs'
 
 // 冻结文案与同仓 frontend/src/components/console/routes-assemble.ts 逐字镜像;
 // 两边各自用单测钉住字面量。类别句(这东西是什么),不是时态句 —— 「尚未试跑」那种
@@ -190,8 +192,11 @@ export function assembleTeam(decision, state, options = {}) {
 export function buildAssembleRecord(decision, team) {
   return {
     kind: 'assemble',
-    id: `asm-${Date.now()}`,
+    id: mintAssembleId(),
     ref: decision && decision.id,
+    // The task this proposal is for, carried from the decision so the trial that
+    // follows can prove it ran the same task instead of only the same proposal id.
+    ...(isTaskFingerprint(decision && decision.taskRef) ? { taskRef: decision.taskRef } : {}),
     ts: Date.now(),
     label: team.label,
     ranking: team.ranking === 'thompson' ? 'thompson' : 'mean',

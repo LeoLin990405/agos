@@ -1,0 +1,229 @@
+✔ secret gate refuses credentials and redacts ledger strings without hiding a path (2.29675ms)
+✔ allocation kernel is shared math and says it is not live dispatch (0.170125ms)
+✔ all model prompts share the honesty preamble and force the selector contract to the tail (0.447334ms)
+✔ shared constants match HTTP dispatch: 512KiB / 32 items / 8000 chars (0.333708ms)
+✔ validateFleetItems accepts the inclusive bounds and returns the original strings (0.376042ms)
+✔ validateFleetItems rejects count/type/empty/oversize and does not truncate (1.05875ms)
+✔ validateHttpDispatchBody shares item limits and rejects extra field errors (0.296ms)
+✔ HTTP body byte cap rejects instead of clipping (0.091458ms)
+✔ desk writes are confirm-gated and never claim Fleet Memory (20.887416ms)
+✔ desk rejects unsafe slugs and unknown kinds (0.959458ms)
+✔ submit stays fail-closed without civ and only marks fleetMemory after accept (5.144542ms)
+✔ civ invoker stays absent unless memory_submit is actually present (0.330958ms)
+✔ inventory is read-only and reports AgOS copies without inventing drift (23.42ms)
+✔ current process is collected from argv or plugin path, never guessed (0.193542ms)
+{"scenario":"contiguous","chars":4096,"scrubMs":0.57,"classifyMs":0.21}
+{"scenario":"contiguous","chars":8192,"scrubMs":1.06,"classifyMs":0.25}
+{"scenario":"contiguous","chars":16384,"scrubMs":0.64,"classifyMs":0.54}
+{"scenario":"contiguous","chars":32768,"scrubMs":1.19,"classifyMs":0.79}
+{"scenario":"contiguous","chars":102400,"scrubMs":3.06,"classifyMs":3.21}
+{"scenario":"contiguous","chars":204800,"scrubMs":5.63,"classifyMs":3.78}
+{"scenario":"keyword-near-match","chars":4096,"scrubMs":0.27,"classifyMs":0.05}
+{"scenario":"keyword-near-match","chars":8192,"scrubMs":0.32,"classifyMs":0.12}
+{"scenario":"keyword-near-match","chars":16384,"scrubMs":0.73,"classifyMs":0.21}
+{"scenario":"keyword-near-match","chars":32768,"scrubMs":1.09,"classifyMs":0.3}
+{"scenario":"keyword-near-match","chars":102400,"scrubMs":3.08,"classifyMs":0.97}
+{"scenario":"keyword-near-match","chars":204800,"scrubMs":6.59,"classifyMs":2.22}
+{"scenario":"jwt-near-match","chars":4096,"scrubMs":0.12,"classifyMs":0.39}
+{"scenario":"jwt-near-match","chars":8192,"scrubMs":0.2,"classifyMs":0.36}
+{"scenario":"jwt-near-match","chars":16384,"scrubMs":0.36,"classifyMs":1}
+{"scenario":"jwt-near-match","chars":32768,"scrubMs":0.7,"classifyMs":1.28}
+{"scenario":"jwt-near-match","chars":102400,"scrubMs":2.36,"classifyMs":3.83}
+{"scenario":"jwt-near-match","chars":204800,"scrubMs":4.64,"classifyMs":7.56}
+✔ multi-scale contiguous bench: original 100KB retained, no input cap (138.214917ms)
+✔ multi-scale keyword-near-match bench: original 100KB retained, no input cap (102.093625ms)
+✔ multi-scale jwt-near-match bench: original 100KB retained, no input cap (142.64875ms)
+✔ one classifier, two dispositions: refuse persist vs redact ledger (1.954417ms)
+✔ synthetic KEY / TOKEN / PASSWORD classify and redact without keeping the fragment (1.185792ms)
+✔ structural shapes: PEM, URL password, vendor token, AKIA, JWT (0.340958ms)
+✔ high-entropy token is refused; low-entropy long run is not (12.208208ms)
+✔ near-matches on long contiguous runs are not secrets (3.082917ms)
+✔ Unicode keywords, fullwidth punctuation, and newlines still classify (0.352708ms)
+✔ recursive objects redact leaves and drop cycles; paths stay visible (0.241708ms)
+✔ original 100KB contiguous scenario stays a non-secret identity scrub (18.494833ms)
+✔ 100KB pad still finds an embedded fake assignment and redacts only that value (4.733541ms)
+✔ repeated keyword near-matches preserve text and still scrub the final credential (19.544875ms)
+✔ classifier preserves historical compact keywords and short-value separator splits (0.134083ms)
+✔ known credential structures remain recognized above former regex caps (2.399084ms)
+✔ quoted assignments discard escaped and unterminated credential fragments (0.111084ms)
+✔ session meta routes are method-strict, atomic, idempotent, concurrent-safe, and host archive is live (38.088958ms)
+✔ GET session meta soft-degrades when host archive is unavailable (2.451291ms)
+✔ apply scopes fixture state to an explicit home and disposes each route across injection reruns (5.355917ms)
+✔ delete normally moves the whole session directory and appends an audit row (17.481917ms)
+✔ delete prunes projcache after move and records success before the audit hook (21.803625ms)
+✔ delete keeps the successful move when projcache pruning fails and audits the failure (17.223125ms)
+✔ delete rejects path-shaped ids and never traverses project/session symlinks (4.016416ms)
+✔ delete rejects a sessions root symlink even when it contains a matching directory (1.787167ms)
+▶ delete rejects trash root and project symlinks without moving the source
+  ✔ trash root points back into sessions (2.598083ms)
+  ✔ trash root points at another .dsh directory (2.62675ms)
+  ✔ project trash points at a sibling directory (2.931125ms)
+✔ delete rejects trash root and project symlinks without moving the source (8.531584ms)
+✔ delete rejects a running session and leaves its directory untouched (1.861333ms)
+✔ delete fails closed for an attached idle session before projection pruning (2.293084ms)
+✔ delete catches reattach after target preparation with a final check immediately before rename (8.792958ms)
+✔ delete rejects a trash target replaced during final live checks and preserves the replacement (8.022875ms)
+✔ delete maps a trash target removed during final live checks to a race conflict (9.050166ms)
+✔ delete fails closed when running status cannot be checked (1.346042ms)
+✔ delete preserves an existing trash target and chooses the -2 suffix (13.025167ms)
+✔ delete treats an existing empty trash directory as occupied (11.86525ms)
+✔ delete removes the id from pinned and archived metadata (14.395875ms)
+✔ delete compensates the move and metadata if audit append fails (10.8095ms)
+✔ audit failure restores the exact projection row after directory and metadata rollback (9.620666ms)
+✔ projection restore failure is explicit after directory and metadata compensation (9.846834ms)
+✔ delete.log symlink is never followed and delete is fully compensated (11.9035ms)
+✔ agosRoot symlink is rejected before any session move (7.277792ms)
+✔ dshRoot symlink is rejected before creating trash or metadata (2.247375ms)
+✔ rollback never overwrites a source path rebuilt after the move (11.953708ms)
+✔ delete supports the host path encoding for unicode and tilde session ids (12.426458ms)
+✔ delete rejects duplicate exact session directory matches (2.087875ms)
+✔ overview sessions prefers persistence and labels the projcache fallback (1.69125ms)
+✔ projection cache resolver uses the already-open diagnostic domain only (0.106625ms)
+✔ production projection pruner captures a queued current row, deletes, and restores it exactly (0.194166ms)
+✔ startup reconciliation only prunes non-authoritative cache rows, caps at 200, and logs each attempt (0.36125ms)
+✔ startup reconciliation compares opaque ids exactly (0.080334ms)
+✔ startup reconciliation protects a nonempty cache from empty or failed authority (0.232584ms)
+✔ inject rewrite prepends one reminder and is idempotent (1.182875ms)
+✔ session id resolver does not invent an identity (1.601917ms)
+✔ inject hook is fail-closed and skips empty stores (3.356875ms)
+✔ inject hook prepends when the store has items (8.507708ms)
+✔ inject config write is confirm-gated and default is on (5.223041ms)
+✔ inject hook shortlists by this-turn query and does not dump the store (4.189584ms)
+✔ inject reminder marks reserved constraints as not more relevant (1.640625ms)
+✔ inject hook records prepended 0 when the store is empty (1.855333ms)
+✔ inject hook records a collected failure instead of swallowing it (2.3995ms)
+✔ inject failure does not keep the previous turn impressions (0.883208ms)
+✔ empty query does not invent a lexical shortlist (1.212584ms)
+✔ no overlap falls back to importance and says so (0.307833ms)
+✔ constraint reserve keeps lexical siblings when items have no id (0.27775ms)
+✔ lexical miss still reserves a constraint and does not call it more relevant (0.120542ms)
+✔ memory lexical uses whole CJK runs and slug substrings, not unigrams (0.789792ms)
+✔ lexical shortlist does not dump the whole store (0.17425ms)
+✔ posterior from the same label can promote a lower lexical hit (7.584416ms)
+✔ importance rank is collected order, not slug invention (0.115916ms)
+✔ relevance ledger is confirm-gated and session-scoped (13.856583ms)
+✔ describe keeps missing session uncollected, zero rows as true zero (0.37175ms)
+✔ relevance ledger indexes by session and ingests a tail append (6.013708ms)
+✔ private corpus requires its explicit dedicated path, never HOME discovery (1.413167ms)
+✔ corpus miner refuses to discover an archive root without an explicit argument (43.755917ms)
+﹣ W20 尺:四个块各自可评分,并把指标打印出来(只看不进门) (0.072083ms) # 未显式指定完整 SESSION_MEMORY_CORPUS_DIR，跳过私有语料
+﹣ W20 acceptEdit 门:语料没动;每条原来通过的样本不得变失败;有提升须显式接受新基线 (0.039458ms) # 未显式指定完整 SESSION_MEMORY_CORPUS_DIR，跳过私有语料
+[F2-1 抽取] 总 59 · 计分 53 · 通过 47 · 误收 1 · 漏收 5 · 错类 0 · 两难 6(不计分)
+  question     计分 6/7
+  quotation    计分 5/5 · 两难 2
+  negation     计分 5/6
+  conditional  计分 6/6 · 两难 2
+  oneshot      计分 6/7
+  preference   计分 5/6
+  correction   计分 3/5
+  outdated     计分 5/5 · 两难 1
+  sensitive    计分 6/6 · 两难 1
+  ✗ zh-once-07 want=null got=fact · 我这次想先看看日志。
+  ✗ zh-q-07 want=constraint got=null · 以后不要再问我为什么要用 pnpm，默认就是 pnpm。
+  ✗ zh-neg-05 want=constraint got=null · 别把构建缓存提交进仓库。
+  ✗ zh-pref-06 want=preference got=null · 以后写文档默认用中文，不用英文。
+  ✗ zh-corr-03 want=fact got=null · 说错了，记忆推送脚本要跑的是 push 而不是 sync。
+  ✗ zh-corr-05 want=fact got=null · 刚才说的 8080 作废，现在是 8443。
+  ~ zh-quote-06 两难(当前产出 constraint,与其中一种读法一致)
+  ~ zh-quote-07 两难(当前产出 constraint,与其中一种读法一致)
+  ~ zh-cond-06 两难(当前产出 constraint,与其中一种读法一致)
+  ~ zh-cond-07 两难(当前产出 constraint,与其中一种读法一致)
+  ~ zh-out-06 两难(当前产出 null,与其中一种读法不一致)
+  ~ zh-sec-05 两难(当前产出 REFUSE,与其中一种读法一致)
+[F2-2 来源] 总 21 · 通过 21 · 会话来源 12/12 · 技能来源 9/9
+[F2-3 召回] 总 9 · 计分 8 · 通过 6 · 误召回 1 · 漏召回 0 · fallback 口径不符 1 · 两难 1(不计分) · pin 被拒 1
+  ✗ {"id":"ret-04","keys":["build-old"]}
+  ✗ {"id":"ret-08","want":null,"got":"no-overlap","reserved":false}
+  ~ ret-09 两难(回注 2 条)
+✔ F2-1 抽取正确性:合成中文语料九类,误收/漏收/两难分开报 (7.66875ms)
+✔ F2-2 来源判定:会话来源门 + 技能来源标签,未采集一律 unknown (1.780292ms)
+✔ F2-3 召回:误召回与 fallback 诚实度分开报,保送不算相关 (7.284042ms)
+✔ 敏感候选整条拒收:0 条产出、skippedSensitive 计数、正文片段一个字都不留 (0.408167ms)
+✔ 否定与纠正的正文原样落库:不许把「不要用 X」存成「用 X」 (0.362375ms)
+✔ 召回的 fallback 必须自报身份:没问句/没重合都不许说成相关 (0.278125ms)
+✔ 约束保送标成 constraint-reserve,不冒充更相关 (0.217125ms)
+✔ 语料自检:全合成、不含凭据形状、不引用任何个人路径 (1.425167ms)
+✔ 语料自检:九类齐全,且每类都有难负例 (0.298084ms)
+✔ pure extraction admits only direct user text and narrowly labelled assistant rejection (4.185083ms)
+✔ sensitive and high-entropy candidates are dropped whole without retaining substrings (0.627459ms)
+✔ idle capture severs nested event aliases before deferred extraction (13.572209ms)
+✔ idle capture is deferred, coalesces snapshots, advances watermark, and exposes a strict public shape (9.07125ms)
+✔ importance eviction keeps high-value constraints and rejections rather than FIFO (5.288583ms)
+✔ storage uses encoded names, 0700 directories, 0600 files, and refuses symlink files (5.274792ms)
+✔ delete transaction tombstones queued work, prunes, restores exact bytes, and commits without resurrection (14.383166ms)
+✔ GET route is method-strict, returns empty without paths, and delete audit/response report pruning (24.053416ms)
+✔ audit failure restores session memory bytes through manager compensation (20.114917ms)
+✔ no code path accepts a model, prompt, maintenance, or persistence dependency (2.820667ms)
+✔ observer adopts idle agents, captures future idle transitions, and unloads both listeners (7.511208ms)
+✔ W20 来源门:裸 {kind:user} 不收;带 rpcId 收;子代理会话头(origin=subagent / depth>0)整个不收;单轮指令与片段不抽 (1.142166ms)
+✔ W20 来源门走生产链路:capture→drain→processSnapshot 带会话头,子代理会话整个不抽;深度 0 会话抽得到 (3.873458ms)
+✔ operator pin is confirm-gated and does not invent text (6.78325ms)
+✔ splitTrashedTo / projectLabel:只认 dshRoot 下「根/项目/会话」三段且根名合规;projectKey 只回末段 (1.110208ms)
+✔ 读端:delete.log 为软链 → DELETE_LOG_PATH_INVALID;缺文件 → [];坏行丢弃 (7.142542ms)
+✔ describeTrashEntry:落点仍在 present:true;缺失 false;根外/穿越 kind outside 且 present null(不探测);软链标 symlink (11.300125ms)
+✔ summarizeUnloggedRoots:按根统计「含 session.jsonl(.zstd)」的会话目录与未入日志数;空目录/有名无文件不计;裸 uuid 名也计 (9.003083ms)
+✔ 路由:GET 200 形状;POST 405;软链日志 403;响应不含绝对路径 (9.284125ms)
+✔ categoryOf matches librarian seven-bucket taxonomy (0.501125ms)
+✔ analyzeShadowing picks lower DSH rank as winner and flags drift (23.39125ms)
+✔ skillNamesFromEvent reads tool/call arguments and skill-invocation source (0.544833ms)
+✔ loadSkillUsageCached scans session.jsonl.zstd and writes cache (19.303708ms)
+✔ discoverSessionRoots includes trash and backup, scanSkillUsage sums them (10.484958ms)
+✔ CLI decompress sums two zstd frames; zlib only sees the first (11.613042ms)
+✔ walkSessionFiles records an unreadable root and still scans the others (7.290625ms)
+✔ scanSkillUsage yields the event loop between files (414.319292ms)
+✔ estimateIndexBudget reports overshoot vs 1000-token target (0.308834ms)
+✔ skill lexical drops CJK unigrams and scores ASCII substrings (0.738334ms)
+✔ propose is lexical+posterior and does not invent a model rank (0.746ms)
+✔ same-label outcomes can promote a lower lexical hit (5.467125ms)
+✔ store refuses unconfirmed or skill-call verdicts and appends operator outcomes (10.3945ms)
+✔ selector pick must stay inside the shortlist (0.342542ms)
+✔ optional rerank is fail-closed and does not write a route decision (0.243458ms)
+✔ catalog rewrite is fail-closed (0.28825ms)
+✔ catalog trim defaults on and persist is confirm-gated (1.601208ms)
+✔ runtime trim keeps project and origin-unknown when candidates are user-root-only (0.480375ms)
+✔ unlabeled runtime name that also appears in the user-root audit is kept (0.141583ms)
+✔ trim hook keeps project skills when candidate audit is user-root-only (1.60375ms)
+✔ injected runtime snapshot trims unlabeled host entries using current project/global winners (2.781875ms)
+✔ runtime snapshot fallback preserves the host decision and records trimmed false (1.973459ms)
+✔ a successful snapshot without removable globals does not claim a trim (0.937083ms)
+✔ same-name same-description rows from different sources stay unknown and are kept (0.279542ms)
+✔ collided provenance keeps both host rows and never books a no-op as a dedup (2.688833ms)
+✔ operator pin rejects over-limit text instead of silent end-chop (1.193208ms)
+✔ trim hook calls next first and leaves the decision when disabled (0.705166ms)
+✔ normalizeSkillName folds spaces and never keeps a parent path (0.692125ms)
+✔ createSkillDraft writes the DSH model root once and refuses overwrite (16.456542ms)
+✔ createSkillDraft does not write the Claude user root (8.133875ms)
+✔ existing SKILL.md is not rewritten even if evals are new (1.904542ms)
+✔ validateDraft refuses a description without a trigger cue (0.153416ms)
+✔ needsPlugin writes a stub outside profile plugins and does not mark it installed (6.994ms)
+✔ readStudioSkill and description patch stay on the model root (4.279834ms)
+✔ replaceDescriptionFrontmatter keeps the body and refuses files without description (0.150708ms)
+[F2-R2 容量] 512 行 · 276662 字节 · 平均 540 字节/行 · 无上限、无轮转、无 TTL
+✔ R2 容量:账本纯追加 —— 没有行数上限、没有轮转、没有去重 (46.355833ms)
+✔ R2 保留:只有每个 bind 的最后一行可读,被取代的行仍全部留在盘上 (1.693791ms)
+✔ R2 容量:进程内 bind 索引不淘汰,随跳数单调增长 (1.341083ms)
+✔ R2 容量:重开进程要回放整份文件,行数就是启动开销 (2.041792ms)
+✔ R2 保留:崩溃留下的半行只毁掉自己和紧随其后的一行,更早的证据不受影响 (1.184167ms)
+✔ R2 保留:本模块没有任何清理通道,现存有效证据不可能被删 (2.149209ms)
+✔ R2 隐私:默认 store 没有账本路径,模块里也没有 homedir() 兜底 (3.769834ms)
+✔ empty store stays uncollected and does not invent zeros (0.597375ms)
+✔ recorded pre-step keeps prepended 0 distinct from uncollected (1.055459ms)
+✔ impressions stay listed and reserved is not relevance (0.1075ms)
+✔ a later memory lane replaces impressions instead of merging the prior turn (0.078875ms)
+✔ turn evidence ledger reloads the last row and does not invent a turn (3.250417ms)
+✔ host bind never invents a turn/step sequence (0.180209ms)
+✔ cross-step evidence does not leak into another turn (0.097542ms)
+✔ persist failure stays observed but not collected or on-disk (1.177583ms)
+✔ old ledger rows without persist/turn fields stay compatible (1.084584ms)
+✔ selectYoloDecisions:只取该会话且有 callId 的行,按 time 升序,只透传白名单字段,justification 截短 (1.346125ms)
+✔ readYoloRows:缺文件 → [];半行/坏行丢弃 (2.296333ms)
+✔ 路由:GET only;sessionId 经 validateSessionId;200 形状 {version, sessionId, file, count, items} (1.716084ms)
+✔ W18 读侧:resourcePath/workspaceRoot 透传,inWorkspace 只收 boolean(null = 未采集不透传),argumentsSummary 不透传;存量行无字段不发明 (0.201916ms)
+ℹ tests 174
+ℹ suites 0
+ℹ pass 172
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 2
+ℹ todo 0
+ℹ duration_ms 552.410166

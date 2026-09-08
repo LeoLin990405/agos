@@ -6,7 +6,7 @@
  */
 import { composeSelectorSystemPrompt, createSelector, resolveCachedSelector } from './selector-llm.js'
 import { fallbackPick } from './fallback.js'
-import { appendLine, buildAnnotateRecord, buildDecisionRecord, listRoutes as listRoutesFromLedger, readLedgerLines, foldLedger } from './ledger.js'
+import { appendLine, buildAnnotateRecord, buildDecisionRecord, listRoutes as listRoutesFromLedger, readLedgerLines, foldLedger, withLedgerLock } from './ledger.js'
 import { shadowDecide, fleetBatchRuns, backfillShadowOutcomes, attachShadowLinks } from './shadow.js'
 import { ASSEMBLE_COPY as ASM_COPY, ASSEMBLE_EMPTY_COPY, allocationStateFromLedger, assembleLive, defaultPoolCandidates, LIVE_DISPATCH_OFF_COPY as LIVE_OFF } from './assemble.js'
 import { DISPATCH_COPY, DISPATCH_EMPTY_COPY, dispatchTeam, streamRoleText } from './dispatch.js'
@@ -246,39 +246,78 @@ export function apply(ctx, rawConfig) {
     })
   }
 
+  // HTTP 处理器持锁的超时上限。ledger-lock.js 的默认值是 30s,那是给批处理写者定的;
+  // 用在这里会变成一条故障:acquireLedgerLock 等锁走 Atomics.wait,它 park 的是**整个
+  // 单线程 host**,不是当前这一个请求。所以一个卡死的对端会让控制台全站冻住 30 秒。
+  //
+  // 而且这道风险是接线放大的:接线前 appendLine 只在「追加」那一瞬取锁,接线后临界区
+  // 变成「读 → 判定 → 追加」整段(这是事务性的代价,不能退回去)。实测读+fold 在一万行
+  // 台账上是 5.3ms、千行 0.6ms,所以 5s 已是临界区的约一千倍余量;同时它必须大于
+  // recoverStale 内部那把恢复锁的 2s,否则一次正当的陈锁回收就会吃掉整个预算。
+  //
+  // 缩短超时不会让别人抢走我正持有的锁:isStale 对「活着且 start time 匹配」的 owner
+  // 一律返回 false,timeoutMs 只决定何时启用昂贵的 PID 复用检查(见 ledger-lock.js
+  // 的窗口注释)。超时是 fail-closed 的 —— 抛 AGOS_LEDGER_LOCK_TIMEOUT,不写盘。
+  const HTTP_LOCK = { timeoutMs: 5_000 }
+  // 读路径(GET /routes 的影子回填)单独一个短得多的预算,理由是不对称的:
+  //   · 写路径等不到锁 = 一次用户可见的拒绝,值得容忍 5s;
+  //   · 回填是**幂等**的 —— 跳过这一轮,下一次 GET 会重算同一份 pending 集合,
+  //     而列表本来就把未回填的行诚实显示为 pending。
+  // 也就是说读路径花 5s 冻住整个 host,换来的是下一次轮询免费就能拿到的东西;
+  // 而控制台在轮询 GET /routes,一个持续持锁的对端会让宿主每轮冻 5s。
+  // 接线还额外放大了这条:接线前 links.size === 0 时先返回、一次锁都不取,
+  // 接线后取锁被提到最外层,于是「没有任何影子链接」这个常见情形也要取一次锁。
+  // 由接线审查者指出。
+  const BACKFILL_LOCK = { timeoutMs: 250 }
+
   function shadowLink(body) {
     const cfg = effectiveConfig()
-    const rows = readLedgerLines(cfg.auditFile)
-    const bound = bindShadowLink({
-      ref: body && body.ref,
-      batchId: body && body.batchId,
-      hosts: body && body.hosts,
-      rows,
-      decisions: foldLedger(rows).decisions,
-      batches: fleetBatchRuns(readFleetRuns(homedir())),
-    })
-    if (!bound.ok) {
-      const error = new Error(bound.error)
-      error.code = bound.code
-      throw error
-    }
-    if (!bound.idempotent) appendLine(cfg.auditFile, bound.record)
-    return bound.record
+    // 一次事务:REBOUND / BATCH_LINKED 两道检查读的是已有链接,并发的 linker 不能挤在
+    // 这次读与下面的追加之间 —— 否则两条链接都过检查,一个批次绑到两个决策上。
+    return withLedgerLock(cfg.auditFile, () => {
+      const rows = readLedgerLines(cfg.auditFile)
+      const bound = bindShadowLink({
+        ref: body && body.ref,
+        batchId: body && body.batchId,
+        hosts: body && body.hosts,
+        rows,
+        decisions: foldLedger(rows).decisions,
+        batches: fleetBatchRuns(readFleetRuns(homedir())),
+      })
+      if (!bound.ok) {
+        const error = new Error(bound.error)
+        error.code = bound.code
+        throw error
+      }
+      if (!bound.idempotent) appendLine(cfg.auditFile, bound.record)
+      return bound.record
+    }, HTTP_LOCK)
   }
 
   /** W17:GET 时回填影子决策的批次终态(只对 已挂 batchId + outcome 空 + fleet 批次已终态 的行追加 outcome 行)。 */
   function backfillShadow(cfg) {
     try {
-      const rows = readLedgerLines(cfg.auditFile)
-      const batches = fleetBatchRuns(readFleetRuns(homedir()))
-      const links = validatedShadowLinks(rows, batches)
-      if (links.size === 0) return 0
-      const { decisions } = foldLedger(rows)
-      const pending = backfillShadowOutcomes({ decisions, links, batchRuns: batches })
-      for (const rec of pending) appendLine(cfg.auditFile, rec)
-      return pending.length
+      // 否则两个并发 GET 会算出同一份 pending 集合,然后各写一遍。
+      return withLedgerLock(cfg.auditFile, () => {
+        const rows = readLedgerLines(cfg.auditFile)
+        const batches = fleetBatchRuns(readFleetRuns(homedir()))
+        const links = validatedShadowLinks(rows, batches)
+        if (links.size === 0) return 0
+        const { decisions } = foldLedger(rows)
+        const pending = backfillShadowOutcomes({ decisions, links, batchRuns: batches })
+        for (const rec of pending) appendLine(cfg.auditFile, rec)
+        return pending.length
+      }, BACKFILL_LOCK)
     } catch (err) {
-      logger.warn('影子回填失败(不影响列表)', err && err.message ? err.message : err)
+      // 锁超时与「真的出错了」必须分开说。原文案对两者都说「不影响列表」——列表本身确实
+      // 仍然诚实(未回填的行照旧显示为 pending,没有编造终态),但一次数秒的宿主冻结加一次
+      // 回填缺失,对外只表现为一条说「不影响」的 warn,把最重的后果说成无关紧要。
+      // 5s→250ms 之后超时会更常发生而不是更少,所以这条分流是配套的,不是可选的。
+      const timedOut = err && err.code === 'AGOS_LEDGER_LOCK_TIMEOUT'
+      logger.warn(
+        timedOut ? '影子回填本次跳过:台账锁被其他写者持有,下次 GET 会重算' : '影子回填失败(不影响列表)',
+        err && err.message ? err.message : err,
+      )
       if (process.env.SHADOW_DEBUG) console.error(err)
       return 0
     }
@@ -319,19 +358,23 @@ export function apply(ctx, rawConfig) {
 
   function recordOutcome(body) {
     const file = effectiveConfig().auditFile
-    const bound = bindOrdinaryOutcome({
-      authority: 'operator',
-      body,
-      rows: readLedgerLines(file),
-    })
-    if (!bound.ok) {
-      const error = new Error(bound.error)
-      error.code = bound.code
-      throw error
-    }
-    if (bound.idempotent) return bound.record
-    appendLine(file, bound.record)
-    return bound.record
+    // 一次事务:CONFLICTING_RESULT 是由这次读判定的,并发写者不能在读与追加之间落一个
+    // 相反结果 —— 那等于让「改判不改史」被竞争击穿,而不是被 bug 击穿。
+    return withLedgerLock(file, () => {
+      const bound = bindOrdinaryOutcome({
+        authority: 'operator',
+        body,
+        rows: readLedgerLines(file),
+      })
+      if (!bound.ok) {
+        const error = new Error(bound.error)
+        error.code = bound.code
+        throw error
+      }
+      if (bound.idempotent) return bound.record
+      appendLine(file, bound.record)
+      return bound.record
+    }, HTTP_LOCK)
   }
 
   async function assembleLiveRequest(body) {
@@ -376,6 +419,9 @@ export function apply(ctx, rawConfig) {
     }, {
       append: (record) => appendLine(effectiveConfig().auditFile, record),
       readRows: () => readLedgerLines(effectiveConfig().auditFile),
+      // 只有同步的 读→检查→追加 尾段在锁内跑。前面三条模型流各自最长 45s,
+      // 把它们一起圈进跨进程锁会持锁约 135s、远超锁的 30s 超时,使其他写者全部失败。
+      transact: (fn) => withLedgerLock(effectiveConfig().auditFile, fn, HTTP_LOCK),
       streamRole: (input) => streamRoleText(input, {
         llm: ctx.llm,
         BlockAssembler,

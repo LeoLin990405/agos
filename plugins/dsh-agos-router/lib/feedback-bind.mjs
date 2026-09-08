@@ -2,6 +2,7 @@
 // Controller wires these into index/dispatch/shadow. This module does not write the ledger.
 import { buildOutcomeRecord, foldLedger } from './ledger.js'
 import { buildShadowLinkRecord, SHADOW_MODE, SHADOW_OUTCOME_SOURCE } from './shadow.js'
+import { isTaskFingerprint, sameTask } from './task-fingerprint.mjs'
 
 export const OUTCOME_SOURCE_MANUAL = 'manual'
 export const OUTCOME_SOURCE_REVIEWER = 'reviewer-verdict'
@@ -18,6 +19,8 @@ export const FEEDBACK_CODES = Object.freeze({
   NOT_INDEPENDENT: 'NOT_INDEPENDENT',
   POOL_TOO_SMALL: 'POOL_TOO_SMALL',
   NOT_LEARNABLE: 'NOT_LEARNABLE',
+  TASK_MISMATCH: 'TASK_MISMATCH',
+  REPLAYED: 'REPLAYED',
 })
 
 export const FEEDBACK_COPY = Object.freeze({
@@ -31,6 +34,8 @@ export const FEEDBACK_COPY = Object.freeze({
   NOT_INDEPENDENT: '评审模型必须和实现模型不同，自评不入后验',
   POOL_TOO_SMALL: '候选不足，不独立评审不能学习',
   NOT_LEARNABLE: '该结果标记为不可学习，不入后验',
+  TASK_MISMATCH: '判定针对的任务与决策记录的任务不是同一个，拒绝跨任务入账',
+  REPLAYED: '该提交已入账过，拒绝重放',
 })
 
 function fail(code, extra = {}) {
@@ -79,6 +84,49 @@ export function latestOutcome(rows, ref) {
     if (row && row.kind === 'outcome' && String(row.ref) === id) found = row
   }
   return found
+}
+
+/** The task a decision row was made for. Shadow rows keep theirs in shadow.taskFingerprints. */
+export function decisionTaskRef(decision) {
+  const value = decision && typeof decision === 'object' ? decision.taskRef : undefined
+  return isTaskFingerprint(value) ? value : null
+}
+
+/**
+ * Cross-task gate.
+ *
+ * A verdict is an opinion about one specific task. Booking it against a decision
+ * made for a different task credits or blames a model for work it never saw, and
+ * the posterior has no way to tell afterwards. Two rules:
+ *   - an explicitly stated task that disagrees with the decision's is always refused;
+ *   - a reviewer verdict must state one. The dispatch path always knows which task
+ *     it ran, so a missing fingerprint there means the verdict is unattributable.
+ * Decisions written before taskRef existed carry no fingerprint and stay bindable —
+ * refusing them would make every historical row permanently un-annotatable.
+ */
+export function checkTaskBinding({ decision, claimed, source }) {
+  const expected = decisionTaskRef(decision)
+  if (!expected) return { ok: true, taskRef: null, unverified: true }
+  if (isTaskFingerprint(claimed)) {
+    return sameTask(claimed, expected)
+      ? { ok: true, taskRef: expected, unverified: false }
+      : { ok: false, code: FEEDBACK_CODES.TASK_MISMATCH, expected, claimed }
+  }
+  if (source === OUTCOME_SOURCE_REVIEWER) {
+    return { ok: false, code: FEEDBACK_CODES.TASK_MISMATCH, expected, claimed: null }
+  }
+  return { ok: true, taskRef: expected, unverified: true }
+}
+
+/**
+ * Replay gate. A submission may carry a nonce minted once by whoever produced the
+ * verdict; seeing the same nonce twice means the same submission arrived twice
+ * (retry storm, replayed request), not that a second judgement was made.
+ */
+export function seenNonce(rows, nonce) {
+  if (typeof nonce !== 'string' || nonce.trim() === '') return false
+  const id = nonce.trim()
+  return (Array.isArray(rows) ? rows : []).some((row) => row && row.kind === 'outcome' && row.nonce === id)
 }
 
 function poolSize(candidates) {
@@ -198,6 +246,22 @@ export function bindOrdinaryOutcome(input = {}) {
     return fail(FEEDBACK_CODES.SHADOW_MANUAL_OUTCOME, { ref })
   }
 
+  // Same submission arriving twice is one judgement, not two. Checked before the
+  // idempotency branches so a replay is named as such instead of silently absorbed.
+  const nonce = typeof body.nonce === 'string' && body.nonce.trim() ? body.nonce.trim() : ''
+  if (nonce && seenNonce(rows, nonce)) {
+    return fail(FEEDBACK_CODES.REPLAYED, { ref, nonce })
+  }
+
+  const binding = checkTaskBinding({
+    decision,
+    claimed: input.taskRef ?? body.taskRef,
+    source,
+  })
+  if (!binding.ok) {
+    return fail(FEEDBACK_CODES.TASK_MISMATCH, { ref, expected: binding.expected, claimed: binding.claimed })
+  }
+
   const prior = latestOutcome(rows, ref)
   if (!prior && (decision.outcome === 'ok' || decision.outcome === 'fail')) {
     if (decision.outcome !== body.result) {
@@ -230,7 +294,7 @@ export function bindOrdinaryOutcome(input = {}) {
 
   let record
   try {
-    record = buildOutcomeRecord({ ref, result: body.result, source })
+    record = buildOutcomeRecord({ ref, result: body.result, source, taskRef: binding.taskRef })
   } catch (err) {
     const message = err && err.message ? String(err.message) : ''
     if (message.includes('ref')) return fail(FEEDBACK_CODES.MISSING_REF)
@@ -240,6 +304,7 @@ export function bindOrdinaryOutcome(input = {}) {
     if (typeof (input.reviewer ?? body.judge) === 'string') record.judge = input.reviewer ?? body.judge
     if (typeof (input.implementer ?? body.judged) === 'string') record.judged = input.implementer ?? body.judged
   }
+  if (nonce) record.nonce = nonce
   if (independence.learnable === false) {
     record.learnable = false
     record.verdictSkip = independence.skip
@@ -255,6 +320,9 @@ export function bindOrdinaryOutcome(input = {}) {
     learnable: record.learnable !== false,
     feed: independence.learnable !== false,
     verdictSkip: independence.skip,
+    // true when the decision predates taskRef, so callers can report "not checkable"
+    // instead of implying the task binding was verified.
+    taskUnverified: binding.unverified === true,
   }
 }
 

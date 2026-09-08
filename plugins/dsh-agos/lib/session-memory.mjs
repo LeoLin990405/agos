@@ -87,6 +87,24 @@ const QUESTION_RE = /[？?]\s*$|(?:是不是|是什么|为什么|有没有|能�
 const MARKUP_LINE_RE = /^(?:[|`]|```|[-*]\s*`)|^(?:ssh|curl|tailscale|cd|ls|cat|node|npm|git)\s/u
 // 片段(以冒号收尾的引子)与贴回来的报错,两类都不是话
 const FRAGMENT_RE = /[:：]\s*$|^(?:Error|Traceback|Exception)\b/u
+// 第三人称转述:别人的话不是用户自己的偏好或事实(标注口径里「引用的别人文字」= null)。
+// 只认句首的纯转述动词。「要求 / 强调」故意不在表里:那更可能是用户在转达硬要求,文本上分不开。
+const ATTRIBUTION_LEAD_RE = /^[-*#「」“”"'\s]*(?:同事|同学|老板|领导|客户|甲方|对方|群里|群友|别人|某人|他们|她们|他|她|评审|运维|测试)(?:们)?(?:有人|某人)?\s*(?:[也都还就]\s*)?(?:说|表示|提到|认为|反馈|写道|称|建议)/u
+// 条件句里的「X 是 Y」是假设,不是事实。只拦 fact 分支:「如果要动 X,就必须 Y」这类把条件
+// 当适用范围的规矩仍按 constraint 收(正文原样保留「如果」,读的人看得见条件)。
+const CONDITIONAL_LEAD_RE = /^[-*#\s]*(?:如果|假如|倘若|若是|若|要是|万一|一旦)/u
+// 过时陈述不是当前事实。系统没有 stale 标记通道,所以只能不收 —— 绝不静默当成现值。
+// 只在标记出现在判断词之前时生效:「Gen8 是真源,之前说过」的「之前」在判断词之后,不算过时。
+const STALE_MARKER_RE = /以前|之前|原来|原先|旧版|老版|上个月|上周|去年|当时|曾经/u
+const DECLARATIVE_COPULA_RE = /是(?!否)|(?<![作以因认成改设调换命定拆称视])为/u
+
+/** 带过时标记的陈述句:标记落在判断词之前(或整句没有判断词)才算。 */
+function isStaleDeclarative(text) {
+  const marker = STALE_MARKER_RE.exec(text)
+  if (marker === null) return false
+  const copula = DECLARATIVE_COPULA_RE.exec(text)
+  return copula === null || marker.index < copula.index
+}
 
 function classifyUserText(text) {
   if (/^(?:已排除|排除|放弃)\s*[:：]?/u.test(text)
@@ -97,6 +115,9 @@ function classifyUserText(text) {
   // 问句 / 表格行 / 代码围栏 / 命令行 / 片段 / 单轮指令:对所有 kind 一律否决(不只 fact)
   if (QUESTION_RE.test(text) || MARKUP_LINE_RE.test(text) || FRAGMENT_RE.test(text)) return undefined
   if (AUTO_CONTINUE_RE.test(text) || TURN_ONLY_RE.test(text)) return undefined
+  // 转述别人的话:对 constraint/preference/fact 一律否决。rejected 在上面已经判过 ——
+  // 「同事说试过 flock 不行」仍是一条有用的排除记录。
+  if (ATTRIBUTION_LEAD_RE.test(text)) return undefined
   if (/(?:必须|务必|禁止|不许|只允许|只能|(?<!能)不能|不要|不得|应当|都要|一律)/u.test(text)
     || /\b(?:must|never|do not|don't|cannot|can't|required)\b/iu.test(text)) {
     return { kind: 'constraint', importance: 5 }
@@ -106,6 +127,8 @@ function classifyUserText(text) {
     return { kind: 'preference', importance: 4 }
   }
   // Pure rules cannot determine truth. Keep this gate intentionally narrow (declaratives only).
+  // 条件句与过时陈述都不是事实:只拦这一支,上面的 constraint / preference 不受影响。
+  if (CONDITIONAL_LEAD_RE.test(text) || isStaleDeclarative(text)) return undefined
   if (/(?:^|[，, ])(?:我(?:的|们)?|本机|当前|目前|项目|仓库|服务|端口|路径|版本).{1,}/u.test(text)
     || /\b(?:my|our|current|project|repository|service|version)\b.{1,}\b(?:is|are|uses?|runs?|lives?)\b/iu.test(text)
     // 「具名实体 是/为 …」:主语里得有 ASCII 字母或数字(Gen8 / M4-Knowledge / NucBoxG3),纯中文指代(这个是…)不算

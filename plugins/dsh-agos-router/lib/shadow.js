@@ -88,6 +88,10 @@ function chosenOf(body) {
 export function buildShadowRecord(input, decision, meta = {}) {
   const chosen = Array.isArray(meta.chosen) ? meta.chosen : []
   const base = buildDecisionRecord(input, decision ?? { role: 'implementer', pick: null, confidence: null, reason: null, label: TASK_TYPE }, meta.source ?? 'fallback')
+  // input.task here is the *summary* (≤32 items, each clipped). Its hash is not a task
+  // identity, and a row carrying both it and shadow.taskFingerprints would offer a
+  // weaker fingerprint next to the authoritative pre-truncation ones. Keep only the latter.
+  delete base.taskRef
   const pick = typeof base.pick === 'string' ? base.pick : null
   const record = {
     ...base,
