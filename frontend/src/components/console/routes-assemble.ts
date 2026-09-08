@@ -73,8 +73,9 @@ export const NOTE_DISTINCT_COPY = 'generation≠review：评审模型必须和�
 export const NOTE_POOL_SMALL_COPY = '候选池不够，未能做到 generation≠review';
 export const KNOWN_ASSEMBLE_NOTES: readonly string[] = [NOTE_DISTINCT_COPY, NOTE_POOL_SMALL_COPY];
 
-/** 后端 dispatch.js 会写进 turns[].note 的唯一一句(MODEL_UNRESOLVED_COPY)。 */
-export const KNOWN_TURN_NOTES: readonly string[] = ['宿主未配置该模型'];
+/** 后端 dispatch.js 会写进 turns[].note 的句子(MODEL_UNRESOLVED_COPY / IMPLEMENTER_RETRY_COPY)。 */
+export const IMPLEMENTER_RETRY_COPY = '实现被工具块挡下，已去工具再试一次';
+export const KNOWN_TURN_NOTES: readonly string[] = ['宿主未配置该模型', IMPLEMENTER_RETRY_COPY];
 
 /**
  * dispatch.js / selector-llm.js 的错误码全集 → 中文。认不出的不渲染原码(019 同口径)。
@@ -168,6 +169,9 @@ export interface DispatchTurn {
   redacted?: boolean;
   /** ok 但 finish=max-tokens:文本被上限截断,后面的角色看的是截断稿。 */
   truncated?: boolean;
+  /** 实现被工具块挡下后去工具再试过。成功或失败都可能带。 */
+  retried?: boolean;
+  retryCopy?: string;
 }
 
 export interface DispatchRun {
@@ -354,7 +358,7 @@ export function parseAssemblePlan(value: unknown): AssemblePlan | null {
  * 这两样都是台账里的离散码,不是自由文本。
  */
 export function turnFailureCopy(row: { note?: unknown; error?: unknown; providerCode?: unknown; finish?: unknown }): string {
-  if (typeof row.note === 'string' && KNOWN_TURN_NOTES.includes(row.note)) return row.note;
+  if (typeof row.note === 'string' && row.note === '宿主未配置该模型') return row.note;
   if (typeof row.error !== 'string') return TURN_ERROR_UNKNOWN_COPY;
   const copy = TURN_ERROR_COPY.get(row.error);
   if (copy === undefined) return TURN_ERROR_UNKNOWN_COPY;
@@ -370,6 +374,7 @@ export function parseDispatchRun(value: unknown): DispatchRun | null {
   const turns = (root.turns as unknown[]).filter(roleRowOk).map((row): DispatchTurn => {
     const r = row as Record<string, unknown>;
     const ok = r.ok === true;
+    const retried = r.retried === true || r.note === IMPLEMENTER_RETRY_COPY;
     return {
       role: row.role,
       model: row.model,
@@ -378,6 +383,8 @@ export function parseDispatchRun(value: unknown): DispatchRun | null {
       text: ok && typeof r.text === 'string' && r.text !== '' ? clip(r.text, TURN_TEXT_LIMIT) : undefined,
       redacted: ok && (typeof r.text !== 'string' || r.text === ''),
       truncated: ok && r.finish === 'max-tokens',
+      retried: retried || undefined,
+      retryCopy: retried ? IMPLEMENTER_RETRY_COPY : undefined,
     };
   });
   return {

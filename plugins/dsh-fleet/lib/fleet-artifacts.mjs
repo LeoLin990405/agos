@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { constants as fsConstants, promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, sep } from 'node:path'
+import { scrubString } from '../../dsh-agos/lib/secrets-gate.js'
 
 const RUN_ID_RE = /^[A-Za-z0-9_-]{1,64}$/
 const ARTIFACT_MAX_BYTES = 512 * 1024 * 1024
@@ -366,10 +367,7 @@ const sendJson = (res, status, body, extraHeaders = {}) => {
   res.end(JSON.stringify(body))
 }
 
-const defaultScrubSecrets = (value) => String(value ?? '')
-  .replace(/sk-[A-Za-z0-9_-]{16,}/g, '«redacted»')
-  .replace(/(Bearer\s+)\S+/gi, '$1«redacted»')
-  .replace(/([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)\s*=\s*)\S+/gi, '$1«redacted»')
+const defaultScrubSecrets = (value) => scrubString(value)
 
 const createArtifactHandlers = ({ hostsOf, wsOf, sshRead, spawnSsh, spawnLocal = spawn, onStreamError, scrubSecrets = defaultScrubSecrets } = {}) => {
   if (typeof hostsOf !== 'function' || typeof wsOf !== 'function' || typeof sshRead !== 'function' || typeof spawnSsh !== 'function') {

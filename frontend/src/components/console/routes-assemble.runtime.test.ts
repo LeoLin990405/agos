@@ -42,7 +42,7 @@ const assembleJs = await import(join(PLUGIN, 'assemble.js')) as {
 };
 const dispatchJs = await import(join(PLUGIN, 'dispatch.js')) as {
   dispatchTeam: (assemble: unknown, input: unknown, deps: unknown) => Promise<Record<string, unknown>>;
-  DISPATCH_COPY: string; DISPATCH_NO_TOOLS_COPY: string; MODEL_UNRESOLVED_COPY: string; DISPATCH_EMPTY_COPY: string; DISPATCH_CONFIRM_COPY: string; ASSEMBLE_MISMATCH_COPY: string;
+  DISPATCH_COPY: string; DISPATCH_NO_TOOLS_COPY: string; MODEL_UNRESOLVED_COPY: string; IMPLEMENTER_RETRY_COPY: string; DISPATCH_EMPTY_COPY: string; DISPATCH_CONFIRM_COPY: string; ASSEMBLE_MISMATCH_COPY: string;
 };
 const ledgerJs = await import(join(PLUGIN, 'ledger.js')) as {
   appendLine: (file: string, record: unknown) => unknown;
@@ -92,7 +92,7 @@ test('冻结常量与插件真源逐字相同(两边都钉了字面量,这里钉
   assert.equal(fe.DISPATCH_COPY, dispatchJs.DISPATCH_COPY);
   assert.equal(fe.DISPATCH_NO_TOOLS_COPY, dispatchJs.DISPATCH_NO_TOOLS_COPY);
   assert.equal(fe.DISPATCH_EMPTY_COPY, dispatchJs.DISPATCH_EMPTY_COPY);
-  assert.deepEqual([...fe.KNOWN_TURN_NOTES], [dispatchJs.MODEL_UNRESOLVED_COPY]);
+  assert.deepEqual([...fe.KNOWN_TURN_NOTES], [dispatchJs.MODEL_UNRESOLVED_COPY, dispatchJs.IMPLEMENTER_RETRY_COPY]);
   // 后端会发的错误串都在前端白名单里(不然会被前端换成状态码)。
   for (const s of [dispatchJs.DISPATCH_CONFIRM_COPY, dispatchJs.ASSEMBLE_MISMATCH_COPY, assembleJs.ASSEMBLE_EMPTY_COPY]) assert.ok(fe.KNOWN_BACKEND_ERRORS.includes(s), s);
 });

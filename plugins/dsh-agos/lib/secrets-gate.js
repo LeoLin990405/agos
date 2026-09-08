@@ -51,7 +51,7 @@ export function scrubString(value) {
   return String(value)
     .replace(/sk-[A-Za-z0-9_-]{16,}/g, REDACTED)
     .replace(/(Bearer\s+)\S+/gi, `$1${REDACTED}`)
-    .replace(/([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)\s*=\s*)(?:"[^"]*"|'[^']*'|\S+)/g, `$1${REDACTED}`)
+    .replace(/([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)\s*=\s*)(?:"[^"]*"|'[^']*'|\S+)/gi, `$1${REDACTED}`)
 }
 
 export function scrubSecrets(value, seen = new WeakSet()) {

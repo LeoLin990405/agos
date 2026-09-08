@@ -1,12 +1,13 @@
 // Port of FuguNano engine/src/domain/allocation-score.ts.
 // Bookkeeping / offline ranking only — do not wire into live dispatch this round.
 import { UNLISTED_RANK } from './allocation.js'
-import { betaPrior, q6 } from '../../dsh-agos/lib/allocate-kernel.js'
+import { ALLOCATE_KAPPA, betaPrior, posteriorCounts, posteriorMean, q6 } from '../../dsh-agos/lib/allocate-kernel.js'
 
 export { betaPrior, q6 }
 
-export function betaPseudoCounts(p0, kappa) {
-  return { a0: kappa * p0 + 1, b0: kappa * (1 - p0) + 1 }
+export function betaPseudoCounts(p0, kappa = ALLOCATE_KAPPA) {
+  const { A, B } = posteriorCounts(p0, { s: 0, f: 0 }, kappa)
+  return { a0: A, b0: B }
 }
 
 export const applyOutcome = (state, outcome, weight = 1) => {
@@ -74,13 +75,10 @@ export const rankAgents = (taskType, bench, state, params, opts) => {
   for (const agent of candidates) {
     const p0 = priorByAgent.get(agent) ?? params.unlistedPrior
     const evidence = evidenceByAgent.get(agent) ?? { s: 0, f: 0 }
-    const a0 = params.kappa * p0 + 1
-    const b0 = params.kappa * (1 - p0) + 1
-    const A = a0 + evidence.s
-    const B = b0 + evidence.f
+    const { A, B } = posteriorCounts(p0, evidence, params.kappa)
     ranked.push({
       agent,
-      score: opts.sample ? thompsonScore(A, B, opts.random) : A / (A + B),
+      score: opts.sample ? thompsonScore(A, B, opts.random) : posteriorMean(p0, evidence, params.kappa),
       benchRank: rankByAgent.get(agent) ?? UNLISTED_RANK,
     })
   }

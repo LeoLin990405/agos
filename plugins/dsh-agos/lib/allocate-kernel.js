@@ -10,12 +10,17 @@ export function betaPrior(index, listSize) {
   return (listSize - index) / (listSize + 1)
 }
 
-export function posteriorMean(prior, evidence, kappa = ALLOCATE_KAPPA) {
+export function posteriorCounts(prior, evidence, kappa = ALLOCATE_KAPPA) {
   const s = Number(evidence && evidence.s) || 0
   const f = Number(evidence && evidence.f) || 0
   const a0 = kappa * prior + 1
   const b0 = kappa * (1 - prior) + 1
-  return (a0 + s) / (a0 + s + b0 + f)
+  return { A: a0 + s, B: b0 + f }
+}
+
+export function posteriorMean(prior, evidence, kappa = ALLOCATE_KAPPA) {
+  const { A, B } = posteriorCounts(prior, evidence, kappa)
+  return A / (A + B)
 }
 
 export function q6(x) {

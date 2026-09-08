@@ -117,4 +117,10 @@ test('civ invoker stays absent unless memory_submit is actually present', () => 
     invoke: async (name, args) => ({ name, args }),
   })
   assert.equal(typeof viaList, 'function')
+  const viaGetMissThenList = resolveMemorySubmitInvoker({
+    get: () => undefined,
+    list: () => [{ name: 'memory_submit' }],
+    invoke: async (name, args) => ({ name, args }),
+  })
+  assert.equal(typeof viaGetMissThenList, 'function')
 })

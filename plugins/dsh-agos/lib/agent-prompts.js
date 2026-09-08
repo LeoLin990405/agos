@@ -39,6 +39,34 @@ export const MEMORY_REMINDER_RULES = [
   'Session memory is a convenience projection, not Fleet Memory.',
 ].join('\n')
 
+export const SKILL_CATALOG_HEAD =
+  'A skill is a reusable set of task-specific instructions. The following skills are available in this session:'
+export const SKILL_CATALOG_HEAD_UPDATE =
+  'The available skill catalog changed. This complete catalog replaces every earlier available-skills list in this session:'
+export const SKILL_CATALOG_RULES = [
+  'This catalog is a fail-closed shortlist for this turn, not the full disk catalog. Do not invent skill names that are not listed.',
+  'Load a listed skill with the `skill` tool before following its instructions. A skill() call is an impression, not a win or loss.',
+  'Do not write /api/agos/routes/decide. Do not switch the session model for this turn.',
+].join('\n')
+
+export function renderSkillCatalogReminder(entries, update) {
+  const lines = (Array.isArray(entries) ? entries : []).map((entry) => (
+    `- \`${entry?.name ?? ''}\`: ${String(entry?.description ?? '')}`
+  ))
+  return [
+    '<system-reminder>',
+    AGENT_HONESTY_PREAMBLE,
+    update === true ? SKILL_CATALOG_HEAD_UPDATE : SKILL_CATALOG_HEAD,
+    '',
+    '<available_skills>',
+    ...lines,
+    '</available_skills>',
+    '',
+    SKILL_CATALOG_RULES,
+    '</system-reminder>',
+  ].join('\n')
+}
+
 export const REVIEWER_SEES_FINAL_COPY = '评审只看实现终稿'
 export const IMPLEMENTER_RETRY_COPY = '实现被工具块挡下，已去工具再试一次'
 
@@ -72,6 +100,22 @@ export const IMPLEMENTER_RETRY_SYSTEM = [
 export const FLEET_GUIDANCE_BODY = '本机装了 @dsh-local/fleet(homelab 多机并发)。工具 `fleet_run` 把若干**自包含**子任务派到 worker 并行执行；remote 经 ssh 跑 DSH，codex 经本机 Codex SDK（必须显式 hosts:[codex] 或 tag:codex 才会使用）。`fleet_hosts` 看有哪些机、健康与在飞数。适合 **工具重 / 需要隔离** 的批量任务；任务必须自包含，产出以文本或工作区文件交回。不要发明名单外的主机。缺席写成未采集。不要写 /api/agos/routes/decide。'
 
 export const FLEET_GUIDANCE = [AGENT_HONESTY_PREAMBLE, FLEET_GUIDANCE_BODY].join('\n')
+
+export const PLAN_APPENDIX_BODY = [
+  '## 集群执行(本机附加)',
+  '在上面的计划模式规则之外:**只要**你的计划能拆成 **两个以上互不依赖、各自自包含** 的实施步骤(例如"分别写 A、B、C 三份文件"就是三个独立步骤),你**必须**在提交给 exit_plan_mode 的 markdown 计划**末尾**追加一个代码块(语言标记必须是 dsh-plan),内容是且仅是这个 JSON —— 这不是可选项:',
+  '```dsh-plan',
+  '{"steps":[{"id":1,"title":"步骤名","detail":"给执行者的自包含指令(它看不到目标全文与其他步骤,须写清背景、输入、产出与验收)","dependsOn":[],"type":"coder"}]}',
+  '```',
+  '- dependsOn 填它依赖的步骤 id(留空 = 可并行);type 按**动作性质**从 coder / deep / explore / review / reason / docs / fast 中选(写改代码=coder;长链推理=deep;翻资料跑工具=explore;对着已有内容挑错=review;数学逻辑短判断=reason;把材料变短=docs;不需判断的机械动作=fast)。',
+  '- 计划被 Approve 后,你的**下一步**先调用工具 plan_run,参数 approve=true 与 plan=<上面那段 JSON 原文>:它会把步骤按 dependsOn 分波、按 type 派给对应厂商的国产模型子代理并行执行,再由另一家模型对照目标验收;工具返回后你只需整合结果、补做工具没覆盖的部分。',
+  '- 只有当步骤之间**强依赖**、或整体确实不可并行时才**不附块**,批准后自己逐步实施。判断标准很简单:能同时开工的就附块。不要为了凑并行而拆分,也不要因为怕麻烦而不附。',
+  '不要写 /api/agos/routes/decide。不要切换本跳会话模型。缺席写成未采集。',
+].join('\n')
+
+export function composePlanAppendix() {
+  return [AGENT_HONESTY_PREAMBLE, PLAN_APPENDIX_BODY].join('\n')
+}
 
 export function composeOptimizeAgentPrompt({ goal, metric, best, baseMetric, direction, scope, recentLog }) {
   return [

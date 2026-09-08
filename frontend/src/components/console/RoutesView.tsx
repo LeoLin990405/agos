@@ -321,7 +321,7 @@ export const RoutesView: React.FC = () => {
                   <strong className="surface-strong">{row.role}</strong>
                   <code className="surface-code">{row.model}</code>
                   <span className="surface-quiet">
-                    {row.ok ? (row.redacted ? TURN_TEXT_REDACTED_COPY : `${TURN_TEXT_PREFIX}${row.text ?? ''}${row.truncated ? TURN_TRUNCATED_COPY : ''}`) : row.failure}
+                    {row.ok ? (row.redacted ? TURN_TEXT_REDACTED_COPY : `${TURN_TEXT_PREFIX}${row.text ?? ''}${row.truncated ? TURN_TRUNCATED_COPY : ''}`) : row.failure}{row.retryCopy ? ` · ${row.retryCopy}` : ''}
                   </span>
                 </li>
               ))}

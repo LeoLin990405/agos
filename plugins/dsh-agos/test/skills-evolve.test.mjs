@@ -18,10 +18,12 @@ import {
   createSkillEvolveStore,
   writeCatalogTrimConfig,
   lastUserQuery,
+  lexicalOverlap,
   parseSelectorSkillPick,
   proposeSkillEvolve,
   rewriteCatalogDecision,
   shortlistSkills,
+  tokenize,
   trimCatalogEntries,
 } from '../lib/skills-evolve.js'
 
@@ -30,6 +32,16 @@ const catalog = [
   { name: 'playwright', description: '每当用户要浏览器自动化或说 playwright 时使用本技能。' },
   { name: 'book-chaos', description: '每当讨论混沌或复杂度阅读时使用本技能。' },
 ]
+
+test('skill lexical drops CJK unigrams and scores ASCII substrings', () => {
+  const tokens = tokenize('整理 Inbox 收件箱')
+  assert.equal(tokens.includes('inbox'), true)
+  assert.equal(tokens.includes('收件箱'), true)
+  assert.equal(tokens.includes('收件'), true)
+  assert.equal(tokens.includes('收'), false)
+  assert.ok(lexicalOverlap('fold', 'skill-folding') > 0)
+  assert.equal(lexicalOverlap('帮我改这段 React 组件的样式', '每当用户要清理收件箱或说 inbox 时使用本技能。'), 0)
+})
 
 test('propose is lexical+posterior and does not invent a model rank', () => {
   const empty = proposeSkillEvolve(catalog, '', [])
@@ -110,6 +122,9 @@ test('catalog rewrite is fail-closed', () => {
   assert.notEqual(next, decision)
   assert.equal(next.messages[0].source.entries.length, 1)
   assert.equal(next.messages[0].source.trimmed, true)
+  assert.match(next.messages[0].content[0].text, /你是 AgOS 的提案器/)
+  assert.match(next.messages[0].content[0].text, /Do not write \/api\/agos\/routes\/decide/)
+  assert.match(next.messages[0].content[0].text, /impression, not a win or loss/)
   assert.deepEqual(trimCatalogEntries(catalog, []), { ok: false, reason: 'empty-shortlist' })
 })
 

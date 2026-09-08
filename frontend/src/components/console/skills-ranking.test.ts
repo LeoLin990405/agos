@@ -18,11 +18,16 @@ const catalog: SkillCatalogEntry[] = [
   { name: 'book-chaos', description: '每当讨论混沌或复杂度阅读时使用本技能。', modelInvocable: true, category: 'books' },
 ];
 
-test('tokenize keeps latin words and CJK bigrams', () => {
+test('tokenize keeps latin words and CJK bigrams, not unigrams', () => {
   const tokens = tokenize('整理 Inbox 收件箱');
   assert.equal(tokens.includes('inbox'), true);
+  assert.equal(tokens.includes('整理'), true);
+  assert.equal(tokens.includes('收件箱'), true);
   assert.equal(tokens.includes('收件'), true);
   assert.equal(tokens.includes('件箱'), true);
+  assert.equal(tokens.includes('收'), false);
+  assert.equal(tokens.includes('箱'), false);
+  assert.ok(lexicalOverlap('fold', 'skill-folding') > 0);
 });
 
 test('shortlist is lexical overlap and empty query stays uncollected', () => {

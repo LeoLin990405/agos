@@ -4,7 +4,7 @@ import { DESCRIPTION_MAX, validateDescription } from './skills-studio-model';
 
 export const LEXICAL_METHOD = 'lexical-overlap' as const;
 export const LEXICAL_THRESHOLD = 0.18;
-export const SHORTLIST_K = 8;
+export const SHORTLIST_K = 8; // 与 allocate-kernel ALLOCATE_SHORTLIST_K 同值
 export const RERANK_UNAVAILABLE_COPY = '小模型重排未采集：宿主没有推荐接口';
 export const SHORTLIST_METHOD_COPY = '词面短名单，不是模型推荐';
 export const LEXICAL_EVAL_COPY = '词面重合，不是模型触发率';
@@ -38,8 +38,8 @@ export function tokenize(text: string): string[] {
   for (const word of lower.match(/[a-z0-9]+/g) ?? []) {
     if (word.length >= 2) tokens.add(word);
   }
-  for (const run of lower.match(/[\u3400-\u9fff]+/g) ?? []) {
-    for (const char of run) tokens.add(char);
+  for (const run of lower.match(/[\u3400-\u9fff]{2,}/g) ?? []) {
+    tokens.add(run);
     for (let index = 0; index < run.length - 1; index += 1) {
       tokens.add(run.slice(index, index + 2));
     }
@@ -50,10 +50,10 @@ export function tokenize(text: string): string[] {
 export function lexicalOverlap(query: string, document: string): number {
   const queryTokens = tokenize(query);
   if (queryTokens.length === 0) return 0;
-  const documentTokens = new Set(tokenize(document));
+  const hay = document.toLocaleLowerCase();
   let hit = 0;
   for (const token of queryTokens) {
-    if (documentTokens.has(token)) hit += 1;
+    if (hay.includes(token)) hit += 1;
   }
   return hit / queryTokens.length;
 }

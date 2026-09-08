@@ -9,7 +9,7 @@ import { homedir } from 'node:os'
 import { tmpdir } from 'node:os'
 import { basename, dirname, extname, join, sep } from 'node:path'
 import { formatCodexBarUsage, readCodexBarUsage } from './usage.mjs'
-import { composeOptimizeAgentPrompt } from '../../dsh-agos/lib/agent-prompts.js'
+import { composeOptimizeAgentPrompt, composePlanAppendix } from '../../dsh-agos/lib/agent-prompts.js'
 import { buildCouncilReviewRecord, councilReviewVerdict, disagreementsFromParsed, normalizeDisagreementItems } from './council-record.js'
 
 const name = 'cn-capabilities'
@@ -2198,16 +2198,7 @@ const PROVIDER_DEFAULT_MODEL = {
   //    抓一次就不再读(2026-08-19 实测);而用户层 overlay 的 config 改动是在插件**构造完之后**才应用的,
   //    改 section 只更新 dump-config 的配置树、不更新活插件 —— dump 有附加、真跑没有。禁用+插入同名实例也不行
   //    (插入在构造后应用 → 新实例根本不加载)。所以改成加法:自己再挂一段,只在计划模式激活时输出。
-  const PLAN_APPENDIX = [
-    '## 集群执行(本机附加)',
-    '在上面的计划模式规则之外:**只要**你的计划能拆成 **两个以上互不依赖、各自自包含** 的实施步骤(例如"分别写 A、B、C 三份文件"就是三个独立步骤),你**必须**在提交给 exit_plan_mode 的 markdown 计划**末尾**追加一个代码块(语言标记必须是 dsh-plan),内容是且仅是这个 JSON —— 这不是可选项:',
-    '```dsh-plan',
-    '{"steps":[{"id":1,"title":"步骤名","detail":"给执行者的自包含指令(它看不到目标全文与其他步骤,须写清背景、输入、产出与验收)","dependsOn":[],"type":"coder"}]}',
-    '```',
-    '- dependsOn 填它依赖的步骤 id(留空 = 可并行);type 按**动作性质**从 coder / deep / explore / review / reason / docs / fast 中选(写改代码=coder;长链推理=deep;翻资料跑工具=explore;对着已有内容挑错=review;数学逻辑短判断=reason;把材料变短=docs;不需判断的机械动作=fast)。',
-    '- 计划被 Approve 后,你的**下一步**先调用工具 plan_run,参数 approve=true 与 plan=<上面那段 JSON 原文>:它会把步骤按 dependsOn 分波、按 type 派给对应厂商的国产模型子代理并行执行,再由另一家模型对照目标验收;工具返回后你只需整合结果、补做工具没覆盖的部分。',
-    '- 只有当步骤之间**强依赖**、或整体确实不可并行时才**不附块**,批准后自己逐步实施。判断标准很简单:能同时开工的就附块。不要为了凑并行而拆分,也不要因为怕麻烦而不附。',
-  ].join('\n')
+  const PLAN_APPENDIX = composePlanAppendix()
   // 折叠会话里的 plan/mode 事件,拿到"此刻是否在计划模式"(与 dsh-plan-mode 的 foldPlanMode 同口径:取最后一次)
   const planActive = (events) => {
     if (!Array.isArray(events)) return false

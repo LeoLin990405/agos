@@ -253,7 +253,6 @@ export function resolveMemorySubmitInvoker(tools) {
     if (typeof found === 'function') {
       return (args) => found(args)
     }
-    return undefined
   }
   const named = listToolNames(tools)
   const listed = named.includes('memory_submit')

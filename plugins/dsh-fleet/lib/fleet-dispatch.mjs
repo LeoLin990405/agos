@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { scrubString } from '../../dsh-agos/lib/secrets-gate.js'
 
 const MAX_BODY_BYTES = 512 * 1024
 const MAX_ITEMS = 32
@@ -31,10 +32,7 @@ const clip = (value, max) => {
 }
 
 function defaultScrubSecrets(value) {
-  return String(value ?? '')
-    .replace(/sk-[A-Za-z0-9_-]{16,}/g, '«redacted»')
-    .replace(/(Bearer\s+)\S+/gi, '$1«redacted»')
-    .replace(/([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)\s*=\s*)\S+/gi, '$1«redacted»')
+  return scrubString(value)
 }
 
 function scrubTree(value, scrubSecrets = defaultScrubSecrets, seen = new WeakSet()) {

@@ -5,12 +5,14 @@ import {
   AGENT_HONESTY_PREAMBLE,
   composeAssembleRolePrompt,
   composeOptimizeAgentPrompt,
+  composePlanAppendix,
   composeSelectorSystemPrompt,
   DEFAULT_SYSTEM_PROMPT,
   FLEET_GUIDANCE,
   IMPLEMENTER_RETRY_SYSTEM,
   REVIEWER_SEES_FINAL_COPY,
   SELECTOR_IO_CONTRACT,
+  renderSkillCatalogReminder,
   SKILL_RERANK_SYSTEM,
 } from '../lib/agent-prompts.js'
 import { ALLOCATE_KAPPA, ALLOCATE_NOT_LIVE_COPY, betaPrior, posteriorMean } from '../lib/allocate-kernel.js'
@@ -62,4 +64,11 @@ test('all model prompts share the honesty preamble and force the selector contra
   })
   assert.ok(optimize.startsWith(AGENT_HONESTY_PREAMBLE))
   assert.ok(optimize.includes('不要编造指标数字'))
+  const plan = composePlanAppendix()
+  assert.ok(plan.startsWith(AGENT_HONESTY_PREAMBLE))
+  assert.ok(plan.includes('不要写 /api/agos/routes/decide'))
+  const catalog = renderSkillCatalogReminder([{ name: 'inbox-triage', description: '清理收件箱' }], false)
+  assert.ok(catalog.includes(AGENT_HONESTY_PREAMBLE))
+  assert.ok(catalog.includes('inbox-triage'))
+  assert.ok(catalog.includes('Do not write /api/agos/routes/decide'))
 })

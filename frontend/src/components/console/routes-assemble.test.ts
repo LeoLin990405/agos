@@ -223,12 +223,26 @@ test('违约预览有上限且按原串计数，alert 区不是后端文本的�
 });
 
 test('回合文案：note 只认表内那句，error 码译成中文，原型链键不泄漏，text 截 400', () => {
-  assert.deepEqual([...KNOWN_TURN_NOTES], ['宿主未配置该模型']);
+  assert.deepEqual([...KNOWN_TURN_NOTES], ['宿主未配置该模型', '实现被工具块挡下，已去工具再试一次']);
   assert.equal(turnFailureCopy({ note: '宿主未配置该模型' }), '宿主未配置该模型');
   assert.equal(turnFailureCopy({ note: '已接入本跳会话并换了模型', error: 'BAD_OUTPUT' }), '没有产出可见文本（旧码，原因未拆分）');
   // 2026-08-23 拆码:四个新码各有译文;PROVIDER_ERROR 带供应商码译文;max-tokens 点明截断;认不出的供应商码不带。
   assert.equal(turnFailureCopy({ error: 'NO_TEXT', finish: 'max-tokens' }), '没有产出文本块，输出被 maxTokens 上限截断');
   assert.equal(turnFailureCopy({ error: 'TOOL_CALL' }), '模型试图调用工具');
+  const retried = parseDispatchRun({ dispatch: { ...GOOD_DISPATCH, turns: [
+    TURNS[0],
+    { role: 'implementer', model: 'qwen3.8-max', ok: true, text: '终稿', retried: true, note: '实现被工具块挡下，已去工具再试一次' },
+    TURNS[2],
+  ] } });
+  assert.equal(retried?.turns[1]?.retried, true);
+  assert.equal(retried?.turns[1]?.retryCopy, '实现被工具块挡下，已去工具再试一次');
+  const retryFail = parseDispatchRun({ dispatch: { ...GOOD_DISPATCH, turns: [
+    TURNS[0],
+    { role: 'implementer', model: 'qwen3.8-max', ok: false, error: 'TOOL_CALL', retried: true, note: '实现被工具块挡下，已去工具再试一次' },
+    TURNS[2],
+  ] } });
+  assert.equal(retryFail?.turns[1]?.failure, '模型试图调用工具');
+  assert.equal(retryFail?.turns[1]?.retryCopy, '实现被工具块挡下，已去工具再试一次');
   assert.equal(turnFailureCopy({ error: 'UNPARSEABLE' }), '输出不是约定的 JSON');
   assert.equal(turnFailureCopy({ error: 'PROVIDER_ERROR', providerCode: 'QUOTA' }), '供应商报错（额度用尽）');
   assert.equal(turnFailureCopy({ error: 'PROVIDER_ERROR', providerCode: '__proto__' }), '供应商报错');
@@ -545,7 +559,7 @@ test('RoutesView 只渲染 deriveAssembleView 的结果与冻结常量，不自�
   for (const key of ['ASSEMBLE_EMPTY_COPY', 'ASSEMBLE_HOW_COPY', 'ASSEMBLE_CONFIRM_COPY', 'DISPATCH_NO_TOOLS_COPY', 'DISPATCH_CONFIRM_CHECK_COPY', 'DISPATCH_EMPTY_COPY', 'DISPATCH_BUTTON_COPY']) {
     assert.match(view, new RegExp(`\\{${key}\\}`), `${key} 没有渲染`);
   }
-  assert.match(view, /row\.ok \? \(row\.redacted \? TURN_TEXT_REDACTED_COPY : `\$\{TURN_TEXT_PREFIX\}\$\{row\.text \?\? ''\}\$\{row\.truncated \? TURN_TRUNCATED_COPY : ''\}`\) : row\.failure/);
+  assert.match(view, /row\.ok \? \(row\.redacted \? TURN_TEXT_REDACTED_COPY : `\$\{TURN_TEXT_PREFIX\}\$\{row\.text \?\? ''\}\$\{row\.truncated \? TURN_TRUNCATED_COPY : ''\}`\) : row\.failure\}\{row\.retryCopy \? ` · \$\{row\.retryCopy\}` : ''\}/);
   // 失败分支也刷新台账;试跑失败放掉本地提案(第三轮 [5][21])。
   assert.equal((view.match(/resource\.refresh\(\);/g) ?? []).length, 5);
   assert.match(view, /setDispatchNote\(\{ tone: 'error', text: posted\.error \}\);\s*setProposed\(null\);\s*setLocalRun\(null\);\s*resource\.refresh\(\);/);

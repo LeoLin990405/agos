@@ -9,15 +9,16 @@ import { dirname, join } from 'node:path'
 import {
   ALLOCATE_KAPPA,
   ALLOCATE_POSTERIOR_COPY,
+  ALLOCATE_SHORTLIST_K,
   ALLOCATE_UNLISTED_PRIOR,
   betaPrior,
   posteriorMean,
 } from './allocate-kernel.js'
-import { SKILL_RERANK_SYSTEM } from './agent-prompts.js'
+import { renderSkillCatalogReminder, SKILL_RERANK_SYSTEM } from './agent-prompts.js'
 
 export const EVOLVE_KAPPA = ALLOCATE_KAPPA
 export const EVOLVE_UNLISTED_PRIOR = ALLOCATE_UNLISTED_PRIOR
-export const SHORTLIST_K = 8
+export const SHORTLIST_K = ALLOCATE_SHORTLIST_K
 export const LEXICAL_METHOD = 'lexical-overlap'
 export const POSTERIOR_METHOD_COPY = ALLOCATE_POSTERIOR_COPY
 export const CALL_IS_NOT_VERDICT_COPY = 'skill() 调用不是胜负'
@@ -44,8 +45,8 @@ export function tokenize(text) {
   for (const word of lower.match(/[a-z0-9]+/g) ?? []) {
     if (word.length >= 2) tokens.add(word)
   }
-  for (const run of lower.match(/[\u3400-\u9fff]+/g) ?? []) {
-    for (const char of run) tokens.add(char)
+  for (const run of lower.match(/[\u3400-\u9fff]{2,}/g) ?? []) {
+    tokens.add(run)
     for (let index = 0; index < run.length - 1; index += 1) {
       tokens.add(run.slice(index, index + 2))
     }
@@ -56,10 +57,10 @@ export function tokenize(text) {
 export function lexicalOverlap(query, document) {
   const queryTokens = tokenize(query)
   if (queryTokens.length === 0) return 0
-  const documentTokens = new Set(tokenize(document))
+  const hay = String(document ?? '').toLocaleLowerCase()
   let hit = 0
   for (const token of queryTokens) {
-    if (documentTokens.has(token)) hit += 1
+    if (hay.includes(token)) hit += 1
   }
   return hit / queryTokens.length
 }
@@ -208,21 +209,7 @@ export function rewriteCatalogDecision(decision, names) {
 }
 
 function renderTrimmedCatalog(entries, update) {
-  const lines = entries.map((entry) => `- \`${entry.name}\`: ${String(entry.description ?? '')}`)
-  const head = update
-    ? 'The available skill catalog changed. This complete catalog replaces every earlier available-skills list in this session:'
-    : 'A skill is a reusable set of task-specific instructions. The following skills are available in this session:'
-  return [
-    '<system-reminder>',
-    head,
-    '',
-    '<available_skills>',
-    ...lines,
-    '</available_skills>',
-    '',
-    'This catalog is a fail-closed shortlist for this turn. Load a listed skill with the `skill` tool before following its instructions.',
-    '</system-reminder>',
-  ].join('\n')
+  return renderSkillCatalogReminder(entries, update === true)
 }
 
 export function parseSelectorSkillPick(text, allowedIds) {

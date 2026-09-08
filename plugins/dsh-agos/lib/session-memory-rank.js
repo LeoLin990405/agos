@@ -5,6 +5,7 @@ import { appendFile, mkdir, open } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
+import { ALLOCATE_POSTERIOR_COPY, ALLOCATE_SHORTLIST_K } from './allocate-kernel.js'
 import {
   EVOLVE_KAPPA,
   EVOLVE_UNLISTED_PRIOR,
@@ -16,13 +17,13 @@ import {
 
 export { lastUserQuery }
 
-export const MEMORY_SHORTLIST_K = 8
+export const MEMORY_SHORTLIST_K = ALLOCATE_SHORTLIST_K
 export const ITEM_ID_RE = /^[a-f0-9]{24}$/
 export const MEMORY_LEXICAL_METHOD = 'lexical+posterior'
 export const MEMORY_FALLBACK_METHOD = 'importance-recency'
 export const MEMORY_RESERVE_METHOD = 'constraint-reserve'
 export const MEMORY_RESERVE_COPY = '短名单含约束保送，不是把约束算成更相关'
-export const MEMORY_POSTERIOR_COPY = '经验后验，不是模型推荐'
+export const MEMORY_POSTERIOR_COPY = ALLOCATE_POSTERIOR_COPY
 export const MEMORY_LEXICAL_COPY = '词面短名单，不是模型推荐'
 export const MEMORY_FALLBACK_QUERY_COPY = '本跳没有可排序的用户问句，按重要度回注'
 export const MEMORY_FALLBACK_OVERLAP_COPY = '词面没有重合，按重要度回注'
