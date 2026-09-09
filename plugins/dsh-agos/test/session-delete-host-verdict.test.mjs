@@ -48,7 +48,7 @@ const listEnvelope = (items) => ({
  *   · gateway/src/index.ts:950-953 —— payload 必须含**恰好一个** plain-object args 字段;
  *   · gateway/src/index.ts:1112-1137 assertExactArguments —— args 的键必须与 descriptor
  *     逐一对上,多了报 unexpected,少了报 missing。
- * 拒绝时的返回照抄宿主行为:HTTP **200** + `{ok:false, error:{code}}`(不是 4xx —— 
+ * 拒绝时的返回照抄宿主行为:HTTP **200** + `{ok:false, error:{code}}`(不是 4xx ——
  * gateway 捕获异常后仍走正常信封,这一点本身也值得钉住)。
  */
 const gatewayFetch = (items, seen) => async (url, init) => {
