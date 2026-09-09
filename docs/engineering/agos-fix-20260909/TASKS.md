@@ -4,7 +4,7 @@
 「改了」不算完成，「改坏了会变红」才算。
 
 - 基线：`9434064f87b1a936c13c58b94c2473c6d89f3a61`
-- 交付：`d60ae14`（分支 `fix/cursor-integration-20260909`）
+- 交付：`e93ce40`（分支 `fix/cursor-integration-20260909`；代码最后一跳 `d60ae14`，其后只动 `docs/`）
 - 结果汇总见 [VERIFICATION.md](VERIFICATION.md)
 
 ---

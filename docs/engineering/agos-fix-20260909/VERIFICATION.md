@@ -3,7 +3,8 @@
 本文件围绕**最终状态**写。历史结论在文末「已作废的历史结论」一节单列并标明作废原因。
 
 - 基线提交：`9434064f87b1a936c13c58b94c2473c6d89f3a61`（第二轮，未上传）
-- 交付提交：`d60ae14`（分支 `fix/cursor-integration-20260909`，worktree `/Users/leo/Projects/agos-cursor-fix-20260909`）
+- 交付提交：`e93ce40`（分支 `fix/cursor-integration-20260909`，worktree `/Users/leo/Projects/agos-cursor-fix-20260909`）
+- **下面所有数字量在 `d60ae14`**，即代码的最后一跳；其后两跳（`8695099`、`e93ce40`）只动 `docs/`，不改任何被测代码
 - 相对基线：84 个文件，+14807 / −1757
 - `git diff --check 9434064 HEAD`：**无空白问题**
 
