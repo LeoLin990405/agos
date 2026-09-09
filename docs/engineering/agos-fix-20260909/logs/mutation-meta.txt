@@ -1,0 +1,214 @@
+# 突变元检查(把验收器故意改坏,证明负控抓得到)
+# 脱敏:本文件经过一次路径前缀替换 —— /Users/leo → <HOME>、/Users/leo/Projects/agos-cursor-fix-20260909 → <REPO>、临时目录 → <TMP>。
+# 除此之外未作任何删改;下方 SHA256 是**脱敏后**这份文件的摘要。
+#
+
+[M1] 把整条守卫退回纯词法 resolve + 字符串前缀(忠实还原原始缺陷)
+   突变文件: scripts/acceptance/lib/safe-write-root.mjs
+   套件退出码: 1   变红: NC-W1, NC-W2, NC-W3, NC-W4, POS-W6, NC-W7
+   期望变红: NC-W1, NC-W2, NC-W3  → ✅ 全部变红
+   判定: OK
+
+[M2] 摘掉 .dsh 受保护路径段检查
+   突变文件: scripts/acceptance/lib/safe-write-root.mjs
+   套件退出码: 1   变红: NC-W1, NC-W3, NC-W7
+   期望变红: NC-W1  → ✅ 全部变红
+   期望保持绿: NC-W2  → ✅ 仍绿
+   含义: NC-W2 用窄 allow-root,应当仍绿 → 证明包含性检查独立于命名规则
+   判定: OK
+
+[M3] 摘掉"真实路径必须落在允许根内"的包含性检查
+   突变文件: scripts/acceptance/lib/safe-write-root.mjs
+   套件退出码: 1   变红: NC-W2
+   期望变红: NC-W2  → ✅ 全部变红
+   期望保持绿: NC-W1  → ✅ 仍绿
+   含义: NC-W1 的假 profile 含 .dsh 段,应当仍绿 → 证明两条规则各自成立
+   判定: OK
+
+[M4] 把 O_NOFOLLOW 写入退回成普通 writeFileSync(会穿过软链)
+   突变文件: scripts/acceptance/lib/safe-write-root.mjs
+   套件退出码: 1   变红: NC-W5
+   期望变红: NC-W5  → ✅ 全部变红
+   判定: OK
+
+[M5] 把守卫在 --check 模式下关掉(不变量按模式打折)
+   突变文件: scripts/acceptance/prepare-host-modules.mjs
+   套件退出码: 1   变红: NC-W7
+   期望变红: NC-W7  → ✅ 全部变红
+   判定: OK
+
+[M6] 不再递归跟随相对导入(只看入口文件本身)
+   突变文件: scripts/acceptance/lib/import-graph.mjs
+   套件退出码: 1   变红: NC-G1, NC-G2, POS-G4
+   期望变红: NC-G1, NC-G2  → ✅ 全部变红
+   判定: OK
+
+[M7] 词法器不再跳过行注释(注释里的 import 会被当真)
+   突变文件: scripts/acceptance/lib/import-graph.mjs
+   套件退出码: 1   变红: POS-G5
+   期望变红: POS-G5  → ✅ 全部变红
+   判定: OK
+
+[M8] 不再扫描测试入口(test/*.mjs)
+   突变文件: scripts/acceptance/lib/import-graph.mjs
+   套件退出码: 1   变红: NC-G3
+   期望变红: NC-G3  → ✅ 全部变红
+   判定: OK
+
+[M9] 不再折叠同文件字符串常量(动态 import(CONST) 又变成不可见)
+   突变文件: scripts/acceptance/lib/import-graph.mjs
+   套件退出码: 1   变红: NC-G7
+   期望变红: NC-G7  → ✅ 全部变红
+   判定: OK
+
+[M10] 摘掉版本一致性检查整段(只留内容摘要)
+   突变文件: scripts/acceptance/verify-host-tree.mjs
+   套件退出码: 1   变红: NC-V1, NC-V2, NC-V4
+   期望变红: NC-V1, NC-V2, NC-V4  → ✅ 全部变红
+   判定: OK
+
+[M11] 树没装时跳过版本判定(还原"没装就静默失效")
+   突变文件: scripts/acceptance/verify-host-tree.mjs
+   套件退出码: 1   变红: NC-V4
+   期望变红: NC-V4  → ✅ 全部变红
+   判定: OK
+
+[M12] 把"不证明干净安装"的诚实表述删掉(还原夸大措辞)
+   突变文件: scripts/acceptance/verify-host-tree.mjs
+   套件退出码: 1   变红: NC-V6
+   期望变红: NC-V6  → ✅ 全部变红
+   判定: OK
+
+[M13] 把输出里的"不证明"提示行删掉
+   突变文件: scripts/acceptance/verify-host-tree.mjs
+   套件退出码: 1   变红: NC-V6
+   期望变红: NC-V6  → ✅ 全部变红
+   判定: OK
+
+[M14] 【安全阀】让加载期导入形态也算「可选」—— 静态 import 缺包被放行
+   突变文件: scripts/acceptance/lib/import-graph.mjs
+   套件退出码: 1   变红: NEG-HI-C1, NEG-HI-C2, NEG-HI-C3, NEG-HI-C4, NEG-HI-C5, NEG-HI-C6, NEG-HI-C8, UNIT-HI-1
+   期望变红: NEG-HI-C1, NEG-HI-C2, NEG-HI-C3, NEG-HI-C4, NEG-HI-C5, NEG-HI-C6, NEG-HI-C8, UNIT-HI-1  → ✅ 全部变红
+   期望保持绿: NEG-HI-A1, NEG-HI-A2, NEG-HI-E1  → ✅ 仍绿
+   含义: 安全阀失效不牵连「清单外缺包照旧阻断」与 fail-closed —— 三层互相独立,不是一层在兜底。
+   判定: OK
+
+[M15] 【安全阀】只把 ESM 静态形态放行(留着 require 判定),看是否仍被抓到
+   突变文件: scripts/acceptance/lib/import-graph.mjs
+   套件退出码: 1   变红: NEG-HI-C1, NEG-HI-C2, NEG-HI-C3, NEG-HI-C4, NEG-HI-C8, UNIT-HI-1
+   期望变红: NEG-HI-C1, NEG-HI-C2, NEG-HI-C3, NEG-HI-C4, NEG-HI-C8, UNIT-HI-1  → ✅ 全部变红
+   期望保持绿: NEG-HI-C5, NEG-HI-C6  → ✅ 仍绿
+   含义: ESM 静态那四条变红、require 那两条仍绿 —— 证明六条形态是分别被断言的,不是一条覆盖全部。
+   判定: OK
+
+[M16] 【fail-closed】清单读不了时静默当成空清单继续跑
+   突变文件: scripts/acceptance/prepare-host-modules.mjs
+   套件退出码: 1   变红: NEG-HI-E1, NEG-HI-E2, NEG-HI-E3, NEG-HI-E4, NEG-HI-E5, NEG-HI-E6, NEG-HI-E7, NEG-HI-E8, NEG-HI-E9, NEG-HI-E10, NEG-HI-E11
+   期望变红: NEG-HI-E1, NEG-HI-E2, NEG-HI-E3, NEG-HI-E4, NEG-HI-E5, NEG-HI-E6, NEG-HI-E7, NEG-HI-E8, NEG-HI-E9, NEG-HI-E10, NEG-HI-E11  → ✅ 全部变红
+   期望保持绿: NEG-HI-A1, NEG-HI-C1  → ✅ 仍绿
+   含义: fail-open 不牵连安全阀与默认行为 —— 三层独立。
+   判定: OK
+
+[M17] 【闸门 a】不看 verdict,清单里列了就一律豁免(只拆第一道)
+   突变文件: scripts/acceptance/prepare-host-modules.mjs
+   套件退出码: 0   变红: (无)
+   期望变红:   → ✅ 全部变红
+   期望保持绿: NEG-HI-C1, NEG-HI-C2, NEG-HI-C3, NEG-HI-C4, NEG-HI-C5, NEG-HI-C6, NEG-HI-C8, NEG-HI-D1, NEG-HI-D2, NEG-HI-D3, NEG-HI-A1  → ✅ 仍绿
+   含义: 只拆闸门 a 不漏 —— hostIntegrationsOk 这道独立顶住了。
+   判定: OK
+
+[M17b] 【闸门 b】把 hostIntegrationsOk 从就绪判定里摘掉(只拆第二道)
+   突变文件: scripts/acceptance/prepare-host-modules.mjs
+   套件退出码: 0   变红: (无)
+   期望变红:   → ✅ 全部变红
+   期望保持绿: NEG-HI-C1, NEG-HI-C2, NEG-HI-C3, NEG-HI-C4, NEG-HI-C5, NEG-HI-C6, NEG-HI-C8, NEG-HI-D1, NEG-HI-D2, NEG-HI-D3  → ✅ 仍绿
+   含义: 只拆闸门 b 也不漏 —— exempt 不收 violation,那些包照旧算缺失。
+   判定: OK
+
+[M17c] 【两道一起拆】exempt 无条件放行 + 摘掉 hostIntegrationsOk —— 安全阀彻底失效
+   突变文件: scripts/acceptance/prepare-host-modules.mjs
+   套件退出码: 1   变红: NEG-HI-C1, NEG-HI-C2, NEG-HI-C3, NEG-HI-C4, NEG-HI-C5, NEG-HI-C6, NEG-HI-C8, NEG-HI-D1, NEG-HI-D2, NEG-HI-D3
+   期望变红: NEG-HI-C1, NEG-HI-C2, NEG-HI-C3, NEG-HI-C4, NEG-HI-C5, NEG-HI-C6, NEG-HI-C8, NEG-HI-D1, NEG-HI-D2, NEG-HI-D3  → ✅ 全部变红
+   期望保持绿: NEG-HI-A1  → ✅ 仍绿
+   含义: 两道都拆才漏,且漏的时候十条负例全红 —— 说明它们确实各自在守,且清单外的默认行为不受牵连。
+   判定: OK
+
+[M18] 【声明核验】不核验降级实现是否真的导出声明的那个名字
+   突变文件: scripts/acceptance/lib/host-integrations.mjs
+   套件退出码: 1   变红: NEG-HI-D2
+   期望变红: NEG-HI-D2  → ✅ 全部变红
+   期望保持绿: NEG-HI-D1, NEG-HI-C1  → ✅ 仍绿
+   判定: OK
+
+[M19] 【报告可见性】把宿主集成专节的标题行删掉
+   突变文件: scripts/acceptance/prepare-host-modules.mjs
+   套件退出码: 1   变红: POS-HI-B1
+   期望变红: POS-HI-B1  → ✅ 全部变红
+   期望保持绿: POS-HI-B4, NEG-HI-C1  → ✅ 仍绿
+   含义: 「不能从输出里静默消失」这条要求确实被断言在守,不是写在注释里的空话。
+   判定: OK
+
+[M19b] 【报告可见性】把每条集成的状态行删掉(集成本身从输出里消失)
+   突变文件: scripts/acceptance/prepare-host-modules.mjs
+   套件退出码: 1   变红: POS-HI-B1, POS-HI-B3
+   期望变红: POS-HI-B1, POS-HI-B3  → ✅ 全部变红
+   期望保持绿: POS-HI-B4  → ✅ 仍绿
+   判定: OK
+
+[M20] 【如实披露】图没观测到时不说明「图无法佐证」,假装一切已核实
+   突变文件: scripts/acceptance/prepare-host-modules.mjs
+   套件退出码: 1   变红: POS-HI-B2
+   期望变红: POS-HI-B2  → ✅ 全部变红
+   期望保持绿: POS-HI-B1  → ✅ 仍绿
+   判定: OK
+
+
+================ 削弱反证汇总 ================
+✅ M1  把整条守卫退回纯词法 resolve + 字符串前缀(忠实还原原始缺陷)
+      套件 W 退出 1;期望红 [NC-W1, NC-W2, NC-W3] → OK
+✅ M2  摘掉 .dsh 受保护路径段检查
+      套件 W 退出 1;期望红 [NC-W1];期望绿 [NC-W2] → OK
+✅ M3  摘掉"真实路径必须落在允许根内"的包含性检查
+      套件 W 退出 1;期望红 [NC-W2];期望绿 [NC-W1] → OK
+✅ M4  把 O_NOFOLLOW 写入退回成普通 writeFileSync(会穿过软链)
+      套件 W 退出 1;期望红 [NC-W5] → OK
+✅ M5  把守卫在 --check 模式下关掉(不变量按模式打折)
+      套件 W 退出 1;期望红 [NC-W7] → OK
+✅ M6  不再递归跟随相对导入(只看入口文件本身)
+      套件 G 退出 1;期望红 [NC-G1, NC-G2] → OK
+✅ M7  词法器不再跳过行注释(注释里的 import 会被当真)
+      套件 G 退出 1;期望红 [POS-G5] → OK
+✅ M8  不再扫描测试入口(test/*.mjs)
+      套件 G 退出 1;期望红 [NC-G3] → OK
+✅ M9  不再折叠同文件字符串常量(动态 import(CONST) 又变成不可见)
+      套件 G 退出 1;期望红 [NC-G7] → OK
+✅ M10  摘掉版本一致性检查整段(只留内容摘要)
+      套件 V 退出 1;期望红 [NC-V1, NC-V2, NC-V4] → OK
+✅ M11  树没装时跳过版本判定(还原"没装就静默失效")
+      套件 V 退出 1;期望红 [NC-V4] → OK
+✅ M12  把"不证明干净安装"的诚实表述删掉(还原夸大措辞)
+      套件 V 退出 1;期望红 [NC-V6] → OK
+✅ M13  把输出里的"不证明"提示行删掉
+      套件 V 退出 1;期望红 [NC-V6] → OK
+✅ M14  【安全阀】让加载期导入形态也算「可选」—— 静态 import 缺包被放行
+      套件 H 退出 1;期望红 [NEG-HI-C1, NEG-HI-C2, NEG-HI-C3, NEG-HI-C4, NEG-HI-C5, NEG-HI-C6, NEG-HI-C8, UNIT-HI-1];期望绿 [NEG-HI-A1, NEG-HI-A2, NEG-HI-E1] → OK
+✅ M15  【安全阀】只把 ESM 静态形态放行(留着 require 判定),看是否仍被抓到
+      套件 H 退出 1;期望红 [NEG-HI-C1, NEG-HI-C2, NEG-HI-C3, NEG-HI-C4, NEG-HI-C8, UNIT-HI-1];期望绿 [NEG-HI-C5, NEG-HI-C6] → OK
+✅ M16  【fail-closed】清单读不了时静默当成空清单继续跑
+      套件 H 退出 1;期望红 [NEG-HI-E1, NEG-HI-E2, NEG-HI-E3, NEG-HI-E4, NEG-HI-E5, NEG-HI-E6, NEG-HI-E7, NEG-HI-E8, NEG-HI-E9, NEG-HI-E10, NEG-HI-E11];期望绿 [NEG-HI-A1, NEG-HI-C1] → OK
+✅ M17  【闸门 a】不看 verdict,清单里列了就一律豁免(只拆第一道)
+      套件 H 退出 0;期望红 [];期望绿 [NEG-HI-C1, NEG-HI-C2, NEG-HI-C3, NEG-HI-C4, NEG-HI-C5, NEG-HI-C6, NEG-HI-C8, NEG-HI-D1, NEG-HI-D2, NEG-HI-D3, NEG-HI-A1] → OK
+✅ M17b  【闸门 b】把 hostIntegrationsOk 从就绪判定里摘掉(只拆第二道)
+      套件 H 退出 0;期望红 [];期望绿 [NEG-HI-C1, NEG-HI-C2, NEG-HI-C3, NEG-HI-C4, NEG-HI-C5, NEG-HI-C6, NEG-HI-C8, NEG-HI-D1, NEG-HI-D2, NEG-HI-D3] → OK
+✅ M17c  【两道一起拆】exempt 无条件放行 + 摘掉 hostIntegrationsOk —— 安全阀彻底失效
+      套件 H 退出 1;期望红 [NEG-HI-C1, NEG-HI-C2, NEG-HI-C3, NEG-HI-C4, NEG-HI-C5, NEG-HI-C6, NEG-HI-C8, NEG-HI-D1, NEG-HI-D2, NEG-HI-D3];期望绿 [NEG-HI-A1] → OK
+✅ M18  【声明核验】不核验降级实现是否真的导出声明的那个名字
+      套件 H 退出 1;期望红 [NEG-HI-D2];期望绿 [NEG-HI-D1, NEG-HI-C1] → OK
+✅ M19  【报告可见性】把宿主集成专节的标题行删掉
+      套件 H 退出 1;期望红 [POS-HI-B1];期望绿 [POS-HI-B4, NEG-HI-C1] → OK
+✅ M19b  【报告可见性】把每条集成的状态行删掉(集成本身从输出里消失)
+      套件 H 退出 1;期望红 [POS-HI-B1, POS-HI-B3];期望绿 [POS-HI-B4] → OK
+✅ M20  【如实披露】图没观测到时不说明「图无法佐证」,假装一切已核实
+      套件 H 退出 1;期望红 [POS-HI-B2];期望绿 [POS-HI-B1] → OK
+
+✅ 全部 23 条突变都被测试抓到(且独立性断言成立)

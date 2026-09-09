@@ -1,0 +1,16 @@
+# 交付日志 SHA256 —— 摘要针对**脱敏后**的文件本身
+# 脱敏口径见每份文件头部三行:一次路径前缀替换(<HOME>/<REPO>/<TMP>),此外未作删改。
+# 本文件不含自身摘要(自指无意义)。生成于 2026-09-09 16:55 CST,提交 d60ae14
+#
+ade9b32b7f8853ef56962b9c4ad3dbde5f9556570eef1e98237046b6f9e6f8ee  acceptance-gate.txt
+2d0456577ee214493ebea609593bb7bf9ab3f95c9389a19b0460dcae96b1673b  acceptance-unit.txt
+bd0a52ce172c585b3ec506259ced5cf48eb329a9ac4efc6f693ebed4e0d7312f  clean-npm-ci.txt
+b01cbcc8c922b773cb77a05d5b63d334a9e9a8aa8a09d9df9e4a6a22c779180f  host-integration.txt
+f26bb9fb475775af2ef860fe698d40aeaad805a2a47e715a0865b56e38f540d5  mutation-meta.txt
+3235cdd3071263c0a062a734c6dd1413eb1e7f84f0f9d9b640c5b9488d0e0dfe  selftest.txt
+d1b3df46c9560c4c9fae3acd5c2abe7c78e253126f76903f30c1f1e0044bb961  suite-cn-capabilities.txt
+3671b2862bee9e20fc5f11c8bbf0a569755518ccc287cad55a64652571203131  suite-dsh-agos-router.txt
+07b559b897d787fe285b2bab9f00c168d68022afe0f6a083b9f9c39ca3695ab7  suite-dsh-agos.txt
+2d79630f355c67f9212a01e161c0c01a5f8925cb2534f7930c3f1941fc23093a  suite-dsh-fleet.txt
+a0eaf3ede75e398602201a6ce4e807805af098f351c30010c5d6b4e554b0164b  suite-dsh-mcp-bridge.txt
+2d29674bf3744c4f039dcb5cd97d3f5d383d3dc8b144509945578d351915e62c  suite-frontend.txt

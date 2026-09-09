@@ -1,0 +1,17 @@
+# 套件 dsh-mcp-bridge(node --test test/*.mjs;该包无 test 脚本)
+# 脱敏:本文件经过一次路径前缀替换 —— /Users/leo → <HOME>、/Users/leo/Projects/agos-cursor-fix-20260909 → <REPO>、临时目录 → <TMP>。
+# 除此之外未作任何删改;SHA256.txt 里的摘要是**脱敏后**这份文件的。
+#
+✔ initialize is emitted as one MCP SSE protocol frame (23.845959ms)
+✔ tools/list exposes the five bounded tools and warns that prompt burns quota (7.873917ms)
+✔ tools/call agos_sessions reads a fixture projcache through /mcp (5.688083ms)
+✔ prompt is intercepted and memory search goes through /api/memory/search (BM25), stripping non-contract fields (4.452333ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 147.246125
+EXIT=0

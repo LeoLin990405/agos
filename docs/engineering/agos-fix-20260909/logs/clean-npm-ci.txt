@@ -1,0 +1,12 @@
+# 干净依赖树(临时目录 npm ci,公开 registry,无 --force / --legacy-peer-deps)
+# 脱敏:本文件经过一次路径前缀替换 —— /Users/leo → <HOME>、/Users/leo/Projects/agos-cursor-fix-20260909 → <REPO>、临时目录 → <TMP>。
+# 除此之外未作任何删改;下方 SHA256 是**脱敏后**这份文件的摘要。
+#
+agos-plugin-host-deps@0.0.0 /private/tmp/agos-clean-ci-8vjn
+├── @deepseek-ai/dsh-llm@0.1.2-rc.1
+├── @deepseek-ai/dsh-timeout@0.1.2-rc.1
+├── @deepseek-ai/dsh-tools@0.1.2-rc.1
+├── @deepseek-ai/schemastery@3.18.1
+├── @openai/codex-sdk@0.147.0
+└── react@18.3.1
+

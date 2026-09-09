@@ -1,0 +1,175 @@
+# 真实宿主浏览器联测(node frontend/tests/host-integration/run.mjs)—— 9 passed / 0 failed / 0 blocked / 0 skipped
+# 脱敏:本文件经过一次路径前缀替换 —— /Users/leo → <HOME>、/Users/leo/Projects/agos-cursor-fix-20260909 → <REPO>、临时目录 → <TMP>。
+# 除此之外未作任何删改;SHA256.txt 里的摘要是**脱敏后**这份文件的。
+#
+[2026-09-09T08:45:27.982Z] real pinned host up: <HOME>/.npm-global/bin/dsh --profile web --patch <TMP> --port 39411 --host 127.0.0.1 --no-open --trusted-host 127.0.0.1:39412
+[2026-09-09T08:45:27.982Z] run root <TMP> (runId mttusbaq-c45f8554b66c)
+[2026-09-09T08:45:28.080Z] SPA origin up: http://127.0.0.1:39412 (relaying /api to the real host)
+[2026-09-09T08:45:28.272Z] playwright: <REPO>/frontend/node_modules/playwright-core/index.js (repo:frontend/package.json)
+[2026-09-09T08:45:29.841Z] browser pid 17176 recorded (group 17176, own group)
+[2026-09-09T08:45:30.054Z] real browser up: 152.0.7977.82
+[2026-09-09T08:45:30.083Z] ── scenario 0-bringup: the real SPA loads against the real host and goes live
+[2026-09-09T08:45:30.502Z] blocked external request: GET https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500;600;700&family=Geist:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap
+[2026-09-09T08:45:31.824Z]    ok   real session/follow reached phase=live in the browser store
+[2026-09-09T08:45:31.824Z]    ok   real $events stream online in the browser (streamOnline=true)
+[2026-09-09T08:45:31.824Z]    ok   live connection phase=online
+[2026-09-09T08:45:31.824Z]    ok   4 real /api/remote.mux WebSocket(s) open from the page
+[2026-09-09T08:45:31.826Z]    ok   the session the real host created is listed in the real sidebar
+[2026-09-09T08:45:31.826Z]    ok   script errors: []
+[2026-09-09T08:45:31.826Z]    ok   every failing request is a documented optional route; unexpected=[]
+[2026-09-09T08:45:31.826Z]    optional routes absent on a stock host (expected): ["/css2 failed","/api/fleet/batches 404","/api/swarm/progress failed","/api/swarm/progress 404"]
+[2026-09-09T08:45:31.878Z]    → PASS in 1824ms
+[2026-09-09T08:45:31.899Z] ── scenario 1-approval-accepted-then-decision: approval request → HTTP accepted → host decision arrives
+[2026-09-09T08:45:31.934Z] blocked external request: GET https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500;600;700&family=Geist:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap
+[2026-09-09T08:45:33.948Z]    ok   the real approval/request waterfall is answerable (hasApprovalWaterfall)
+[2026-09-09T08:45:33.950Z]    ok   before any click the panel does not claim 已放行
+[2026-09-09T08:45:34.015Z]    ok   host-evident decision = allowed-once
+[2026-09-09T08:45:34.016Z]    ok   observed phase timeline: ["gone","idle","pending","gone"]
+[2026-09-09T08:45:34.016Z]    ok   no pre-decision phase ever rendered 已放行
+[2026-09-09T08:45:34.019Z]    ok   the settled audit row renders the host outcome 已放行(一次)
+[2026-09-09T08:45:34.019Z]    ok   no pending approval panel survives the decision
+[2026-09-09T08:45:34.034Z]    ok   real host log types: ["permission/preset","sandbox/mode","approval/policy","session/title","agent/inbox/spliced","turn/start","agent/inbox/spliced","step/start","user/message","user/message","user/message","request/header","request/context","assistant/chunk","assistant/chunk","assistant/chunk","assistant/chunk","assistant/chunk","assistant/message","tool/call","approval/asked","approval/decided","tool/result","step/end","step/start","user/message"]
+[2026-09-09T08:45:34.034Z]    ok   real host executed the tool only after the grant
+[2026-09-09T08:45:34.093Z]    → PASS in 2215ms
+[2026-09-09T08:45:34.116Z] ── scenario 2-decision-before-http-response: host decision arrives BEFORE the HTTP response returns (ordering race)
+[2026-09-09T08:45:34.147Z] blocked external request: GET https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500;600;700&family=Geist:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap
+[2026-09-09T08:45:35.978Z]    ok   the host decision resolved the approval while the HTTP response was still in flight
+[2026-09-09T08:45:35.978Z]    ok   decision during hold = allowed-once
+[2026-09-09T08:45:35.979Z]    ok   no pre-decision phase claimed 已放行: ["gone","idle","pending","gone"]
+[2026-09-09T08:45:36.783Z]    ok   after the late 200 the phase is still resolved
+[2026-09-09T08:45:36.783Z]    ok   decision unchanged by the late 200: allowed-once
+[2026-09-09T08:45:36.784Z]    ok   terminal timeline after the late 200: ["gone","idle","pending","gone"]
+[2026-09-09T08:45:36.831Z]    ok   the real host recorded exactly one decision (1)
+[2026-09-09T08:45:36.831Z]    → PASS in 2738ms
+[2026-09-09T08:45:36.852Z] ── scenario 3-failure-then-retry: failure then retry
+[2026-09-09T08:45:36.880Z] blocked external request: GET https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500;600;700&family=Geist:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap
+[2026-09-09T08:45:38.643Z]    ok   exactly one POST was attempted and aborted (attempts=1)
+[2026-09-09T08:45:38.643Z]    ok   the failure is retryable
+[2026-09-09T08:45:38.643Z]    ok   a failed submission claims no decision
+[2026-09-09T08:45:38.645Z]    ok   the failed panel does not claim 已放行
+[2026-09-09T08:45:38.645Z]    ok   retryable copy is shown: 审批提交未获确认，可重试：Failed to fetch
+[2026-09-09T08:45:38.761Z]    ok   the retry issued a second POST (attempts=2)
+[2026-09-09T08:45:38.761Z]    ok   retry produced a host-evident decision: allowed-once
+[2026-09-09T08:45:38.773Z]    ok   the real host recorded exactly one decision (1) — the aborted POST never reached it
+[2026-09-09T08:45:38.773Z]    → PASS in 1942ms
+[2026-09-09T08:45:38.816Z] ── scenario 4-stale-reply-after-session-switch: after switching sessions, a stale reply for the old session is rejected
+4:45:38 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:159:15)
+    at writeGeneric (node:internal/stream_base_commons:150:3)
+    at Socket._writeGeneric (node:net:1258:11)
+    at Socket._write (node:net:1270:8)
+    at writeOrBuffer (node:internal/streams/writable:574:12)
+    at _write (node:internal/streams/writable:503:10)
+    at Writable.write (node:internal/streams/writable:512:10)
+    at Socket.ondata (node:internal/streams/readable:1030:24)
+    at Socket.emit (node:events:514:20)
+    at addChunk (node:internal/streams/readable:568:12)
+4:45:38 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:159:15)
+    at writeGeneric (node:internal/stream_base_commons:150:3)
+    at Socket._writeGeneric (node:net:1258:11)
+    at Socket._write (node:net:1270:8)
+    at writeOrBuffer (node:internal/streams/writable:574:12)
+    at _write (node:internal/streams/writable:503:10)
+    at Writable.write (node:internal/streams/writable:512:10)
+    at Socket.ondata (node:internal/streams/readable:1030:24)
+    at Socket.emit (node:events:514:20)
+    at addChunk (node:internal/streams/readable:568:12)
+4:45:38 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:159:15)
+    at writeGeneric (node:internal/stream_base_commons:150:3)
+    at Socket._writeGeneric (node:net:1258:11)
+    at Socket._write (node:net:1270:8)
+    at writeOrBuffer (node:internal/streams/writable:574:12)
+    at _write (node:internal/streams/writable:503:10)
+    at Writable.write (node:internal/streams/writable:512:10)
+    at Socket.ondata (node:internal/streams/readable:1030:24)
+    at Socket.emit (node:events:514:20)
+    at addChunk (node:internal/streams/readable:568:12)
+[2026-09-09T08:45:38.869Z] blocked external request: GET https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500;600;700&family=Geist:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap
+[2026-09-09T08:45:40.624Z]    ok   A's reply is in flight (status=pending)
+[2026-09-09T08:45:40.674Z]    ok   B has its own distinct approval (A=agos-fake-ca… B=agos-fake-ca…)
+[2026-09-09T08:45:40.675Z]    ok   the store's active session is B (true)
+[2026-09-09T08:45:40.676Z]    ok   B is untouched before the stale reply lands (status=idle)
+[2026-09-09T08:45:41.879Z]    ok   the stale reply for A did not authorize B (B status=idle, decision=null)
+[2026-09-09T08:45:41.880Z]    ok   A's callId read under B's session is rejected as foreign (status=idle)
+[2026-09-09T08:45:41.883Z]    ok   B's live panel never claims 已放行 from A's reply
+[2026-09-09T08:45:41.938Z]    ok   session A was decided on the real host (1 decision)
+[2026-09-09T08:45:41.942Z]    ok   session B has no decision on the real host: ["approval/policy","approval/asked"]
+[2026-09-09T08:45:41.942Z]    → PASS in 3169ms
+[2026-09-09T08:45:41.965Z] ── scenario 5-connection-drop-and-reconnect: connection ready/follow failure and reconnect
+[2026-09-09T08:45:41.995Z] blocked external request: GET https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500;600;700&family=Geist:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap
+[2026-09-09T08:45:43.157Z]    ok   online before the drop (streamOnline=true, phase=online)
+[2026-09-09T08:45:43.158Z]    ok   3 real /api/remote.mux socket(s) force-closed
+[2026-09-09T08:45:43.211Z]    ok   the document survived the drop (this is a transport reconnect, not a page reload)
+[2026-09-09T08:45:43.211Z]    ok   the drop is DELIVERED to store subscribers: ["online","offline"]
+[2026-09-09T08:45:43.211Z]    ok   the drop is visible in the store's own snapshot: ["online","offline"]
+[2026-09-09T08:45:43.211Z]    ok   3 mux socket(s) really reached CLOSING/CLOSED
+[2026-09-09T08:45:44.292Z]    ok   reconnected unaided: liveConnection=online, follow phase=live
+[2026-09-09T08:45:44.293Z]    ok   subscribers were driven online→down→online: ["online","offline","connecting","online"]
+[2026-09-09T08:45:44.293Z]    ok   the reconnect happened inside the SAME document
+[2026-09-09T08:45:44.293Z]    ok   the client opened NEW mux socket(s) to the real host (3 live of 6 tracked)
+[2026-09-09T08:45:44.507Z]    ok   live events flow again after reconnect (0 → 4 items)
+[2026-09-09T08:45:44.507Z]    → PASS in 2565ms
+[2026-09-09T08:45:44.528Z] ── scenario 6-empty-window-still-pages: an EMPTY opening window still exposes earlier history (paging is not hidden)
+[2026-09-09T08:45:56.576Z]    ok   the real host reports hasMore=true after 30 real turns (window holds 238 records)
+[2026-09-09T08:45:56.592Z] blocked external request: GET https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500;600;700&family=Geist:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap
+[2026-09-09T08:45:57.759Z]    ok   the real store marks the window incomplete
+[2026-09-09T08:45:57.766Z]    ok   6a: the paging affordance is offered on a real truncated window
+[2026-09-09T08:45:57.783Z] blocked external request: GET https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500;600;700&family=Geist:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap
+[2026-09-09T08:45:58.905Z]    ok   the opening window renders zero transcript items
+[2026-09-09T08:45:58.905Z]    ok   the host's own hasMore survived, so the window is still known-incomplete (true)
+[2026-09-09T08:45:58.907Z]    ok   6b: an EMPTY window still shows the incomplete-history banner
+[2026-09-09T08:45:58.911Z]    ok   6b: 加载更早的历史 is reachable, not hidden behind the empty state
+[2026-09-09T08:45:58.912Z]    ok   the empty-state hero has not replaced the paging affordance
+[2026-09-09T08:45:59.047Z]    ok   paging out of the empty window recovered 50 items from the real host
+[2026-09-09T08:45:59.048Z]    → PASS in 14541ms
+[2026-09-09T08:45:59.079Z] ── scenario 7-paging-and-live-tail-merge: paging and live-tail concurrent merge
+[2026-09-09T08:46:11.940Z]    ok   the real host window is truncated, so paging is meaningful
+[2026-09-09T08:46:11.958Z] blocked external request: GET https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500;600;700&family=Geist:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap
+[2026-09-09T08:46:13.176Z]    ok   the older-page request is held in-flight (1 request)
+[2026-09-09T08:46:13.272Z]    ok   the live event landed while the older page was still in-flight (real overlap, not sequential)
+[2026-09-09T08:46:13.488Z]    ok   the merge grew the window (50 → 95 items)
+[2026-09-09T08:46:13.488Z]    ok   no duplicated items after the concurrent merge (95 ids, 95 unique)
+[2026-09-09T08:46:13.492Z]    ok   the concurrent live message survived the page rebuild
+[2026-09-09T08:46:13.492Z]    ok   merged transcript stays seq/turn ordered across 31 positioned items
+[2026-09-09T08:46:13.492Z]    ok   the pager settled (no stuck loading state)
+[2026-09-09T08:46:13.551Z]    → PASS in 14503ms
+[2026-09-09T08:46:13.574Z] ── scenario 8-history-evidence-does-not-leak: historical turn evidence does NOT leak into the latest hop
+[2026-09-09T08:46:26.969Z]    ok   the real host window is truncated, so older turns exist to page in
+[2026-09-09T08:46:26.984Z] blocked external request: GET https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500;600;700&family=Geist:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap
+[2026-09-09T08:46:28.194Z]    ok   latest hop before paging: turn=30 step=1
+[2026-09-09T08:46:28.195Z]    ok   the hop points at the newest turn in the window (30 === 30)
+[2026-09-09T08:46:28.374Z]    ok   older turns really entered the window (oldest turn now 1, window 50 → 92)
+[2026-09-09T08:46:28.374Z]    ok   hop after paging: turn=30 step=1
+[2026-09-09T08:46:28.374Z]    ok   the current hop is unchanged by paging in historical turns
+[2026-09-09T08:46:28.374Z]    ok   the hop still names the newest turn, not a historical one (30 === 30)
+[2026-09-09T08:46:28.591Z]    ok   the evidence strip is rendered (turn-evidence answered)
+[2026-09-09T08:46:28.593Z]    ok   the strip's binding names the current turn 30: 轮次 30 · 步骤 1 会话记忆为空，本跳没有条目可回注，不是没有匹配 本跳进模型 48 个技能 当前进程 web 问句 历史构建 30 AI-PM-ROADMAP-NIKA ·
+[2026-09-09T08:46:28.593Z]    ok   the strip carries the CURRENT turn's own prompt (问句 历史构建 30)
+[2026-09-09T08:46:28.593Z]    ok   the strip names no other turn's evidence (paged-in oldest is 1; strays: none)
+[2026-09-09T08:46:28.776Z]    → PASS in 15225ms
+[2026-09-09T08:46:28.809Z] unwind page: released (dispose)
+[2026-09-09T08:46:28.858Z] unwind browser-context: released (dispose)
+[2026-09-09T08:46:31.369Z] unwind browser: released (dispose)
+[2026-09-09T08:46:31.767Z] unwind ui-server: released (dispose)
+[2026-09-09T08:46:31.915Z] unwind ui-server-listener: released (dispose)
+[2026-09-09T08:46:31.980Z] unwind ui-cache-dir: released (dispose)
+[2026-09-09T08:46:33.662Z] unwind host: released (dispose)
+[2026-09-09T08:46:33.663Z] unwind host-process: released (dispose)
+[2026-09-09T08:46:33.780Z] unwind run-root: released (dispose)
+[2026-09-09T08:46:33.780Z] host stopped: code=0 signal=null
+
+9 passed, 0 failed, 0 blocked, 0 skipped (9 scenarios)
+  PASS     0-bringup  the real SPA loads against the real host and goes live
+  PASS     1-approval-accepted-then-decision  approval request → HTTP accepted → host decision arrives
+  PASS     2-decision-before-http-response  host decision arrives BEFORE the HTTP response returns (ordering race)
+  PASS     3-failure-then-retry  failure then retry
+  PASS     4-stale-reply-after-session-switch  after switching sessions, a stale reply for the old session is rejected
+  PASS     5-connection-drop-and-reconnect  connection ready/follow failure and reconnect
+  PASS     6-empty-window-still-pages  an EMPTY opening window still exposes earlier history (paging is not hidden)
+  PASS     7-paging-and-live-tail-merge  paging and live-tail concurrent merge
+  PASS     8-history-evidence-does-not-leak  historical turn evidence does NOT leak into the latest hop
