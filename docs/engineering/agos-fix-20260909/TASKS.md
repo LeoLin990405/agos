@@ -4,7 +4,7 @@
 「改了」不算完成，「改坏了会变红」才算。
 
 - 基线：`9434064f87b1a936c13c58b94c2473c6d89f3a61`
-- 交付：分支 `fix/cursor-integration-20260909` 尖端；**代码最后一跳 `3454a97`**，其后各跳只动 `docs/`
+- 交付：分支 `fix/cursor-integration-20260909` 尖端；**功能改动最后一跳 `3454a97`**（其后只有文档与一处行尾空格）
 - 结果汇总见 [VERIFICATION.md](VERIFICATION.md)
 
 ---
