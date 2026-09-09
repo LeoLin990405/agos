@@ -1,6 +1,6 @@
 // Last pre-step evidence. Absence stays uncollected. Never invents zeros.
 // Persist ≠ observe: a memory hit after a disk failure is not on-disk evidence.
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { appendFileSync, closeSync, existsSync, fstatSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, writeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 export const TURN_UNCOLLECTED_COPY = '本跳未采集'
@@ -32,6 +32,76 @@ function persistErrorCode(err) {
   if (err && typeof err.code === 'string' && err.code) return err.code
   if (err && typeof err.message === 'string' && err.message.trim() !== '') return err.message.trim()
   return 'PERSIST_FAILED'
+}
+
+/**
+ * Append one complete `\n`-terminated record without gluing it onto a possible
+ * crash fragment. A crash mid-append can leave the file without a trailing
+ * newline; a plain append then concatenates our record onto the fragment and
+ * BOTH lines fail to reload — while record() would have reported persisted.
+ * The fix is write-side only: inspect the last byte and insert a separator
+ * first. The fragment itself is never repaired or re-searched for JSON —
+ * recovery from fragments would be inventing evidence (read side stays
+ * "unparseable line = uncollected", see parseEvidenceLine).
+ * If the tail cannot be inspected (and the file exists), the write is refused
+ * with the real error instead of appending blindly — an append we could not
+ * prove to be safely separated must not report persisted:true.
+ *
+ * Concurrency boundary: the tail check and the append are not atomic. If
+ * another writer appends a complete line in between, we may add one extra
+ * blank line — harmless, blank lines are skipped on load. The reverse window
+ * (another writer crashes mid-append between our check and our append) can
+ * still glue lines; that exposure predates this fix, each append is a single
+ * write(2) so the window is narrow, and the next write's tail check separates
+ * again after at most one lost line.
+ */
+function appendRecordLine(ledgerPath, line, fsync) {
+  let prefix = ''
+  let fd
+  try {
+    fd = openSync(ledgerPath, 'r')
+  } catch (err) {
+    if (!(err && err.code === 'ENOENT')) throw err
+    // No file yet: nothing to separate from.
+  }
+  if (fd !== undefined) {
+    try {
+      const { size } = fstatSync(fd)
+      if (size > 0) {
+        const tail = Buffer.alloc(1)
+        const read = readSync(fd, tail, 0, 1, size - 1)
+        if (read !== 1) throw new Error('PERSIST_TAIL_UNREADABLE')
+        if (tail[0] !== 0x0a) prefix = '\n'
+      }
+    } finally {
+      closeSync(fd)
+    }
+  }
+  // Plain appendFileSync only guarantees the write is visible to other
+  // processes (kernel page cache): it survives a process crash, NOT a power
+  // loss. The fsync option upgrades the same write to stable storage. It is
+  // opt-in because it costs one device flush per pre-step row on a hot path.
+  if (!fsync) {
+    appendFileSync(ledgerPath, `${prefix}${line}\n`, { mode: 0o600 })
+    return
+  }
+  const payload = Buffer.from(`${prefix}${line}\n`, 'utf8')
+  let appendFd
+  try {
+    appendFd = openSync(ledgerPath, 'a', 0o600)
+    // write(2) may write fewer bytes than requested (signal, ENOSPC edge).
+    // A partial write followed by fsyncSync would be exactly the "half line
+    // reported persisted" failure this module forbids — loop until drained.
+    let written = 0
+    while (written < payload.length) {
+      const chunk = writeSync(appendFd, payload, written, payload.length - written)
+      if (chunk === 0) throw new Error('PERSIST_WRITE_ZERO')
+      written += chunk
+    }
+    fsyncSync(appendFd)
+  } finally {
+    if (appendFd !== undefined) closeSync(appendFd)
+  }
 }
 
 /** Host-provable session/turn/step only. Missing stays null — never invents a sequence. */
@@ -111,6 +181,9 @@ export function createTurnEvidenceStore(options = {}) {
   const byBind = new Map()
   const ledgerPath = options.ledgerPath
     ?? (options.home ? join(options.home, '.dsh', 'agos', 'turn-evidence.jsonl') : null)
+  // fsync is opt-in: see appendRecordLine for what the default does and does
+  // NOT guarantee (process-crash visibility vs power-loss durability).
+  const fsync = options.fsync === true
 
   if (ledgerPath && existsSync(ledgerPath)) {
     let text = ''
@@ -150,7 +223,10 @@ export function createTurnEvidenceStore(options = {}) {
           mkdirSync(dirname(ledgerPath), { recursive: true, mode: 0o700 })
           const diskRow = { sessionId: id, ...next, persist: PERSIST_DISK, persisted: true, durable: true }
           delete diskRow.persistError
-          appendFileSync(ledgerPath, `${JSON.stringify(diskRow)}\n`, { mode: 0o600 })
+          appendRecordLine(ledgerPath, JSON.stringify(diskRow), fsync)
+          // durable here means "written to the ledger file, reloadable by the
+          // next process". It does NOT mean power-loss stable storage — that
+          // requires the opt-in fsync option (see appendRecordLine).
           next.persist = PERSIST_DISK
           next.persisted = true
           next.durable = true

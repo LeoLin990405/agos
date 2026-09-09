@@ -129,7 +129,7 @@ test('R2 容量:重开进程要回放整份文件,行数就是启动开销', asy
   assert.equal(replayed, rows, '构造器整文件 readFileSync + 逐行建索引:没有窗口、没有分页')
 })
 
-test('R2 保留:崩溃留下的半行只毁掉自己和紧随其后的一行,更早的证据不受影响', async () => {
+test('R2 保留:崩溃留下的半行只毁掉自己,写侧分隔让后续行不再被连坐', async () => {
   const home = await mkdtemp(join(tmpdir(), 'agos-turn-ev-torn-'))
   const file = ledgerOf(home)
   await mkdir(dirname(file), { recursive: true, mode: 0o700 })
@@ -142,21 +142,28 @@ test('R2 保留:崩溃留下的半行只毁掉自己和紧随其后的一行,更
   const store = createTurnEvidenceStore({ home })
   assert.equal(describeTurnEvidence('sess-torn', store, {}, { turn: 1, step: 'pre-step' }).memory.copy, 'before-tear')
   const torn = describeTurnEvidence('sess-torn', store, {}, { turn: 9001, step: 'pre-step' })
-  assert.equal(torn.collected, false, '半行被丢弃,不猜也不修')
+  assert.equal(torn.collected, false, '半行被丢弃,不猜也不修:读侧永不从残片里找回 JSON')
   assert.equal(torn.copy, TURN_UNCOLLECTED_COPY)
 
-  // 报边界(F-wiring.md R2-b):写侧不检查文件尾是否有换行,所以半行之后的**下一行**
-  // 会和它拼成一行,重开进程读不出来 —— 而 record() 当时照样回报 persisted:true。
+  // 2026-09-09 修复(原 F-wiring.md R2-b 报的边界):写侧在追加前检查文件尾,
+  // 不以换行结尾就先补一个分隔符 —— 半行残片之后的新记录不再被拼进去吃掉。
+  // persisted:true 从此是可兑现的:下一进程能重新加载到这一行。
   const next = store.record('sess-torn', { memory: { enabled: true, prepended: 2, copy: 'after-tear' } }, at(1), { turn: 9002, step: 'pre-step' })
   assert.equal(next.persisted, true)
   const later = store.record('sess-torn', { memory: { enabled: true, prepended: 3, copy: 'recovered' } }, at(2), { turn: 9003, step: 'pre-step' })
   assert.equal(later.persisted, true)
   const reloaded = createTurnEvidenceStore({ home })
   assert.equal(describeTurnEvidence('sess-torn', reloaded, {}, { turn: 1, step: 'pre-step' }).memory.copy, 'before-tear')
-  assert.equal(describeTurnEvidence('sess-torn', reloaded, {}, { turn: 9002, step: 'pre-step' }).collected, false,
-    '紧随半行之后的那一行被吃掉:本轮如实报,不在生产写路径上顺手改')
-  assert.equal(describeTurnEvidence('sess-torn', reloaded, {}, { turn: 9003, step: 'pre-step' }).memory.copy, 'recovered',
-    '换行恢复后继续写就正常了:损失只有一行')
+  const afterTear = describeTurnEvidence('sess-torn', reloaded, {}, { turn: 9002, step: 'pre-step' })
+  assert.equal(afterTear.collected, true, '写侧分隔之后,半行的下一行必须能重新加载 —— 否则 persisted:true 是假话')
+  assert.equal(afterTear.memory.copy, 'after-tear')
+  assert.equal(describeTurnEvidence('sess-torn', reloaded, {}, { turn: 9003, step: 'pre-step' }).memory.copy, 'recovered')
+  // 半行自己仍然缺席:修复的是分隔,不是「恢复」—— 残片里的证据一个字都不许发明。
+  assert.equal(describeTurnEvidence('sess-torn', reloaded, {}, { turn: 9001, step: 'pre-step' }).collected, false)
+  // 分隔符只补在残片与新一行的边界;残片本身原样留在盘上(纯追加,不删不改)。
+  const lines = await readFile(file, 'utf8')
+  assert.equal(lines.includes('{"enab\n'), true, '残片之后必须正好一个换行分隔')
+  assert.equal(lines.includes('\n\n'), false, '不许出现空行:连续写入不重复补分隔符')
 })
 
 test('R2 保留:本模块没有任何清理通道,现存有效证据不可能被删', async () => {

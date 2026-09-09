@@ -90,6 +90,15 @@ const FRAGMENT_RE = /[:：]\s*$|^(?:Error|Traceback|Exception)\b/u
 // 第三人称转述:别人的话不是用户自己的偏好或事实(标注口径里「引用的别人文字」= null)。
 // 只认句首的纯转述动词。「要求 / 强调」故意不在表里:那更可能是用户在转达硬要求,文本上分不开。
 const ATTRIBUTION_LEAD_RE = /^[-*#「」“”"'\s]*(?:同事|同学|老板|领导|客户|甲方|对方|群里|群友|别人|某人|他们|她们|他|她|评审|运维|测试)(?:们)?(?:有人|某人)?\s*(?:[也都还就]\s*)?(?:说|表示|提到|认为|反馈|写道|称|建议)/u
+// 转述句里紧跟转折的自身偏好(2026-09-09):「同事说 X 更好,但我更喜欢 Y」的转折小句
+// 是用户自己的话,不该被句首的转述连坐。放行条件从严(独立复核后收紧):
+//  - 转折词到「我」之间不许出现第三人称(他/她/它/您)——「但他认为我更倾向…」仍是二手观察;
+//  - 「我」之前不许是希望/让/叫/要求/逼——「但希望我习惯一下」的我 是宾语,主语是别人;
+//  - 「我(们)」之后不许紧跟亲属称谓——「但我妈喜欢空格」的偏好属于第三方;
+//  - 「我」到偏好动词的距离 ≤10 字(原 6 字误拒「但我经过长期项目实践更喜欢…」),其间不许再有第三人称。
+// 「同事说我习惯…」这类**没有转折**的对本人的转述仍然整句不收;纯转述(zh-quote-01~04)不受影响。
+// 刻意不覆盖「…但必须…」的 constraint 形态:转达的硬要求本来就在两可区(zh-quote-07)。
+const OWN_PREFERENCE_AFTER_CONTRAST_RE = /(?:但|不过|可是|然而)[^。！？!?;；他她它您]{0,8}(?<!希望|让|叫|要求|逼)我(?:们)?(?![妈爸爹娘哥姐弟妹儿女妻夫家])[^。！？!?;；他她它您]{0,10}(?:偏好|更喜欢|喜欢|希望|倾向|习惯)/u
 // 条件句里的「X 是 Y」是假设,不是事实。只拦 fact 分支:「如果要动 X,就必须 Y」这类把条件
 // 当适用范围的规矩仍按 constraint 收(正文原样保留「如果」,读的人看得见条件)。
 const CONDITIONAL_LEAD_RE = /^[-*#\s]*(?:如果|假如|倘若|若是|若|要是|万一|一旦)/u
@@ -117,7 +126,8 @@ function classifyUserText(text) {
   if (AUTO_CONTINUE_RE.test(text) || TURN_ONLY_RE.test(text)) return undefined
   // 转述别人的话:对 constraint/preference/fact 一律否决。rejected 在上面已经判过 ——
   // 「同事说试过 flock 不行」仍是一条有用的排除记录。
-  if (ATTRIBUTION_LEAD_RE.test(text)) return undefined
+  // 例外:转折小句里用户自己的第一人称偏好不连坐(OWN_PREFERENCE_AFTER_CONTRAST_RE)。
+  if (ATTRIBUTION_LEAD_RE.test(text) && !OWN_PREFERENCE_AFTER_CONTRAST_RE.test(text)) return undefined
   if (/(?:必须|务必|禁止|不许|只允许|只能|(?<!能)不能|不要|不得|应当|都要|一律)/u.test(text)
     || /\b(?:must|never|do not|don't|cannot|can't|required)\b/iu.test(text)) {
     return { kind: 'constraint', importance: 5 }
