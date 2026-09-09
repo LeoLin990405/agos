@@ -1,6 +1,6 @@
 // Feedback bind: server-owned source, real decision refs, shadow truth, learnability.
 // Controller wires these into index/dispatch/shadow. This module does not write the ledger.
-import { buildOutcomeRecord, foldLedger } from './ledger.js'
+import { buildOutcomeRecord, foldLedger, outcomeMatchesDecision } from './ledger.js'
 import { buildShadowLinkRecord, SHADOW_MODE, SHADOW_OUTCOME_SOURCE } from './shadow.js'
 import { isTaskFingerprint, sameTask } from './task-fingerprint.mjs'
 
@@ -259,10 +259,22 @@ export function bindOrdinaryOutcome(input = {}) {
     source,
   })
   if (!binding.ok) {
-    return fail(FEEDBACK_CODES.TASK_MISMATCH, { ref, expected: binding.expected, claimed: binding.claimed })
+    // Never echo the decision's own fingerprint: the hash algorithm is public,
+    // so returning it would hand out a confirmation oracle for the task text
+    // behind this ref. The client's own claimed value is echoed back untouched.
+    return fail(FEEDBACK_CODES.TASK_MISMATCH, {
+      ref,
+      ...(binding.claimed !== undefined && binding.claimed !== null
+        ? { claimed: binding.claimed } : {}),
+    })
   }
 
-  const prior = latestOutcome(rows, ref)
+  // The stored prior is evidence only if it actually binds to THIS decision's
+  // task. A row fingerprinted for another task (old data, a pre-fix row, a
+  // hand-edited ledger) is not "the prior outcome of this decision": it must
+  // neither absorb this submission as idempotent nor block it as a conflict.
+  const stored = latestOutcome(rows, ref)
+  const prior = outcomeMatchesDecision(stored, decision) ? stored : null
   if (!prior && (decision.outcome === 'ok' || decision.outcome === 'fail')) {
     if (decision.outcome !== body.result) {
       return fail(FEEDBACK_CODES.CONFLICTING_RESULT, { ref, existing: decision.outcome })
@@ -294,7 +306,16 @@ export function bindOrdinaryOutcome(input = {}) {
 
   let record
   try {
-    record = buildOutcomeRecord({ ref, result: body.result, source, taskRef: binding.taskRef })
+    record = buildOutcomeRecord({
+      ref,
+      result: body.result,
+      source,
+      taskRef: binding.taskRef,
+      // Persist the check status: an unverified binding must be visibly
+      // unverified on disk, or "verified" and "unverified" rows are byte-identical
+      // and no after-the-fact audit can tell them apart.
+      taskUnverified: binding.unverified === true,
+    })
   } catch (err) {
     const message = err && err.message ? String(err.message) : ''
     if (message.includes('ref')) return fail(FEEDBACK_CODES.MISSING_REF)

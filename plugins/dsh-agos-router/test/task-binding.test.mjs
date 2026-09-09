@@ -106,8 +106,8 @@ test('NEGATIVE: a verdict computed for task Y is refused against a decision for 
   })
   assert.equal(crossed.ok, false)
   assert.equal(crossed.code, FEEDBACK_CODES.TASK_MISMATCH)
-  assert.equal(crossed.expected, taskFingerprint(TASK_X))
-  assert.equal(crossed.claimed, taskFingerprint(TASK_Y))
+  assert.equal(crossed.expected, undefined, 'the decision fingerprint must never be echoed back')
+  assert.equal(crossed.claimed, taskFingerprint(TASK_Y), 'the caller own claimed value is echoed for debugging')
   assert.equal(crossed.record, undefined, 'a refused verdict must not hand back a bookable row')
 
   // Same task ⇒ accepted, so the gate discriminates rather than blocking everything.
@@ -134,13 +134,18 @@ test('NEGATIVE: a reviewer verdict that states no task at all is refused when th
   })
   assert.equal(silent.ok, false)
   assert.equal(silent.code, FEEDBACK_CODES.TASK_MISMATCH)
-  assert.equal(silent.claimed, null)
+  assert.equal(silent.claimed, undefined, 'nothing was claimed, and the decision fingerprint is never echoed')
 
   // An operator pressing "record success" is not judging a task, so the manual path
-  // still works — otherwise the gate would silently disable human feedback.
+  // still works — otherwise the gate would silently disable human feedback. The
+  // binding is honestly marked unverified ON DISK: the row carries the decision's
+  // fingerprint for later correlation plus a taskUnverified marker, instead of
+  // being byte-identical to a verified row.
   const manual = bindOrdinaryOutcome({ authority: 'operator', body: { ref: decision.id, result: 'ok' }, rows: [decision] })
   assert.equal(manual.ok, true)
   assert.equal(manual.record.taskRef, taskFingerprint(TASK_X))
+  assert.equal(manual.record.taskUnverified, true)
+  assert.equal(manual.taskUnverified, true)
 
   // A client claiming the wrong task is refused on the manual path too.
   const lying = bindOrdinaryOutcome({

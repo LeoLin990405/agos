@@ -440,16 +440,16 @@ test('real OS sandbox denies outside reads/writes, verifier writes, inherited se
   await writeFile(protectedFile, 'trusted score')
   process.env.AGOS_SYNTHETIC_SECRET = 'test-only-not-a-real-secret'
   t.after(() => { delete process.env.AGOS_SYNTHETIC_SECRET })
-  const sandbox = await verificationSandbox(evaluator)
   if (process.platform !== 'darwin') {
-    // Seatbelt is the only boundary this suite can exercise. On any other host the
-    // contract is either a Linux backend (whose runtime is covered by a Linux runner,
-    // not here) or a fail-closed refusal.
-    if (sandbox.ok) assert.match(sandbox.kind, /^linux-(bubblewrap|unshare)$/)
-    else assert.match(sandbox.reason, /verification-unavailable/)
+    // Seatbelt is the only runtime boundary this suite can exercise, and this
+    // repo has no Linux runtime suite (linux-unshare is disabled, bubblewrap is
+    // unproven here). Skipping explicitly is honest; asserting a backend name
+    // and returning would be a silent pass.
+    t.skip('runtime sandbox evidence requires a darwin host; on this host no sandboxed runtime check can execute')
     return
   }
-  assert.equal(sandbox.ok, true)
+  const sandbox = await verificationSandbox(evaluator)
+  assert.equal(sandbox.ok, true, sandbox.reason)
   const server = createServer((socket) => socket.end())
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
   t.after(() => new Promise((resolve) => server.close(resolve)))
@@ -494,7 +494,10 @@ test('a sandboxed timeout reaps the whole process group and leaves no orphan', a
   await mkdir(evaluator)
   const sandbox = await verificationSandbox(evaluator)
   if (!sandbox.ok) {
-    assert.match(sandbox.reason, /verification-unavailable/)
+    // No OS boundary on this host (or it failed its own smoke). Nothing here can
+    // be exercised, so say so explicitly instead of asserting a refusal and
+    // calling it coverage.
+    t.skip(`no usable OS sandbox on this host: ${sandbox.reason}`)
     return
   }
 
@@ -562,6 +565,27 @@ test('artifact export removes every temporary candidate and evaluator repo', asy
   assert.match(await readFile(artifacts.patchPath, 'utf8'), /\+export const n = 8/)
   const manifest = JSON.parse(await readFile(artifacts.manifestPath, 'utf8'))
   assert.equal(manifest.bestMetric, 8)
-  assert.match(manifest.verificationBoundary, /^(macos-seatbelt|linux-bubblewrap|linux-unshare)$/)
+  assert.match(manifest.verificationBoundary, /^(macos-seatbelt|linux-bubblewrap)$/)
   assert.ok(manifest.verificationCapabilities.length > 0)
+  // Structured isolation manifest: independent per-dimension fields, never a
+  // single merged boundary string; every check names what was actually run.
+  const isolation = manifest.isolation
+  assert.ok(isolation, 'manifest.isolation required')
+  assert.equal(typeof isolation.backend, 'string')
+  assert.match(isolation.readScope.kind, /whitelist$/)
+  assert.ok(Array.isArray(isolation.readScope.paths) && isolation.readScope.paths.length > 0)
+  assert.ok(!isolation.readScope.paths.includes('/'), 'read scope must never be the host root')
+  assert.equal(isolation.writeScope.kind, 'single-path')
+  assert.ok(Array.isArray(isolation.writeScope.paths) && isolation.writeScope.paths.length > 0)
+  assert.equal(isolation.network.status, 'denied')
+  assert.equal(isolation.environment.inherited, false)
+  assert.ok(Array.isArray(isolation.environment.keys) && isolation.environment.keys.length > 0)
+  assert.equal(typeof isolation.processCleanup.strategy, 'string')
+  assert.ok(Array.isArray(isolation.checks) && isolation.checks.length > 0)
+  for (const check of isolation.checks) {
+    assert.equal(typeof check.name, 'string')
+    assert.ok(['verified', 'unproven', 'unavailable'].includes(check.status), `${check.name}: ${check.status}`)
+    assert.equal(typeof check.evidence, 'string')
+  }
+  assert.ok(isolation.checks.some((c) => c.status === 'verified'), 'at least one check must be runtime-verified')
 })

@@ -26,3 +26,16 @@ export function isTaskFingerprint(value) {
 export function sameTask(a, b) {
   return isTaskFingerprint(a) && isTaskFingerprint(b) && a === b
 }
+
+/**
+ * Public-safe form of a fingerprint. The raw sha256 of the *full task text* must
+ * never be echoed into API responses: paired with a decision id it works as a
+ * confirmation oracle for guessing the task behind a row (the algorithm is
+ * public, so seeing the hash lets an attacker verify candidate task texts).
+ * A 16-hex-char prefix is enough to correlate log lines, not enough to confirm
+ * a guessed preimage.
+ */
+export function redactTaskFingerprint(value) {
+  if (!isTaskFingerprint(value)) return null
+  return `${value.slice(0, 16)}…`
+}

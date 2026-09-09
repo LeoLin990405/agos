@@ -43,12 +43,24 @@ export const DISPATCH_MAX_TOKENS = 256
  * Truncation is by leading code points (deterministic: same input, same prompt)
  * and always announced in the prompt itself — a reviewer told nothing about a cut
  * will confidently judge a fragment.
+ *
+ * 2026-09-09 P1: the prompt must be fed from the RAW streamed text, never from the
+ * turn row. The row is a 400-char ledger preview (its own contract, with an
+ * explicit truncation notice since this round); the reviewer's window is
+ * REVIEWER_*_LIMIT and must be a separate budget. Feeding the row preview made
+ * the reviewer judge a fragment it could not see the end of — while the verdict
+ * still counted as a full review in the posterior.
  */
 export const REVIEWER_TASK_LIMIT = 4000
 export const REVIEWER_RESULT_LIMIT = 4000
 export const REVIEWER_SEES_TASK_COPY = '评审看到原始任务与实现终稿，看不到规划稿'
 export const TASK_ABSENT_COPY = '任务未采集'
 export const RESULT_ABSENT_COPY = '实现未采集'
+// verdictSkip codes for the honesty gate below — a verdict over a truncated
+// section is a verdict over a fragment, and a fragment's pass must not feed
+// the posterior as if the whole material had been reviewed.
+export const REVIEW_TASK_TRUNCATED = 'REVIEW_TASK_TRUNCATED'
+export const REVIEW_RESULT_TRUNCATED = 'REVIEW_RESULT_TRUNCATED'
 
 /** `[已截断：保留前 N 字，省略 M 字]` — honest, machine-checkable, never silent. */
 export function truncationNotice(kept, dropped) {
@@ -96,18 +108,36 @@ export function roleSystemPrompt(role) {
   return composeAssembleRolePrompt(role)
 }
 
-export function roleUserPrompt(role, task, turns) {
+/**
+ * Ledger/display preview of one turn's text: flattened like the old
+ * sanitizePreview row (same whitespace/secret gates) but, when clipped, with an
+ * explicit truncationNotice appended — the row must never silently present a
+ * fragment as the whole turn. Internal review material does NOT come from here;
+ * it uses the raw streamed text via `raw` in roleUserPrompt.
+ */
+export function previewTurnText(text, limit = TURN_TEXT_LIMIT) {
+  const cleaned = sanitizePreview(text, Number.MAX_SAFE_INTEGER) ?? ''
+  return boundedSection(cleaned, limit).text
+}
+
+export function roleUserPrompt(role, task, turns, raw = {}) {
   const job = typeof task === 'string' && task.trim() ? task.trim() : DEFAULT_DISPATCH_TASK
   if (role === 'planner') {
     return `任务：${job}`
   }
   if (role === 'implementer') {
-    const plan = lastTurnText(turns, 'planner')
+    const plan = typeof raw.planner === 'string' && raw.planner.trim()
+      ? raw.planner
+      : lastTurnText(turns, 'planner')
     return `任务：${job}\n规划：${plan || '规划未采集'}`
   }
   // Reviewer: the task it is judging against, plus the candidate result. Still no
   // planner draft — that invariant (REVIEWER_SEES_FINAL_COPY, 「看不到规划稿」) is unchanged.
-  const finalText = lastTurnText(turns, 'implementer')
+  // raw.implementer carries the UNCLIPPED streamed text: the turn row is only a
+  // bounded preview and must never be what the reviewer judges.
+  const finalText = typeof raw.implementer === 'string' && raw.implementer.trim()
+    ? raw.implementer
+    : lastTurnText(turns, 'implementer')
   const boundedTask = boundedSection(job, REVIEWER_TASK_LIMIT)
   const boundedResult = boundedSection(finalText, REVIEWER_RESULT_LIMIT)
   return [
@@ -251,6 +281,10 @@ export async function dispatchTeam(assemble, input, deps = {}) {
   const task = typeof input.task === 'string' && input.task.trim() ? input.task.trim() : DEFAULT_DISPATCH_TASK
   const transact = typeof deps.transact === 'function' ? deps.transact : runDirect
   const turns = []
+  // Raw streamed text per role, unclipped. Reviewer/implementer prompts are
+  // composed from this — never from the turn rows, which are bounded previews
+  // for the ledger and would silently hand the reviewer a fragment.
+  const rawByRole = new Map()
   // 判定必须从评审「原文」解析:sanitizePreview 会把换行压成空格,整行判定在净文里已不可辨。
   let reviewerRawText = ''
   let reviewBlocked = null
@@ -292,7 +326,10 @@ export async function dispatchTeam(assemble, input, deps = {}) {
       })
       continue
     }
-    const user = roleUserPrompt(role, task, turns)
+    const user = roleUserPrompt(role, task, turns, {
+      planner: rawByRole.get('planner'),
+      implementer: rawByRole.get('implementer'),
+    })
     let streamed
     let retried = false
     try {
@@ -326,6 +363,7 @@ export async function dispatchTeam(assemble, input, deps = {}) {
     // streamRole 可返回裸字符串(测试替身)或 {text, detail}(streamRoleText)。
     const text = typeof streamed === 'string' ? streamed : streamed && typeof streamed.text === 'string' ? streamed.text : ''
     const detail = streamed && typeof streamed === 'object' && streamed.detail ? streamed.detail : undefined
+    rawByRole.set(role, text)
     if (role === 'reviewer') reviewerRawText = text
     turns.push({
       role,
@@ -333,7 +371,9 @@ export async function dispatchTeam(assemble, input, deps = {}) {
       provider: route.provider,
       hostModel: route.model,
       ok: true,
-      text: sanitizePreview(text, TURN_TEXT_LIMIT) || '',
+      // Row text is the bounded ledger preview with an explicit truncation
+      // notice when clipped; the review material itself is rawByRole.
+      text: previewTurnText(text),
       // 成功行也记 finish/usage:回答「256 的上限为什么 output 334」要靠它。不带 error(前端契约:ok 行无 error)。
       ...(retried ? { retried: true, note: IMPLEMENTER_RETRY_COPY } : {}),
       ...(detail ? { finish: detail.finish, blockTypes: detail.blockTypes, ...(detail.usage ? { usage: detail.usage } : {}) } : {}),
@@ -355,10 +395,23 @@ export async function dispatchTeam(assemble, input, deps = {}) {
   record.verdictFed = false
   record.verdictSkip = reviewBlocked
   if (reviewBlocked) record.learnable = false
+  // Honesty gate for bounded review material: these are exactly the windows the
+  // reviewer prompt was built from (roleUserPrompt uses the same limits on the
+  // same raw text). If either was clipped, the verdict passed judgement on a
+  // fragment — it is displayed, but it must not feed the posterior as a full
+  // review.
+  const reviewWindow = {
+    task: boundedSection(task, REVIEWER_TASK_LIMIT),
+    result: boundedSection(rawByRole.get('implementer') ?? '', REVIEWER_RESULT_LIMIT),
+  }
   if (verdict !== null) {
     if (!implementerFinal) {
       // 评审判的是「实现未采集」——判决属实但对象缺席,不喂(今天现网就发生过这种判)。
       record.verdictSkip = 'IMPLEMENTER_ABSENT'
+    } else if (reviewWindow.result.truncated) {
+      record.verdictSkip = REVIEW_RESULT_TRUNCATED
+    } else if (reviewWindow.task.truncated) {
+      record.verdictSkip = REVIEW_TASK_TRUNCATED
     } else if (!implementerTurn || typeof implementerTurn.model !== 'string' || !implementerTurn.model) {
       record.verdictSkip = 'IMPLEMENTER_ABSENT'
     } else if (typeof (assemble && assemble.ref) !== 'string' || !assemble.ref) {
@@ -368,7 +421,10 @@ export async function dispatchTeam(assemble, input, deps = {}) {
     } else {
       // Read → check → append is one transaction; see runDirect above for why the
       // lock is injected here rather than wrapped around the whole trial.
-      transact(() => {
+      // The callback is async and its result is awaited: the host's transact is
+      // withLedgerLockAsync (the event-loop-friendly lock), and the append must
+      // complete before the lock — which protects read→append — is released.
+      await transact(async () => {
         const { decisions } = foldLedgerRows(deps.readRows())
         const target = decisions.find((d) => d && d.id === assemble.ref)
         if (!target) {
@@ -411,7 +467,7 @@ export async function dispatchTeam(assemble, input, deps = {}) {
             } else if (bound.idempotent) {
               record.verdictFed = true
             } else {
-              deps.append(bound.record)
+              await deps.append(bound.record)
               record.verdictFed = bound.feed !== false
               if (bound.feed === false) record.verdictSkip = bound.verdictSkip
             }
@@ -422,7 +478,9 @@ export async function dispatchTeam(assemble, input, deps = {}) {
       })
     }
   }
-  if (typeof deps.append === 'function') deps.append(record)
+  // await: the host may inject appendLineAsync so a contended lock never parks
+  // the event loop; sync fakes keep working unchanged.
+  if (typeof deps.append === 'function') await deps.append(record)
   return {
     dispatch: record,
     assemble,

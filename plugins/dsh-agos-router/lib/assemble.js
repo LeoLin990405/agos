@@ -236,6 +236,8 @@ export async function assembleLive(input, deps = {}) {
     halfLifeDays,
   })
   const record = buildAssembleRecord(decision, team)
-  if (typeof deps.append === 'function') deps.append(record)
+  // await: the host may inject an async append (appendLineAsync) so a contended
+  // lock never parks the event loop; sync fakes keep working unchanged.
+  if (typeof deps.append === 'function') await deps.append(record)
   return { decision, assemble: record, dispatched: false }
 }

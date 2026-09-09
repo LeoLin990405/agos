@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve, dirname } from 'node:path'
 
 import { compareMetric, extractStructuredMetric } from './autoresearch-metrics.mjs'
-import { chooseIsolationBackend, linuxVerificationSandbox } from './autoresearch-sandbox.mjs'
+import { chooseIsolationBackend, linuxVerificationSandbox, runSeatbeltSmoke } from './autoresearch-sandbox.mjs'
 
 export { compareMetric, extractStructuredMetric }
 
@@ -218,15 +218,39 @@ export async function verificationSandbox(evaluator, { platform = process.platfo
   const quote = (s) => JSON.stringify(s)
   const libraryRoots = ['/usr/bin', '/usr/lib', '/usr/libexec', '/usr/share', '/System', '/bin', '/sbin',
     '/Library/Apple/System', '/opt/homebrew/Cellar', '/opt/homebrew/opt', '/usr/local/Cellar', '/usr/local/opt', nodePrefix]
+  const readWhitelist = [...new Set([...libraryRoots, root])]
   const profile = '(version 1)\n(deny default)\n(allow process*)\n(allow sysctl-read)\n(allow mach-lookup)\n'
     + '(allow file-read-metadata)\n(allow file-read* (literal "/") (literal "/dev/null") (literal "/dev/urandom") (literal "/dev/random") '
-    + [...new Set([...libraryRoots, root])].map((p) => '(subpath ' + quote(p) + ')').join(' ') + ')\n'
+    + readWhitelist.map((p) => '(subpath ' + quote(p) + ')').join(' ') + ')\n'
     + '(allow file-write* (subpath ' + quote(scratch) + ') (literal "/dev/null"))\n'
   // No inherited provider tokens, proxies, NODE_OPTIONS, BASH_ENV or HOME.
   const env = { PATH: dirname(node) + ':/usr/bin:/bin:/usr/sbin:/sbin', AGOS_VERIFY_SCRATCH: scratch,
     TMPDIR: scratch, TMP: scratch, TEMP: scratch, LANG: 'C.UTF-8', LC_ALL: 'C', TZ: 'UTC', OPENSSL_CONF: '/dev/null' }
   const launcher = { file: '/usr/bin/sandbox-exec', before: ['-p', profile, '/bin/bash', '-c'] }
-  return { ok: true, profile, launcher, env, scratch, kind: 'macos-seatbelt' }
+  // The boundary is only trusted after a real in-sandbox smoke proves each property.
+  const smoke = await runSeatbeltSmoke({ launcher, env, evaluator: root, scratch })
+  if (!smoke.ok) return { ok: false, reason: smoke.reason }
+  return {
+    ok: true,
+    profile,
+    launcher,
+    env,
+    scratch,
+    kind: 'macos-seatbelt',
+    capabilities: ['seatbelt-profile', 'deny-default', ...smoke.checks.filter((c) => c.status === 'verified').map((c) => `verified:${c.name}`)],
+    // Structured isolation manifest: independent per-dimension fields, never a
+    // single merged boundary string. Every check names what was actually run.
+    isolation: {
+      backend: 'macos-seatbelt',
+      readScope: { kind: 'profile-whitelist', paths: readWhitelist },
+      writeScope: { kind: 'single-path', paths: [scratch] },
+      network: { status: 'denied', enforcedBy: 'seatbelt deny-default (no socket allow rule)' },
+      environment: { inherited: false, keys: Object.keys(env).sort(), enforcedBy: 'explicit env at spawn; nothing inherited' },
+      processCleanup: { strategy: 'process-group kill on timeout/abort', enforcedBy: 'execCommand (backend-independent)' },
+      seccomp: { available: false, applied: false },
+      checks: smoke.checks,
+    },
+  }
 }
 
 export function gitCommand(cwd, args, { signal, timeoutMs = 60000 } = {}) {
@@ -575,6 +599,7 @@ async function verifyCandidate(workspace, verifyCmd, signal) {
     if (!sandbox.ok) return { ...failure(sandbox.reason), unavailable: true }
     workspace.verificationBoundary = sandbox.kind
     workspace.verificationCapabilities = sandbox.capabilities || [sandbox.kind]
+    workspace.isolationManifest = sandbox.isolation || null
     const materials = async () => {
       const snapshot = {}
       for (const rel of await walkRelPaths(evaluator)) {
@@ -607,6 +632,7 @@ export async function saveAutoresearchArtifacts(workspace, artifactDir, details 
     sourceAllowlist: workspace.sourceAllowlist, verificationCommand: workspace.verifyCmd,
     verificationBoundary: workspace.verificationBoundary || 'unavailable',
     verificationCapabilities: workspace.verificationCapabilities || [],
+    isolation: workspace.isolationManifest || null,
     patchSha256: createHash('sha256').update(await readFile(patchPath)).digest('hex'),
     at: new Date().toISOString() }
   await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n')

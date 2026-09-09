@@ -20,8 +20,12 @@
 //     re-checks ino/dev/token after acquiring it. A late reaper therefore cannot
 //     unlink the lock of a *new* live owner that took over in the meantime.
 //
-// Blocking is done with Atomics.wait on a private SharedArrayBuffer: it parks the
-// thread without burning CPU and without an event-loop turn, which a sync API needs.
+// Blocking for a *sync* caller is done with Atomics.wait on a private
+// SharedArrayBuffer: it parks the thread without burning CPU and without an
+// event-loop turn, which a sync API needs. HTTP handlers must instead use
+// acquireLedgerLockAsync / withLedgerLockAsync — same protocol, but the wait
+// lives on the event loop so a held lock freezes nothing but the one waiting
+// request (see the freeze analysis in lib/index.js HTTP_LOCK).
 import {
   closeSync,
   fstatSync,
@@ -214,26 +218,105 @@ export function acquireLedgerLock(lockPath, options = {}) {
   const deadline = Date.now() + timeoutMs
   let delay = retryMs
   for (;;) {
-    try {
-      const held = tryPublish(path, host, timeoutMs)
-      heldLocks.set(path, { ...held, depth: 1 })
-      return { path, reentrant: false }
-    } catch (error) {
-      if (error?.code !== 'EEXIST') throw error
-    }
-    const current = snapshot(path)
-    if (isStale(current.owner, current.stat, host)) {
-      recoverStale(path, current, host, depth)
-      if (Date.now() < deadline) continue
-    }
+    const got = attemptAcquire(path, host, timeoutMs, depth)
+    if (got) return got
     if (Date.now() >= deadline) {
       throw new LedgerLockError(`agos ledger lock timed out: ${path}`, {
         code: 'AGOS_LEDGER_LOCK_TIMEOUT',
-        owner: current.owner,
+        owner: snapshot(path).owner,
         path,
       })
     }
     sleepSync(delay)
+    delay = Math.min(Math.ceil(delay * 1.5), 50)
+  }
+}
+
+/**
+ * One non-blocking acquire attempt: publish, or reclaim + report "try again".
+ * Shared by the sync and the async wait loops so both implement exactly the
+ * same cross-process protocol (stale recovery included) and cannot drift.
+ */
+function attemptAcquire(path, host, timeoutMs, depth) {
+  try {
+    const held = tryPublish(path, host, timeoutMs)
+    heldLocks.set(path, { ...held, depth: 1 })
+    return { path, reentrant: false }
+  } catch (error) {
+    if (error?.code !== 'EEXIST') throw error
+  }
+  const current = snapshot(path)
+  if (isStale(current.owner, current.stat, host)) {
+    recoverStale(path, current, host, depth)
+  }
+  return null
+}
+
+function abortError(path) {
+  return new LedgerLockError(`agos ledger lock wait cancelled: ${path}`, {
+    code: 'AGOS_LEDGER_LOCK_ABORTED',
+    path,
+  })
+}
+
+function throwIfAborted(signal, path) {
+  if (signal && signal.aborted) throw abortError(path)
+}
+
+/** setTimeout-based sleep that rejects the moment the caller's AbortSignal fires. */
+function sleepAsync(ms, signal, path) {
+  return new Promise((resolve, reject) => {
+    if (signal && signal.aborted) {
+      reject(abortError(path))
+      return
+    }
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(abortError(path))
+    }
+    const timer = setTimeout(() => {
+      if (signal) signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    if (signal) signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+/**
+ * Async sibling of acquireLedgerLock: identical file-lock protocol, but the wait
+ * is done on the event loop (setTimeout) instead of Atomics.wait. A held lock
+ * therefore freezes nothing: unrelated HTTP requests and timers in this process
+ * keep being served while we wait for timeoutMs, and options.signal can cancel
+ * the wait (fail-closed: cancellation never acquires). The critical section
+ * itself is still the same synchronous publish/release — only waiting differs.
+ */
+export async function acquireLedgerLockAsync(lockPath, options = {}) {
+  const path = resolve(lockPath)
+  const existing = heldLocks.get(path)
+  if (existing) {
+    existing.depth += 1
+    return { path, reentrant: true }
+  }
+  const timeoutMs = Math.max(1, Number(options.timeoutMs) || DEFAULT_LOCK_TIMEOUT_MS)
+  const retryMs = Math.max(1, Number(options.retryMs) || DEFAULT_LOCK_RETRY_MS)
+  const host = options.host ?? hostname()
+  const signal = options.signal
+  const depth = Number.isInteger(options._depth) ? options._depth : 0
+  const deadline = Date.now() + timeoutMs
+  let delay = retryMs
+  for (;;) {
+    throwIfAborted(signal, path)
+    const got = attemptAcquire(path, host, timeoutMs, depth)
+    if (got) return got
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) {
+      throw new LedgerLockError(`agos ledger lock timed out: ${path}`, {
+        code: 'AGOS_LEDGER_LOCK_TIMEOUT',
+        owner: snapshot(path).owner,
+        path,
+      })
+    }
+    await sleepAsync(Math.min(delay, remaining), signal, path)
     delay = Math.min(Math.ceil(delay * 1.5), 50)
   }
 }
@@ -281,6 +364,25 @@ export function withLedgerLock(targetFile, fn, options = {}) {
       )
     }
     return result
+  } finally {
+    releaseLedgerLock(held)
+  }
+}
+
+/**
+ * Async sibling of withLedgerLock: the *wait* for the lock never parks the
+ * event loop (see acquireLedgerLockAsync), so a slow or dead peer cannot
+ * freeze the host's unrelated HTTP traffic and timers. fn may be async; the
+ * lock is released only after its promise settles. options.signal cancels the
+ * wait, fail-closed — a cancelled wait never enters the critical section.
+ * The callback still must confine its *lock-holding* section to fast
+ * synchronous work: holding a cross-process lock across awaits invites the
+ * 30s-scale holds the timeout exists to prevent.
+ */
+export async function withLedgerLockAsync(targetFile, fn, options = {}) {
+  const held = await acquireLedgerLockAsync(lockPathFor(targetFile), options)
+  try {
+    return await fn()
   } finally {
     releaseLedgerLock(held)
   }
