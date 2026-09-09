@@ -4,6 +4,15 @@
   "generatedAt": "2026-09-08T20:04:40.132Z",
   "gitHead": "7e7e359801644b77b302835f374f035e2836926d",
   "gitDirtyFiles": 39,
+  "amendments": [
+    {
+      "at": "2026-09-09T05:00:00+08:00",
+      "added": "selftest",
+      "why": "本轮把负控自检接进了正式门(run-acceptance.mjs 的默认计划)。defaultPlan 现在要求每个必需的 node-test 闸都在基线里有条目 —— 没有条目就判 missing-floor-entry 失败,否则「删掉几条负控」不会被抓到。",
+      "measuredBy": "node --test scripts/acceptance/selftest.mjs(REPO_ROOT 下,37 项全过、0 skip)",
+      "note": "上面的 generatedAt / gitHead / gitDirtyFiles 仍指五插件+frontend 那次全绿运行,没有改动;selftest 这一条是单独实测追加的。本轮无法用 --write-floors 重生成整份基线:那个开关(有意地)只接受全绿运行,而本轮 cn-capabilities、dsh-fleet 与两个宿主依赖闸都还是红的(别的 writer 在并行处理)。所以只追加这一条,其余下限一个字没动。整树转绿后 controller 应当从一次真全绿运行重新生成整份基线。"
+    }
+  ],
   "floors": {
     "dsh-agos": {
       "minTests": 174,
@@ -28,6 +37,10 @@
     "frontend-verify": {
       "minTests": 366,
       "minPass": 365
+    },
+    "selftest": {
+      "minTests": 37,
+      "minPass": 37
     }
   }
 }

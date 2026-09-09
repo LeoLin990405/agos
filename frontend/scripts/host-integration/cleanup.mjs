@@ -1,52 +1,62 @@
 /**
- * Reap anything the host-integration harness may have left behind.
+ * Reap what the host-integration harness left behind — and NOTHING else.
  *
  * The harness disposes itself on a normal or failed run, but a hard kill
  * (SIGKILL of the runner, a crashed debug session) can orphan a host process
- * and its temp roots. Everything this script touches is identified by the
- * harness's own unique marker, so it can never match the user's real DSH:
+ * and its temp root.
  *
- * - processes whose argv names an `agos-host-integration-home-…` overlay file
- * - temp directories named `agos-host-integration-*` under the run tmpdir
+ * ⚠️ What this script used to do, and why it was dangerous. It matched on the
+ * global prefix `agos-host-integration`: every process whose argv mentioned the
+ * marker was signalled, and every temp directory carrying the prefix was
+ * deleted. That is a correct description of "a harness run" and an incorrect
+ * description of "an ABANDONED harness run". Two suites in parallel — CI plus a
+ * developer, or two shells — meant the first one to finish killed the other's
+ * live host and deleted its DSH_HOME while it was mid-scenario, and the victim
+ * failed with an unexplainable transport error.
  *
- * Run: node scripts/host-integration/cleanup.mjs
+ * Ownership is now read out of each run's manifest instead of guessed from a
+ * name (see run-registry.mjs):
+ *
+ * - a run whose creating process is STILL ALIVE is active, and is skipped and
+ *   named in the report — never touched;
+ * - a run is only reaped once its owner is provably gone;
+ * - a recorded pid is only signalled after pid + kernel start-time + argv all
+ *   still match what was recorded at spawn, re-checked before every signal, so
+ *   a recycled pid belonging to an unrelated program is never killed;
+ * - a directory with no manifest yet (a run that is starting up right now looks
+ *   exactly like that) is left alone until it is provably stale.
+ *
+ * Run: node scripts/host-integration/cleanup.mjs [--dry-run] [--root <dir>]
  */
-import { execFile } from 'node:child_process';
-import { readdir } from 'node:fs/promises';
-import path from 'node:path';
-import { promisify } from 'node:util';
-import { HARNESS_ID, removeTemp, tempRoot } from './host-env.mjs';
+import { tmpdir } from 'node:os';
+import { classifyRun, cleanupRuns, listRunDirs } from './run-registry.mjs';
 
-const run = promisify(execFile)
+const args = process.argv.slice(2)
+const dryRun = args.includes('--dry-run')
+const rootArg = args.indexOf('--root')
+const root = rootArg === -1 ? tmpdir() : args[rootArg + 1]
 
-/** The harness marker. Never matches a plain `dsh` the user started. */
-const MARKER = `${HARNESS_ID}-home-`
-
-const listing = await run('ps', ['ax', '-o', 'pid=,command=']).catch(() => ({ stdout: '' }))
-const orphans = listing.stdout.split('\n')
-  .filter((line) => line.includes(MARKER) && line.includes('agos-harness-overlay.json'))
-  .map((line) => ({ pid: Number(line.trim().split(/\s+/, 1)[0]), line: line.trim() }))
-  .filter((entry) => Number.isInteger(entry.pid) && entry.pid !== process.pid)
-
-for (const orphan of orphans) {
-  try {
-    process.kill(orphan.pid, 'SIGTERM')
-    console.log(`SIGTERM → ${orphan.pid} (orphaned harness host)`)
-  } catch (error) {
-    console.log(`could not signal ${orphan.pid}: ${String(error)}`)
+if (dryRun) {
+  const runDirs = await listRunDirs({ root })
+  for (const runDir of runDirs) {
+    const verdict = await classifyRun(runDir)
+    console.log(`${verdict.state.padEnd(10)} ${runDir}  (${verdict.reason})`)
   }
+  console.log(`\ndry run: ${runDirs.length} harness run root(s) under ${root}`)
+} else {
+  const report = await cleanupRuns({ root })
+  for (const entry of report.reaped) {
+    console.log(`reaped   ${entry.runDir}  (${entry.reason})`)
+    for (const proc of entry.processes) {
+      console.log(`   ${proc.sent ? `${proc.signal} → ${proc.pid}` : `skipped pid ${proc.pid}: ${proc.reason}`}`)
+    }
+  }
+  for (const entry of report.skipped) {
+    // Being explicit about what was NOT touched is the point: silence here is
+    // indistinguishable from having deleted someone else's run.
+    console.log(`skipped  ${entry.runDir}  (${entry.state}: ${entry.reason})`)
+  }
+  const killed = report.reaped.reduce((total, entry) => total + entry.processes.filter((proc) => proc.sent).length, 0)
+  console.log(`\ncleanup done: ${report.reaped.length} run root(s) reaped, ${killed} signal(s) sent, `
+    + `${report.skipped.length} live/unreadable run(s) left alone`)
 }
-if (orphans.length > 0) await new Promise((resolve) => { setTimeout(resolve, 2000) })
-for (const orphan of orphans) {
-  try { process.kill(orphan.pid, 0); process.kill(orphan.pid, 'SIGKILL'); console.log(`SIGKILL → ${orphan.pid}`) } catch { /* gone */ }
-}
-
-const entries = await readdir(tempRoot(), { withFileTypes: true }).catch(() => [])
-const stale = entries.filter((entry) => entry.name.startsWith(`${HARNESS_ID}-`))
-for (const entry of stale) {
-  const target = path.join(tempRoot(), entry.name)
-  await removeTemp(target)
-  console.log(`removed ${target}`)
-}
-
-console.log(`cleanup done: ${orphans.length} process(es), ${stale.length} temp root(s)`)

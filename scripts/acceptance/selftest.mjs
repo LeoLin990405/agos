@@ -6,9 +6,11 @@
 // 两处都不许说谎。
 //
 // 跑法:node --test scripts/acceptance/selftest.mjs
+// 正式门也会跑它(run-acceptance.mjs 的默认计划里有 selftest 闸),防递归靠哨兵
+// AGOS_ACCEPTANCE_SELFTEST=1 —— 见 runnerEnv() 与 NC16。
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, cpSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
@@ -18,21 +20,117 @@ const HERE = dirname(new URL(import.meta.url).pathname)
 // 可指向被故意改坏的验收器副本:用来证明这些负控**不是空转**(见 mutation-check.sh)。
 const RUNNER = process.env.AGOS_SELFTEST_RUNNER ? resolve(process.env.AGOS_SELFTEST_RUNNER) : join(HERE, 'run-acceptance.mjs')
 const FIXTURES = 'scripts/acceptance/selftest-fixtures'
+const SELFTEST_SENTINEL = 'AGOS_ACCEPTANCE_SELFTEST'
 
-/** 跑一次验收器,回真实退出码 + 落盘 JSON。 */
-function runRunner({ plan, surface = null, floors = null, extraArgs = [] }) {
+/**
+ * spawn 验收器用的环境。两件事都是必须做的:
+ *
+ * 1. **剔除 node --test 的上下文变量**。本自检自己是 `node --test` 跑的,它 spawn 的验收器
+ *    又会 spawn `node --test`。NODE_TEST_CONTEXT 一路传下去时,最里层的 `node --test`
+ *    会打印 "node:test run() is being called recursively ... skipping running files",
+ *    **一个文件都不跑、连摘要都不打、退出码 0**(v26.7.0 实测)。
+ *    验收器自己的 neutralEnv 也剔这两个变量,这里是同一件事在上一跳再做一遍:
+ *    别让验收器进程本身带着测试运行器的上下文。JSON 里的 environment.nodeTestContext
+ *    把「验收器收到了什么」记下来,NC17 据此钉住这条清理真的发生了。
+ *
+ * 2. **置防递归哨兵**。正式门的默认计划里含本自检;本自检的每条负控又都 spawn 验收器。
+ *    子验收器要是再把自检放进默认计划,就是无限递归。哨兵让它不放。NC16 双向验证。
+ */
+function runnerEnv(extra = {}) {
+	const env = { ...process.env }
+	for (const k of ['NODE_TEST_CONTEXT', 'NODE_OPTIONS']) delete env[k]
+	env[SELFTEST_SENTINEL] = '1'
+	for (const [k, v] of Object.entries(extra)) {
+		if (v === undefined) delete env[k]
+		else env[k] = String(v)
+	}
+	return env
+}
+
+/**
+ * 合成计数下限基线。
+ *
+ * ⚠️ 为什么必须给(本轮修的回归,外部核查者 Luna 实测):验收器对「--floors 指向的文件不存在」
+ * 是 fail-closed 的(退 78)。上一轮这里传的是一个**不存在**的路径,于是 14 项里 13 项
+ * 在到达自己的目标断言前就被 fail-closed 拦死(实测 exit 1 / pass 1 / fail 13)。
+ *
+ * 正确修法是给**真实的合成基线**(内容与本次合成计划一一对应),
+ * **不是**让验收器在缺基线时恢复静默通过 —— 生产路径缺基线必须继续 fail-closed,
+ * 那条行为由 NC10 系列单独钉住(显式传不存在/空/坏 JSON 的路径,断言退 78)。
+ */
+function synthesizeFloors({ plan, requiredPlugins }) {
+	const floors = {}
+	for (const g of plan?.codeGates ?? []) {
+		if (g.kind && g.kind !== 'node-test') continue
+		floors[g.id] = { minTests: Math.max(1, g.minTests ?? 1), minPass: Math.max(1, g.minPass ?? 1) }
+	}
+	for (const p of requiredPlugins ?? []) floors[p] ??= { minTests: 1, minPass: 1 }
+	// 基线不许是空对象(验收器 fail-closed 会拒),给一条与本次计划无关的占位。
+	if (Object.keys(floors).length === 0) floors['__selftest-placeholder__'] = { minTests: 1, minPass: 1 }
+	return {
+		schema: 'agos-acceptance/expected-counts@1',
+		note: '自检合成基线:与本次合成计划一一对应,不是真实实测基线。',
+		floors,
+	}
+}
+
+/**
+ * 跑一次验收器,回真实退出码 + 落盘 JSON。
+ *
+ * plan 省略 → 走验收器**真实的 defaultPlan 代码路径**(配 --required-plugins/--plugins-root
+ * 指向合成套件树)。结构性负控(整包缺失/空目录/缺基线条目)必须走这条路:
+ * 自定义 --plan 压根不经过 defaultPlan,用它证明不了 defaultPlan 的行为。
+ */
+function runRunner({
+	plan = null, surface = null,
+	floors = null, floorsRaw = null, floorsMissing = false, floorsDisabled = false,
+	requiredPlugins = null, pluginsRoot = null, selftestFile = null,
+	extraArgs = [], env = {},
+}) {
 	const work = mkdtempSync(join(tmpdir(), 'agos-selftest-'))
-	const planPath = join(work, 'plan.json')
-	writeFileSync(planPath, JSON.stringify(plan, null, 2))
 	const jsonPath = join(work, 'results.json')
-	const argv = [RUNNER, `--plan=${planPath}`, `--json=${jsonPath}`, `--logdir=${join(work, 'logs')}`, ...extraArgs]
+	const argv = [RUNNER, `--json=${jsonPath}`, `--logdir=${join(work, 'logs')}`]
+	if (plan) {
+		const planPath = join(work, 'plan.json')
+		writeFileSync(planPath, JSON.stringify(plan, null, 2))
+		argv.push(`--plan=${planPath}`)
+	} else {
+		argv.push('--no-advisory')   // 默认计划含部署漂移;合成运行不需要真去跑部署脚本
+	}
 	if (surface) { const sp = join(work, 'surface.json'); writeFileSync(sp, JSON.stringify(surface, null, 2)); argv.push(`--surface=${sp}`) }
 	else argv.push(`--surface=${join(work, 'no-such-surface.json')}`)   // 默认不让负控依赖真实实测文件
-	if (floors) { const fp = join(work, 'floors.json'); writeFileSync(fp, JSON.stringify(floors, null, 2)); argv.push(`--floors=${fp}`) }
-	else argv.push(`--floors=${join(work, 'no-such-floors.json')}`)
-	const res = spawnSync(process.execPath, argv, { cwd: REPO_ROOT, encoding: 'utf8', timeout: 300000 })
+	if (floorsDisabled) argv.push('--floors=none')
+	else if (floorsMissing) argv.push(`--floors=${join(work, 'no-such-floors.json')}`)
+	else {
+		const fp = join(work, 'floors.json')
+		writeFileSync(fp, floorsRaw !== null ? floorsRaw : JSON.stringify(floors ?? synthesizeFloors({ plan, requiredPlugins }), null, 2) + '\n')
+		argv.push(`--floors=${fp}`)
+	}
+	if (requiredPlugins) argv.push(`--required-plugins=${requiredPlugins.join(',')}`)
+	if (pluginsRoot) argv.push(`--plugins-root=${pluginsRoot}`)
+	if (selftestFile) argv.push(`--selftest-file=${selftestFile}`)
+	argv.push(...extraArgs)
+	const res = spawnSync(process.execPath, argv, { cwd: REPO_ROOT, encoding: 'utf8', timeout: 300000, env: runnerEnv(env) })
 	const json = existsSync(jsonPath) ? JSON.parse(readFileSync(jsonPath, 'utf8')) : null
-	return { exitCode: res.status, stdout: res.stdout ?? '', stderr: res.stderr ?? '', json, work }
+	return { exitCode: res.status, stdout: res.stdout ?? '', stderr: res.stderr ?? '', json, work, argv }
+}
+
+/**
+ * 造一棵合成套件树,让结构性负控走真实的 defaultPlan。
+ * kind:'no-test-dir' 整个 test/ 不存在 | 'empty-test-dir' 目录存在但空 | 'no-mjs' 有文件但没 .mjs
+ *      其余值当作 selftest-fixtures/<kind>/test 的固件名(passing / failing / skipped / mixed / zero)
+ */
+function makePluginRoot(specs) {
+	const root = mkdtempSync(join(tmpdir(), 'agos-selftest-plugins-'))
+	for (const [name, kind] of Object.entries(specs)) {
+		if (kind === 'no-test-dir') continue
+		const testDir = join(root, name, 'test')
+		mkdirSync(testDir, { recursive: true })
+		if (kind === 'empty-test-dir') continue
+		if (kind === 'no-mjs') { writeFileSync(join(testDir, 'NOTES.txt'), '这里一个 .mjs 都没有\n'); continue }
+		cpSync(join(REPO_ROOT, FIXTURES, kind, 'test'), testDir, { recursive: true })
+	}
+	return root
 }
 
 /** spawnSync 不过 shell,glob 不会展开;而且 Node v26 的 `--test test/`(目录参数)会直接失败。
@@ -254,4 +352,368 @@ test('NC9: --write-floors 拒绝把红状态写成基线', () => {
 	assert.notEqual(r.exitCode, 0)
 	assert.equal(existsSync(target), false, '红的运行绝不能写出基线文件')
 	assert.match(r.stderr + r.stdout, /拒绝执行|refus/i)
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 控制 10:计数下限基线本身不可用 → **拒绝运行**(退 78),绝不静默变成"没有下限"。
+//
+// 这一组是上面 runRunner 合成基线的**对照面**:合成基线让 13 条负控恢复可达,
+// 而"缺基线必须 fail-closed"这条生产行为在这里被单独钉死。两者不许互相取消。
+// 覆盖:文件不存在 / 空文件 / 坏 JSON / 缺 floors 字段 / 空 floors / 下限值为 0。
+// ─────────────────────────────────────────────────────────────────────────────
+const okPlan = () => ({ codeGates: [nodeTestGate('ctl-passing', 'passing')], advisory: [] })
+
+/** 每条都断言:退 78、stderr 有 fail-closed 文案与 reason code、且**没有**落盘 JSON(压根没跑)。 */
+function assertFloorsRefused(r, reasonCode) {
+	assert.equal(r.exitCode, 78, `基线不可用必须退 78,实际 ${r.exitCode}`)
+	assert.match(r.stderr, /拒绝运行\(fail-closed\)/, '必须打印 fail-closed 文案')
+	assert.match(r.stderr, new RegExp(reasonCode), `必须给出 reason code ${reasonCode}`)
+	assert.equal(r.json, null, '拒绝运行意味着一个闸都没跑,不该有结果 JSON')
+}
+
+test('NC10: 基线文件不存在 → 退 78 fail-closed(生产路径绝不静默通过)', () => {
+	const r = runRunner({ plan: okPlan(), floorsMissing: true })
+	assertFloorsRefused(r, 'floors-missing-file')
+	// 反面对照:同一个计划配上真实合成基线时是能过的 —— 证明 78 是基线缺席造成的,不是计划本身坏
+	assert.equal(runRunner({ plan: okPlan() }).exitCode, 0, '同一计划配真实基线必须能过')
+})
+
+test('NC10b: 基线文件是空的 → 退 78(以前会 JSON.parse 抛未捕获异常)', () => {
+	assertFloorsRefused(runRunner({ plan: okPlan(), floorsRaw: '' }), 'floors-empty-file')
+	assertFloorsRefused(runRunner({ plan: okPlan(), floorsRaw: '   \n\t\n' }), 'floors-empty-file')
+})
+
+test('NC10c: 基线 JSON 格式错误 → 退 78 带解析诊断', () => {
+	assertFloorsRefused(runRunner({ plan: okPlan(), floorsRaw: '{"floors": {' }), 'floors-invalid-json')
+})
+
+test('NC10d: 基线缺 floors 字段 → 退 78(以前 `?? {}` 静默变成没有任何下限)', () => {
+	assertFloorsRefused(runRunner({ plan: okPlan(), floorsRaw: '{"schema":"x"}' }), 'floors-missing-field')
+	assertFloorsRefused(runRunner({ plan: okPlan(), floorsRaw: '{"floors": []}' }), 'floors-missing-field')
+	assertFloorsRefused(runRunner({ plan: okPlan(), floorsRaw: '[]' }), 'floors-not-an-object')
+})
+
+test('NC10e: floors 是空对象 / 下限值为 0 或非整数 → 退 78(都与"没有下限"等价)', () => {
+	assertFloorsRefused(runRunner({ plan: okPlan(), floorsRaw: '{"floors":{}}' }), 'floors-empty-object')
+	assertFloorsRefused(runRunner({ plan: okPlan(), floorsRaw: '{"floors":{"a":{"minTests":0,"minPass":0}}}' }), 'floors-invalid-entry')
+	assertFloorsRefused(runRunner({ plan: okPlan(), floorsRaw: '{"floors":{"a":{"minTests":"7","minPass":7}}}' }), 'floors-invalid-entry')
+	assertFloorsRefused(runRunner({ plan: okPlan(), floorsRaw: '{"floors":{"a":{"minPass":7}}}' }), 'floors-invalid-entry')
+	assertFloorsRefused(runRunner({ plan: okPlan(), floorsRaw: '{"floors":{"a":null}}' }), 'floors-invalid-entry')
+})
+
+test('NC10f: --floors=none 是显式逃生阀 —— 能跑,但"不设下限"这个事实必须醒目', () => {
+	const r = runRunner({ plan: okPlan(), floorsDisabled: true })
+	assert.equal(r.exitCode, 0, '显式关闭下限时允许运行(首次引导基线需要)')
+	assert.match(r.stdout, /已用 --floors=none 显式关闭/, '必须在终端醒目声明本次不设下限')
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 控制 11:必需套件**整包缺失/空目录**必须让正式门失败。
+//
+// ⚠️ 这是外部核查者 Luna 实测出来的假绿:defaultPlan 原来对「test/ 目录不存在」和
+// 「目录里没有 .mjs」都是 `continue` —— 整个套件消失变成"计划里没这一项",于是闸没有
+// 任何东西可抓。Luna 在临时副本上实测:全部插件 test/ 不存在时 tests=0 / green=true / exit 0。
+//
+// 这一组走验收器**真实的 defaultPlan**(--plugins-root 指向合成套件树),
+// 不用自定义 --plan —— 自定义计划压根不经过 defaultPlan,证明不了它的行为。
+// ─────────────────────────────────────────────────────────────────────────────
+test('NC11: 必需插件的 test/ 整个不存在 → 计划里必须留下显式失败条目,闸退非零', () => {
+	const root = makePluginRoot({ 'plug-ok': 'passing', 'plug-gone': 'no-test-dir' })
+	const r = runRunner({ requiredPlugins: ['plug-ok', 'plug-gone'], pluginsRoot: root })
+	assert.notEqual(r.exitCode, 0, '必需套件缺失必须让进程退非零')
+	assert.equal(r.json.codeGate.green, false)
+	const gone = suiteOf(r.json, 'plug-gone')
+	assert.ok(gone, '缺失的必需套件绝不能从计划/结果里消失 —— 消失了就没东西可抓')
+	assert.equal(gone.verdict, 'fail')
+	assert.equal(gone.structural, true)
+	assert.match(gone.reason, /missing-test-suite/)
+	assert.ok(r.json.codeGate.failedGates.some((g) => g.id === 'plug-gone'))
+	// 同一次运行里健在的那个套件确实过了 → 证明这条红不是"什么都红"的假象
+	assert.equal(suiteOf(r.json, 'plug-ok').verdict, 'pass')
+})
+
+test('NC11b: test/ 存在但为空 / 有文件却没有 .mjs → 同样是显式失败', () => {
+	for (const kind of ['empty-test-dir', 'no-mjs']) {
+		const root = makePluginRoot({ 'plug-ok': 'passing', 'plug-empty': kind })
+		const r = runRunner({ requiredPlugins: ['plug-ok', 'plug-empty'], pluginsRoot: root })
+		assert.notEqual(r.exitCode, 0, `${kind}:必须退非零`)
+		const s = suiteOf(r.json, 'plug-empty')
+		assert.ok(s, `${kind}:空套件不能从结果里消失`)
+		assert.equal(s.verdict, 'fail')
+		assert.match(s.reason, /empty-test-suite/)
+		assert.equal(r.json.codeGate.green, false)
+	}
+})
+
+test('NC11c: Luna 的原始复现 —— **全部**必需套件都不存在,绝不能 tests=0/green=true/exit 0', () => {
+	const root = makePluginRoot({})   // 一个套件目录都没有
+	const required = ['dsh-agos', 'dsh-agos-router', 'dsh-mcp-bridge', 'cn-capabilities', 'dsh-fleet']
+	const r = runRunner({ requiredPlugins: required, pluginsRoot: root })
+	assert.notEqual(r.exitCode, 0, '整包全缺时退 0 就是假绿 —— 这正是被抓到的缺陷')
+	assert.equal(r.json.codeGate.green, false, 'green 绝不能是 true')
+	assert.equal(r.json.codeGate.totals.tests, 0, '确实一个测试都没跑(陷阱所在)')
+	assert.equal(r.json.codeGate.suites.length, required.length, '五个必需套件都得留下条目')
+	for (const id of required) {
+		assert.equal(suiteOf(r.json, id).verdict, 'fail', `${id} 必须是显式失败`)
+	}
+	assert.equal(r.json.codeGate.failedGates.length, required.length)
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 控制 12:基线里**缺某个必需套件的条目** → 那个套件没有下限保护,必须判失败。
+// (比删掉整个基线文件隐蔽得多:文件在、格式对、只是少一行。)
+// ─────────────────────────────────────────────────────────────────────────────
+test('NC12: 基线缺某必需套件的条目 → 该套件显式失败,闸退非零', () => {
+	const root = makePluginRoot({ 'plug-a': 'passing', 'plug-b': 'passing' })
+	const r = runRunner({
+		requiredPlugins: ['plug-a', 'plug-b'],
+		pluginsRoot: root,
+		floors: { schema: 'agos-acceptance/expected-counts@1', floors: { 'plug-a': { minTests: 1, minPass: 1 } } },
+	})
+	assert.notEqual(r.exitCode, 0)
+	const b = suiteOf(r.json, 'plug-b')
+	assert.ok(b, '没有下限的必需套件不能从结果里消失')
+	assert.equal(b.verdict, 'fail')
+	assert.match(b.reason, /missing-floor-entry/)
+	assert.equal(suiteOf(r.json, 'plug-a').verdict, 'pass', '有条目的那个照常跑')
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 控制 13/14:默认计划下,全 skip 与计数低于下限同样必须红。
+// (NC5a/NC6 已经用自定义 --plan 证过判定层;这两条证明**默认计划真的把下限接上了**。)
+// ─────────────────────────────────────────────────────────────────────────────
+test('NC13: 默认计划下某必需套件全 skip(tests>0、pass=0)→ 闸退非零', () => {
+	const root = makePluginRoot({ 'plug-skip': 'skipped' })
+	const r = runRunner({ requiredPlugins: ['plug-skip'], pluginsRoot: root })
+	const s = suiteOf(r.json, 'plug-skip')
+	assert.equal(s.exitCode, 0, 'node --test 对全 skip 是退 0(陷阱所在)')
+	assert.ok(s.counts.tests > 0, '确实有测试')
+	assert.equal(s.counts.pass, 0, '但一条都没真过')
+	assert.equal(s.verdict, 'skipped')
+	assert.equal(r.json.codeGate.totals.pass, 0, 'skip 绝不能并入 pass')
+	assert.notEqual(r.exitCode, 0)
+	assert.equal(r.json.codeGate.green, false)
+})
+
+test('NC14: 默认计划下测试计数低于基线下限 → 闸退非零(证明 defaultPlan 真的接了下限)', () => {
+	const root = makePluginRoot({ 'plug-shrunk': 'passing' })   // 固件只有 1 个测试
+	const r = runRunner({
+		requiredPlugins: ['plug-shrunk'],
+		pluginsRoot: root,
+		floors: { schema: 'agos-acceptance/expected-counts@1', floors: { 'plug-shrunk': { minTests: 42, minPass: 42 } } },
+	})
+	const s = suiteOf(r.json, 'plug-shrunk')
+	assert.equal(s.minTests ?? 42, 42)
+	assert.equal(s.verdict, 'fail')
+	assert.match(s.reason, /count-regression/)
+	assert.notEqual(r.exitCode, 0)
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 控制 15:「让计划变空」是最省事的假绿手段 —— 必须拒绝运行。
+// ─────────────────────────────────────────────────────────────────────────────
+test('NC15: 0 个代码闸的计划 → 退 78 拒绝运行(不是"全过")', () => {
+	const r = runRunner({ plan: { codeGates: [], advisory: [] } })
+	assert.equal(r.exitCode, 78)
+	assert.match(r.stderr, /empty-code-gates/)
+	assert.equal(r.json, null)
+})
+
+test('NC15b: 必需套件清单被清空(--required-plugins=)→ 退 78 拒绝运行', () => {
+	const r = runRunner({ requiredPlugins: [], pluginsRoot: makePluginRoot({}) })
+	assert.equal(r.exitCode, 78)
+	assert.match(r.stderr, /empty-required-plugins/)
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 控制 16:正式门接了自检,并且防递归真的挡住了递归。
+//
+// 「计划里没有 selftest 这一项」证明不了递归会不会发生,所以这里用真实分层 spawn 数层数:
+// 探针(见 selftest-fixtures/recursion-probe.test.mjs)每层记一行深度,自身带硬上限 3。
+// ─────────────────────────────────────────────────────────────────────────────
+const PROBE = join(REPO_ROOT, FIXTURES, 'recursion-probe.test.mjs')
+
+/** 直接起第 1 层探针(不经过验收器),让探针自己决定 spawn 验收器时带不带哨兵。 */
+function runRecursionProbe({ sentinel }) {
+	const work = mkdtempSync(join(tmpdir(), 'agos-selftest-recursion-'))
+	const logFile = join(work, 'depths.txt')
+	writeFileSync(logFile, '')
+	const root = makePluginRoot({ 'probe-plug': 'passing' })
+	const floorsFile = join(work, 'floors.json')
+	writeFileSync(floorsFile, JSON.stringify({
+		schema: 'agos-acceptance/expected-counts@1',
+		floors: { 'probe-plug': { minTests: 1, minPass: 1 }, selftest: { minTests: 1, minPass: 1 } },
+	}, null, 2))
+	// 探针每层用这套参数去跑验收器:默认计划(所以会走"要不要放自检进计划"那段) + 合成套件树
+	const runnerArgv = [
+		'--no-advisory',
+		`--surface=${join(work, 'no-such-surface.json')}`,
+		`--floors=${floorsFile}`,
+		'--required-plugins=probe-plug',
+		`--plugins-root=${root}`,
+		`--selftest-file=${PROBE}`,
+		`--logdir=${join(work, 'logs')}`,
+	]
+	const env = {
+		...process.env,
+		AGOS_RECURSION_PROBE_LOG: logFile,
+		AGOS_RECURSION_PROBE_MAX: '3',
+		AGOS_RECURSION_PROBE_SENTINEL: sentinel ? '1' : '0',
+		AGOS_RECURSION_PROBE_RUNNER: RUNNER,
+		AGOS_RECURSION_PROBE_ARGV: JSON.stringify(runnerArgv),
+		AGOS_RECURSION_PROBE_CWD: REPO_ROOT,
+		AGOS_RECURSION_PROBE_DEPTH: '0',
+	}
+	delete env.NODE_TEST_CONTEXT
+	delete env.NODE_OPTIONS
+	delete env[SELFTEST_SENTINEL]   // 第 1 层探针是"自检"的角色,它自己不该带哨兵
+	const res = spawnSync(process.execPath, ['--test', PROBE], { cwd: REPO_ROOT, encoding: 'utf8', timeout: 300000, env })
+	const depths = readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean)
+	return { depths, exitCode: res.status, stdout: res.stdout ?? '', stderr: res.stderr ?? '' }
+}
+
+test('NC16: 哨兵缺失时**真的会递归**(实测层数增长)', () => {
+	const r = runRecursionProbe({ sentinel: false })
+	assert.ok(r.depths.length >= 3,
+		`不带哨兵时验收器会把自检放回计划 → 层层相套。实测层数 ${r.depths.length},期望 ≥3(探针硬上限)。实际记录: ${r.depths.join(',')}`)
+	assert.deepEqual(r.depths.slice(0, 3), ['depth=1', 'depth=2', 'depth=3'], '层数必须是逐层递增的真实嵌套')
+})
+
+test('NC16b: 哨兵存在时递归停在第 1 层,且"自检被排除"这件事不静默', () => {
+	const r = runRecursionProbe({ sentinel: true })
+	assert.deepEqual(r.depths, ['depth=1'], `带哨兵时必须停在第 1 层,实际: ${r.depths.join(',')}`)
+	// 排除不许静默:JSON 与终端都得留痕
+	const j = runRunner({ requiredPlugins: ['plug-ok'], pluginsRoot: makePluginRoot({ 'plug-ok': 'passing' }) })
+	assert.equal(j.json.recursionGuard.active, true, '子验收器必须承认哨兵生效了')
+	assert.equal(j.json.recursionGuard.selftestGateIncluded, false, '哨兵在时自检不该在计划里')
+	assert.equal(j.json.recursionGuard.sentinel, SELFTEST_SENTINEL)
+	assert.match(j.stdout, /防递归哨兵/, '终端必须说明自检为什么被排除')
+})
+
+test('NC16c: 正式默认计划确实接了自检 + 依赖树校验(--print-plan 实测,且它自己退 78)', () => {
+	// --print-plan 一个闸都没跑,所以它**必须**退非零:任何 `--print-plan && echo 通过` 都要失败
+	const res = spawnSync(process.execPath, [RUNNER, '--print-plan', '--no-advisory'], {
+		cwd: REPO_ROOT, encoding: 'utf8', timeout: 120000,
+		env: runnerEnv({ [SELFTEST_SENTINEL]: undefined }),   // 哨兵不在 → 自检应当在计划里
+	})
+	assert.equal(res.status, 78, '--print-plan 绝不能退 0(否则会被当成通过)')
+	const printed = JSON.parse(res.stdout)
+	assert.equal(printed.syntheticSeams, false, '这一条问的是**真实**默认计划,不能有任何合成接缝')
+	const plan = printed.plan
+	const ids = plan.codeGates.map((g) => g.id)
+	for (const id of ['dsh-agos', 'dsh-agos-router', 'dsh-mcp-bridge', 'cn-capabilities', 'dsh-fleet']) {
+		assert.ok(ids.includes(id), `正式门必须含必需套件 ${id}`)
+	}
+	assert.ok(ids.includes('selftest'), '正式门必须接自检(缺陷 3)')
+	assert.ok(ids.includes('host-tree'), '正式门必须接宿主依赖树内容校验')
+	assert.ok(ids.includes('host-modules-check'), '正式门必须接宿主依赖体检')
+	const selftestGate = plan.codeGates.find((g) => g.id === 'selftest')
+	assert.equal(selftestGate.required, true, '自检必须是必需闸,不是可选')
+	// 自检闸也必须有计数下限:否则"删掉几条负控"不会被抓到
+	assert.ok(selftestGate.kind !== 'structural', `自检闸不该是结构性失败(现在是 ${selftestGate.reason ?? ''})`)
+	assert.ok(Number.isInteger(selftestGate.minTests) && selftestGate.minTests >= 1, '自检闸必须有 minTests 下限')
+	assert.ok(Number.isInteger(selftestGate.minPass) && selftestGate.minPass >= 1, '自检闸必须有 minPass 下限')
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 控制 17:嵌套 node --test 的环境传播 —— 最危险的假绿。
+//
+// NODE_TEST_CONTEXT 传给子进程时,子进程的 `node --test` 会打印
+// "run() is being called recursively ... skipping running files",**一个文件都不跑、
+// 连摘要都不打、退出码 0**(v26.7.0 实测)。本自检自己就跑在 node --test 里,
+// 而它 spawn 的验收器又要 spawn node --test,所以这条链必须在每一跳被斩断。
+// ─────────────────────────────────────────────────────────────────────────────
+test('NC17: 自检 spawn 验收器时已清掉 NODE_TEST_CONTEXT/NODE_OPTIONS', () => {
+	const r = runRunner({ plan: okPlan() })
+	assert.equal(r.json.environment.nodeTestContext, null,
+		'验收器进程不该带着 node --test 的上下文(自检自己就跑在 node --test 里)')
+	assert.equal(r.json.environment.nodeOptions, null)
+	assert.equal(r.exitCode, 0)
+})
+
+test('NC17b: 就算污染硬塞给验收器,它也必须为孙子进程斩断(闸照常跑出真实计数)', () => {
+	const r = runRunner({
+		plan: { codeGates: [nodeTestGate('ctl-env', 'env-hygiene')], advisory: [] },
+		env: { NODE_TEST_CONTEXT: 'child-v8', NODE_OPTIONS: '--no-warnings' },
+	})
+	assert.equal(r.json.environment.nodeTestContext, 'child-v8', '收到了什么就如实记什么')
+	assert.equal(r.json.environment.nodeOptions, '--no-warnings')
+	const s = suiteOf(r.json, 'ctl-env')
+	assert.equal(s.verdict, 'pass', '污染必须在验收器这一跳被斩断,否则子进程一个测试都不跑')
+	assert.equal(s.counts.tests, 3, '固件里的三条测试必须真的跑了')
+	assert.equal(s.counts.pass, 3)
+	assert.equal(r.exitCode, 0)
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 控制 19:可测性接缝本身不许变成绕过通道。
+// (为了让结构性负控能走真实的 defaultPlan,验收器加了 --required-plugins/--plugins-root/
+//  --selftest-file/--surface。这些开关必须:① 把本次运行标成不权威;② 不能用来写基线。)
+// ─────────────────────────────────────────────────────────────────────────────
+test('NC19: 用了合成接缝的运行必须自报 authoritative=false', () => {
+	const r = runRunner({ requiredPlugins: ['plug-ok'], pluginsRoot: makePluginRoot({ 'plug-ok': 'passing' }) })
+	assert.equal(r.exitCode, 0, '合成运行本身是能过的(否则下面这条断言没意义)')
+	assert.equal(r.json.authoritative, false, '合成运行绝不能自称权威')
+	assert.ok(r.json.syntheticSeams, '用了哪些接缝必须落到 JSON 里')
+	assert.match(r.stdout, /合成运行/, '终端也必须说明这不是真实仓库状态')
+})
+
+test('NC19b: --write-floors 拒绝从合成运行写基线(否则假套件树能洗掉真基线)', () => {
+	const work = mkdtempSync(join(tmpdir(), 'agos-selftest-synthfloors-'))
+	const target = join(work, 'floors.json')
+	const r = runRunner({
+		requiredPlugins: ['plug-ok'], pluginsRoot: makePluginRoot({ 'plug-ok': 'passing' }),
+		extraArgs: [`--write-floors=${target}`],
+	})
+	assert.equal(r.exitCode, 78, '合成运行想写基线必须被拒')
+	assert.equal(existsSync(target), false, '一个字节都不许写出去')
+	assert.match(r.stderr, /拒绝执行/)
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 控制 18:超时必须**看得出来是超时**,不能长得像一次普通断言失败。
+// (实测起因:dsh-fleet 跑满 900s 被 SIGTERM 砍掉,node --test 接住信号自己退 1,
+//  于是 reason 只写 nonzero-exit:1 —— 判定没错,但诊断把"被砍了"说成了"断言失败"。)
+// ─────────────────────────────────────────────────────────────────────────────
+test('NC18: 跑满超时的套件 → 判 fail 且诊断点明 timeout,不冒充普通失败', () => {
+	const r = runRunner({
+		plan: {
+			codeGates: [{
+				id: 'ctl-timeout', cwd: FIXTURES, argv: ['/bin/sh', '-c', 'sleep 30'],
+				kind: 'node-test', required: true, timeoutMs: 700,
+			}],
+			advisory: [],
+		},
+	})
+	const s = suiteOf(r.json, 'ctl-timeout')
+	assert.equal(s.timedOut, true, '跑满超时必须被标出来')
+	assert.equal(s.timeoutMs, 700, '本次用的超时值必须留痕(便于发现有人偷偷调高)')
+	assert.equal(s.verdict, 'fail', '超时就是失败')
+	assert.match(s.reason, /timeout-after:700ms/, '诊断必须说这是超时,而不是 nonzero-exit')
+	assert.notEqual(r.exitCode, 0)
+	// 反面对照:正常快速套件不许被误标成超时
+	const ok = runRunner({ plan: okPlan() })
+	assert.equal(suiteOf(ok.json, 'ctl-passing').timedOut, false, '正常套件绝不能被误判成超时')
+})
+
+test('NC17c: 污染真的会让 node --test 一个测试都不跑 —— 而验收器判它 fail,不是 pass', () => {
+	// 先记录 Node 的行为本身(这就是为什么必须斩断这条链)
+	const dir = join(REPO_ROOT, FIXTURES, 'passing')
+	const clean = { ...process.env }
+	delete clean.NODE_TEST_CONTEXT
+	delete clean.NODE_OPTIONS
+	const polluted = spawnSync('/bin/sh', ['-c', 'NODE_TEST_CONTEXT=child-v8 node --test test/pass.test.mjs 2>&1'],
+		{ cwd: dir, encoding: 'utf8', timeout: 120000, env: clean })
+	assert.equal(polluted.status, 0, '记录事实:被污染的 node --test 退出码是 0')
+	assert.match(polluted.stdout, /skipping running files/, '它压根不跑文件')
+	assert.equal(parseNodeTestCounts(polluted.stdout), null, '连摘要都没有 → 无法解析出计数')
+	// 而验收器碰到这种输出必须判 fail(no-test-summary),绝不能因为"退出码 0"就算过
+	const r = runRunner({
+		plan: { codeGates: [{ id: 'ctl-polluted', cwd: `${FIXTURES}/passing`, argv: ['/bin/sh', '-c', 'NODE_TEST_CONTEXT=child-v8 node --test test/pass.test.mjs'], kind: 'node-test', required: true }], advisory: [] },
+	})
+	const s = suiteOf(r.json, 'ctl-polluted')
+	assert.equal(s.exitCode, 0, '生产者确实退 0(陷阱所在)')
+	assert.equal(s.verdict, 'fail')
+	assert.match(s.reason, /no-test-summary/)
+	assert.notEqual(r.exitCode, 0, '没有摘要绝不能算过')
 })

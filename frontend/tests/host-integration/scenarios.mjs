@@ -19,6 +19,14 @@ const REAL = { host: 'real', browser: 'real', transport: 'real', store: 'real' }
  */
 const SOFT_ROUTES = /^\/(api\/(agos|swarm|memory|fleet|turn-evidence|yolo)\/|css2|fonts\/)/
 
+/**
+ * The plugin that serves `/api/turn-evidence/…`. Scenario 8 reports its own
+ * evidence-strip layer `blocked` when this id is missing from the RUNNING
+ * host's verified plugin list, instead of reading the resulting 404 as proof
+ * that nothing leaked.
+ */
+const EVIDENCE_PLUGIN = 'dsh-agos'
+
 /** Copy the production panel renders; asserting on it proves the real render path. */
 const COPY = {
   pending: '正在提交审批，尚未生效',
@@ -620,13 +628,49 @@ export const scenarios = [
         return store.phase === 'live' && store.historyIncomplete ? store : false
       }, { timeoutMs: 45_000, intervalMs: 200, label: 'the live truncated window' })
 
-      // Fire the older page and a live turn in the same tick so the page
-      // response and fresh follow events race into the same fold rebuild.
+      // ── Observable overlap barrier ─────────────────────────────────────────
+      //
+      // `Promise.all([click, prompt])` only proves both were *started* in the
+      // same tick. It does not prove they overlapped: the page response can
+      // land and settle before the first follow event ever arrives, in which
+      // case this scenario silently degrades into "paged, then received", and
+      // the merge it claims to test never happened.
+      //
+      // So hold the page response open on the wire and only release it after a
+      // live follow event has been observed. While it is held, the pager is
+      // in-flight by construction; releasing it inside that window makes the
+      // overlap a fact recorded in the report, not an assumption.
+      let pageHeld = 0
+      let releasePage
+      const pageGate = new Promise((resolve) => { releasePage = resolve })
+      await ctx.page.route('**/api/session/page', async (route) => {
+        pageHeld += 1
+        await pageGate
+        await route.continue()
+      })
+
       const pager = ctx.page.getByRole('button', { name: COPY.loadEarlier, exact: true })
-      await Promise.all([
-        pager.click(),
-        ctx.prompt(sessionId, '并发:分页同时来一条实时事件'),
-      ])
+      const paging = pager.click()
+      // Wait until the page request is genuinely in-flight and held.
+      await ctx.waitFor(async () => pageHeld > 0, {
+        timeoutMs: 30_000, intervalMs: 50, label: 'the older-page request to be held open',
+      })
+      ctx.record(pageHeld === 1, `the older-page request is held in-flight (${pageHeld} request)`)
+
+      // Now push a live turn. It must reach the store while the page is still
+      // held — that is the overlap this scenario exists to exercise.
+      const live = ctx.prompt(sessionId, '并发:分页同时来一条实时事件')
+      const grew = await ctx.waitFor(async () => {
+        const store = await ctx.readStore(sessionId)
+        return store.itemCount > before.itemCount ? store : false
+      }, { timeoutMs: 60_000, intervalMs: 100, label: 'a live item to arrive while paging is held' })
+      ctx.record(pageHeld === 1 && grew.historyLoading === true,
+        'the live event landed while the older page was still in-flight (real overlap, not sequential)')
+
+      // Release the held page into a store that has already moved on.
+      releasePage()
+      await Promise.all([paging, live])
+      await ctx.page.unroute('**/api/session/page')
 
       const merged = await ctx.waitFor(async () => {
         const store = await ctx.readStore(sessionId)
@@ -703,11 +747,55 @@ export const scenarios = [
       ctx.record(after.currentStep?.turn === maxTurnAfter,
         `the hop still names the newest turn, not a historical one (${after.currentStep?.turn} === ${maxTurnAfter})`)
 
-      const strip = ctx.page.locator('[aria-label="本跳证据"]')
-      if (await strip.count() > 0) {
-        const text = await strip.first().innerText()
-        ctx.record(!/历史构建 1\b/.test(text), `the evidence strip does not name a paged-in historical turn: ${text.replace(/\s+/g, ' ').slice(0, 90)}`)
+      // ── The turn-evidence layer ────────────────────────────────────────────
+      //
+      // Everything above is store-level: it proves the fold does not republish
+      // an older turn as the current hop. That is real coverage, but it is NOT
+      // the evidence STRIP, which is what this scenario is named after and what
+      // an operator actually reads.
+      //
+      // The strip is rendered from `/api/turn-evidence/…`, an AgOS plugin route.
+      // `live.ts` swallows its failure by design, so on a stock pinned host the
+      // strip simply never appears — and the previous version of this check was
+      // wrapped in `if (await strip.count() > 0)`, which meant a 404 silently
+      // skipped it while the scenario still reported PASS. That is the exact
+      // shape of a false green: the report claimed evidence isolation was
+      // verified on a run where the evidence layer was never even mounted.
+      //
+      // Now: the plugin must have *answered on the running host* (verified by
+      // re-probing, not by having been requested). If it did not, this layer is
+      // reported `blocked` by name. If it did, the strip must exist and must
+      // name the newest turn, never a paged-in historical one.
+      const loaded = await ctx.plugins.loaded()
+      if (!loaded.includes(EVIDENCE_PLUGIN)) {
+        const status = (await ctx.plugins.status()).find((entry) => entry.id === EVIDENCE_PLUGIN)
+        ctx.blocked(
+          '本跳证据条(turn-evidence 插件路由)',
+          `插件 ${EVIDENCE_PLUGIN} 未在运行中的宿主上应答，证据条不会渲染，`
+          + `因此「历史证据不串到最新跳」这一层本次未覆盖。`
+          + `${status === undefined ? '本次运行没有请求挂载该插件。' : `探测详情：${status.detail ?? '(无)'}`}`
+          + ' 上面的 store 级判定仍然成立，但它不等于证据条已验。',
+        )
+        return ctx.screenshot('8-history-evidence-does-not-leak')
       }
+
+      // The plugin answered, so the strip is required — its absence is now a
+      // real failure, not a shrug.
+      const strip = ctx.page.locator('[aria-label="本跳证据"]')
+      await strip.first().waitFor({ timeout: 30_000 })
+      ctx.record(await strip.count() > 0, 'the evidence strip is rendered (turn-evidence answered)')
+
+      const text = (await strip.first().innerText()).replace(/\s+/g, ' ')
+      // Two distinguishable turns exist in the window by construction: the
+      // newest (before.currentStep.turn) and the oldest paged-in one.
+      ctx.record(
+        text.includes(String(after.currentStep.turn)),
+        `the strip names the current turn ${after.currentStep.turn}: ${text.slice(0, 90)}`,
+      )
+      ctx.record(
+        !text.includes(`历史构建 ${oldestTurnAfter}`) && !new RegExp(`\\b${oldestTurnAfter}\\b`).test(text),
+        `the strip does NOT name the paged-in historical turn ${oldestTurnAfter}: ${text.slice(0, 90)}`,
+      )
       return ctx.screenshot('8-history-evidence-does-not-leak')
     },
   },

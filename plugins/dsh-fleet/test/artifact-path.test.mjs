@@ -270,6 +270,10 @@ test('tgz route returns 413 before spawning', async (t) => {
   assert.equal(spawned, 0)
 })
 
+// The single-file route no longer has a preflight to abort: validation and bytes
+// are one remote execution, so there is no metadata pass that could approve one
+// object while a second resolution serves another. The archive still has a
+// manifest preflight, and it is the same guarantee being asserted here.
 test('disconnect during preflight aborts the read and never starts a stream child', async (t) => {
   let resolveRead
   let seenSignal
@@ -287,7 +291,7 @@ test('disconnect during preflight aborts the read and never starts a stream chil
   const { server, port } = await listen((req, res) => { void handlers.prefixHandler(req, res) })
   t.after(() => close(server))
 
-  const client = request({ hostname: '127.0.0.1', port, path: `/fleet/artifact/file?host=fake&run=${runId}&path=report.md` })
+  const client = request({ hostname: '127.0.0.1', port, path: `/fleet/artifact/tgz?host=fake&run=${runId}` })
   const disconnected = new Promise((resolve) => {
     client.on('error', resolve)
     client.on('close', resolve)
@@ -298,11 +302,35 @@ test('disconnect during preflight aborts the read and never starts a stream chil
   client.destroy()
   await disconnected
   await Promise.race([aborted, new Promise((resolve) => setTimeout(resolve, 1000))])
-  resolveRead({ ok: true, out: `OK\t1\t${text.length}\n`, err: '', code: 0 })
+  resolveRead({ ok: true, out: `S\t1\t${text.length}\n`, err: '', code: 0 })
   await new Promise((resolve) => setImmediate(resolve))
   assert.equal(seenSignal.aborted, true)
   assert.equal(spawned, 0)
 })
+
+test('a single-file request makes exactly one remote execution and no metadata pass', async (t) => {
+  let reads = 0
+  const commands = []
+  const handlers = handlersWith({
+    sshRead: async () => { reads += 1; return { ok: true, out: '', err: '', code: 0 } },
+    spawnSsh: (_host, command) => { commands.push(command); return spawn('/bin/sh', ['-c', command], { stdio: ['ignore', 'pipe', 'pipe'] }) },
+  })
+  const { server, port } = await listen((req, res) => { void handlers.prefixHandler(req, res) })
+  t.after(() => close(server))
+
+  const file = await requestBody(port, `/fleet/artifact/file?host=fake&run=${runId}&path=nested%2Fpayload.bin`)
+  assert.equal(file.status, 200)
+  assert.deepEqual(file.body, binary)
+  assert.equal(reads, 0, 'no separate probe may resolve the path a second time')
+  assert.equal(commands.length, 1)
+  assert.equal(commands[0].includes('cat <&3'), true, 'the bytes come from the descriptor that was validated')
+})
+
+// Every injected child below must open with the stream protocol's status line,
+// because the route deliberately withholds HTTP headers until the remote has
+// declared a verdict. Bytes that are already on the wire cannot be recalled, so
+// a 200 is only ever committed after the remote says the read was validated.
+const OK_LINE = 'AGOS-ART\tOK\t7\t1\n'
 
 test('client disconnect kills the injected ssh stream', async (t) => {
   let killedWith = null
@@ -313,7 +341,7 @@ test('client disconnect kills the injected ssh stream', async (t) => {
       super()
       this.stdout = new PassThrough()
       this.stderr = new PassThrough()
-      setImmediate(() => this.stdout.write('x'))
+      setImmediate(() => this.stdout.write(`${OK_LINE}x`))
     }
     kill(signal) { killedWith = signal; resolveKilled(); this.emit('close', null); return true }
   }
@@ -339,7 +367,7 @@ test('a stream error after headers destroys the response and reports only scrubb
       this.stdout = new PassThrough()
       this.stderr = new PassThrough()
       setImmediate(() => {
-        this.stdout.write('partial')
+        this.stdout.write(`${OK_LINE}partial`)
         setImmediate(() => this.stdout.emit('error', new Error('Bearer secret-stream-token')))
       })
     }
@@ -367,6 +395,42 @@ test('a stream error after headers destroys the response and reports only scrubb
   assert.doesNotMatch(reports[0].error, /secret-stream-token/)
 })
 
+test('a refusal declared before the first byte is a status code, never a destroyed 200', async (t) => {
+  const cases = [
+    ['AGOS-ART\tERR\tNOT_FOUND\tmissing\n', 404, /artifact not found/],
+    ['AGOS-ART\tERR\tTAMPER\thard-links\n', 409, /artifact refused: hard-links/],
+    ['AGOS-ART\tERR\tCAPABILITY\tcannot-stat-open-descriptor\n', 500, /remote cannot guarantee descriptor-bound/],
+    // No verdict at all: the remote died before deciding, which is a gateway
+    // failure and must not be reported as a successful empty artifact.
+    ['', 502, /artifact stream failed/],
+  ]
+  for (const [line, expected, matcher] of cases) {
+    const reports = []
+    class Child extends EventEmitter {
+      constructor() {
+        super()
+        this.stdout = new PassThrough()
+        this.stderr = new PassThrough()
+        setImmediate(() => {
+          // A refusing command must not emit artifact bytes, but even if one did
+          // they could not reach the client: the status line is read first.
+          this.stdout.end(line)
+          setImmediate(() => this.emit('close', 0))
+        })
+      }
+      kill() { return true }
+    }
+    const handlers = handlersWith({ spawnSsh: () => new Child(), onStreamError: (entry) => reports.push(entry) })
+    const { server, port } = await listen((req, res) => { void handlers.prefixHandler(req, res) })
+    const result = await requestBody(port, `/fleet/artifact/file?host=fake&run=${runId}&path=report.md`)
+    await close(server)
+    assert.equal(result.status, expected, line || '(no status line)')
+    assert.match(JSON.parse(result.body).error, matcher)
+    assert.equal(result.headers['content-disposition'], undefined, 'a refusal never carries download headers')
+    assert.equal(reports.length, 1)
+  }
+})
+
 test('stdout EOF waits for ssh close so a later non-zero exit still truncates the response', async (t) => {
   class NonzeroChild extends EventEmitter {
     constructor() {
@@ -374,7 +438,7 @@ test('stdout EOF waits for ssh close so a later non-zero exit still truncates th
       this.stdout = new PassThrough()
       this.stderr = new PassThrough()
       setImmediate(() => {
-        this.stdout.end('partial')
+        this.stdout.end(`${OK_LINE}partial`)
         this.stderr.end('remote tar failed')
         setImmediate(() => this.emit('close', 7))
       })

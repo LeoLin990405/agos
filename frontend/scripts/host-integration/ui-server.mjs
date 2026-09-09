@@ -32,8 +32,11 @@ import { FRONTEND_ROOT } from './host-env.mjs';
  * @param options - ui port and the live host handle to relay to.
  * @returns the server handle with its origin and disposer.
  */
-export async function startUiServer({ uiPort, host }) {
+export async function startUiServer({ uiPort, host, register }) {
   const cacheDir = await mkdtemp(path.join(tmpdir(), 'agos-host-integration-vite-'))
+  // The cache directory exists before anything else can fail, so hand it over
+  // now rather than only on the success path.
+  register?.('ui-cache-dir', () => rm(cacheDir, { recursive: true, force: true }))
   const target = host.base
   const attach = (proxyReq) => {
     // The fence compares Origin against Host, and the session cookie is bound
@@ -71,13 +74,15 @@ export async function startUiServer({ uiPort, host }) {
     },
   })
 
+  const stop = async () => {
+    try { await server.close() } finally { await rm(cacheDir, { recursive: true, force: true }) }
+  }
+  // Registered BEFORE listen: a bind that half-succeeds still leaves a server
+  // object holding the port, and the caller must be able to release it.
+  register?.('ui-server-listener', stop)
+
   await server.listen()
   const origin = `http://127.0.0.1:${uiPort}`
 
-  return {
-    origin,
-    async stop() {
-      try { await server.close() } finally { await rm(cacheDir, { recursive: true, force: true }) }
-    },
-  }
+  return { origin, stop }
 }

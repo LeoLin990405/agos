@@ -15,18 +15,25 @@
 // 默认不读私有语料、不带任何供应商密钥(lib/exec.mjs neutralEnv:语料变量指向不存在的临时路径)。
 //
 // 用法:
-//   node scripts/acceptance/run-acceptance.mjs                       # 插件代码闸 + 漂移(advisory)
+//   node scripts/acceptance/run-acceptance.mjs                       # 插件代码闸 + 自检 + 依赖树校验 + 漂移(advisory)
 //   node scripts/acceptance/run-acceptance.mjs --with-frontend       # 加上 frontend npm run verify
 //   node scripts/acceptance/run-acceptance.mjs --plan=<file.json>    # 自定义计划(A4 自检用)
 //   node scripts/acceptance/run-acceptance.mjs --no-advisory         # 不跑漂移检查
+//   node scripts/acceptance/run-acceptance.mjs --print-plan          # 只打印计划(**退 78**,永远不能被当成通过)
 //   node scripts/acceptance/run-acceptance.mjs --json=<out> --logdir=<dir>
+//
+// 可测性接缝(仅自检用;一旦使用,本次运行就被标记 authoritative:false 并大声打印):
+//   --required-plugins=<csv>   覆盖必需套件清单
+//   --plugins-root=<dir>       覆盖套件根目录(默认 <repo>/plugins)
+//   --selftest-file=<path>     覆盖自检文件(防递归探针用)
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, relative, resolve, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { REPO_ROOT, runCommand, parseNodeTestCounts, detectMissingModules, neutralEnv, verdictOf, isGreen, sha256 } from './lib/exec.mjs'
 
 const HERE = dirname(new URL(import.meta.url).pathname)
-const PLUGINS = ['dsh-agos', 'dsh-agos-router', 'dsh-mcp-bridge', 'cn-capabilities', 'dsh-fleet']
+/** 必需套件清单。少一个都不许从计划里消失(见 defaultPlan 的结构性失败)。 */
+const REQUIRED_PLUGINS = ['dsh-agos', 'dsh-agos-router', 'dsh-mcp-bridge', 'cn-capabilities', 'dsh-fleet']
 
 const args = process.argv.slice(2)
 const flag = (n) => args.includes(`--${n}`)
@@ -34,10 +41,36 @@ const opt = (n, d) => { const h = args.find((a) => a.startsWith(`--${n}=`)); ret
 const planPath = opt('plan', null)
 const withFrontend = flag('with-frontend')
 const noAdvisory = flag('no-advisory')
+const printPlanOnly = flag('print-plan')
 const logDir = resolve(opt('logdir', join(tmpdir(), 'agos-acceptance-logs')))
 const jsonOut = opt('json', null)
 const surfaceOverride = opt('surface', null)   // A4 自检注入合成依赖面用
 const floorsPath = opt('floors', join(HERE, 'expected-counts.json'))
+
+// ---- 可测性接缝 ----
+// 自检要验证 defaultPlan 的结构性判定(整包缺失/空目录/缺基线条目),就必须能把默认计划
+// 指向合成的套件树 —— 否则那些负控只能靠"静态读源码"证明,而那不算证明运行行为。
+// 代价是这三个开关本身是绕过手段,所以:用了就把整次运行标成 authoritative:false、
+// 大声打印、并写进 JSON;宿主依赖体检也一并跳过(合成运行本来就不代表真实环境)。
+const pluginsOverride = opt('required-plugins', null)
+const pluginsRootOverride = opt('plugins-root', null)
+const selftestFileOverride = opt('selftest-file', null)
+// --surface 也算:注入合成依赖面等于关掉包级预检,这件事同样不该静默。
+const SYNTHETIC = pluginsOverride !== null || pluginsRootOverride !== null || selftestFileOverride !== null || surfaceOverride !== null
+const PLUGINS = pluginsOverride === null
+	? REQUIRED_PLUGINS
+	: pluginsOverride.split(',').map((s) => s.trim()).filter(Boolean)
+const PLUGINS_ROOT = resolve(pluginsRootOverride ?? join(REPO_ROOT, 'plugins'))
+const SELFTEST_FILE = resolve(selftestFileOverride ?? join(HERE, 'selftest.mjs'))
+
+/**
+ * 防递归哨兵。正式门的默认计划里含自检(见 defaultPlan),而自检的每条负控都会把验收器
+ * 当子进程再跑一遍 —— 如果子进程的默认计划又含自检,就是无限递归。
+ * 约定:自检 spawn 验收器时置 AGOS_ACCEPTANCE_SELFTEST=1,验收器见到它就不把自检放进计划。
+ * 排除这件事**不静默**:终端打印 + JSON 里的 recursionGuard 都记下来。
+ */
+const SELFTEST_SENTINEL = 'AGOS_ACCEPTANCE_SELFTEST'
+const selftestSuppressed = process.env[SELFTEST_SENTINEL] === '1'
 /**
  * 计数下限基线:抓"删测试把闸弄绿"。
  *
@@ -52,38 +85,171 @@ const floorsPath = opt('floors', join(HERE, 'expected-counts.json'))
  * 现在:缺文件直接拒绝运行并给出重建命令。`--floors=none` 是**显式**的逃生阀
  * (首次引导基线时需要),它会打印一条醒目的「本次运行不设下限」并把该事实写进 JSON 输出,
  * 不能靠「文件恰好不在」这种沉默的方式获得同样的效果。
+ *
+ * ⚠️ 2026-09-09 补齐(外部核查者 Luna P1):原来只挡「文件不存在」。空文件会让 JSON.parse
+ * 抛未捕获异常(退 1、无诊断);`{}` 或缺 floors 字段会走 `?? {}` **静默变成没有任何下限**,
+ * 于是「把基线清空成 {}」和「删掉基线」等效 —— 而删基线已经被挡住了,清空却没有。
+ * 所以现在对基线做结构校验,任何一种不可用都带 reason code 退 78。
+ * 下限值必须 ≥ 1:`{minTests:0,minPass:0}` 与没有下限等价,同样是绕过。
  */
 const FLOORS_DISABLED = floorsPath === 'none'
 let FLOORS = {}
+
+function refuseFloors(reasonCode, lines) {
+	console.error(`❌ 计数下限基线不可用,拒绝运行(fail-closed):${reasonCode}`)
+	for (const l of lines) console.error(`   ${l}`)
+	console.error('   这道门抓的是「删测试/清空测试文件把闸弄绿」。基线缺席或失效时它抓不到任何东西,')
+	console.error('   而让它缺席/失效本身就是绕过它的手段,所以不能静默降级成告警。')
+	console.error('   重建(只能从全绿运行生成): node scripts/acceptance/run-acceptance.mjs --floors=none --write-floors=scripts/acceptance/expected-counts.json')
+	console.error('   明知无基线仍要跑(首次引导/临时诊断): 加 --floors=none')
+	process.exit(78)
+}
+
 if (!FLOORS_DISABLED) {
 	const fp = resolve(floorsPath)
-	if (!existsSync(fp)) {
-		console.error('❌ 计数下限基线缺失,拒绝运行(fail-closed)。')
-		console.error(`   期望文件: ${fp.startsWith(REPO_ROOT) ? relative(REPO_ROOT, fp) : fp}`)
-		console.error('   这道门抓的是「删测试/清空测试文件把闸弄绿」。基线缺席时它抓不到任何东西,')
-		console.error('   而缺席本身就是绕过它的手段,所以不能静默降级成告警。')
-		console.error('   重建(只能从全绿运行生成): node scripts/acceptance/run-acceptance.mjs --floors=none --write-floors=scripts/acceptance/expected-counts.json')
-		console.error('   明知无基线仍要跑(首次引导/临时诊断): 加 --floors=none')
-		process.exit(78)
+	const shown = fp.startsWith(REPO_ROOT) ? relative(REPO_ROOT, fp) : fp
+	if (!existsSync(fp)) refuseFloors('floors-missing-file', [`期望文件: ${shown}`, '文件不存在。'])
+	const raw = readFileSync(fp, 'utf8')
+	if (raw.trim() === '') refuseFloors('floors-empty-file', [`文件: ${shown}`, '文件是空的(0 字节或只有空白)。'])
+	let parsed = null
+	try {
+		parsed = JSON.parse(raw)
+	} catch (err) {
+		refuseFloors('floors-invalid-json', [`文件: ${shown}`, `JSON 解析失败: ${err.message}`])
 	}
-	FLOORS = JSON.parse(readFileSync(fp, 'utf8')).floors ?? {}
+	if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+		refuseFloors('floors-not-an-object', [`文件: ${shown}`, '顶层不是对象。'])
+	}
+	const f = parsed.floors
+	if (f === undefined || f === null || typeof f !== 'object' || Array.isArray(f)) {
+		refuseFloors('floors-missing-field', [`文件: ${shown}`, '缺少 `floors` 字段或它不是对象。以前这里会 `?? {}` 静默变成「没有任何下限」。'])
+	}
+	if (Object.keys(f).length === 0) {
+		refuseFloors('floors-empty-object', [`文件: ${shown}`, '`floors` 是空对象 —— 一个下限都没有,等于没有这道门。'])
+	}
+	for (const [id, entry] of Object.entries(f)) {
+		if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+			refuseFloors('floors-invalid-entry', [`文件: ${shown}`, `条目 ${id} 不是对象。`])
+		}
+		for (const k of ['minTests', 'minPass']) {
+			const v = entry[k]
+			if (!Number.isInteger(v) || v < 1) {
+				refuseFloors('floors-invalid-entry', [`文件: ${shown}`, `条目 ${id}.${k} = ${JSON.stringify(v)},必须是 ≥ 1 的整数(0 或缺失与「没有下限」等价,是绕过手段)。`])
+			}
+		}
+	}
+	FLOORS = f
+}
+
+/** 路径落在仓内就用相对路径(保持终端输出与以前一致),否则用绝对路径(合成套件根)。 */
+function gateCwd(absDir) {
+	const rel = relative(REPO_ROOT, absDir)
+	return rel !== '' && !rel.startsWith('..') ? rel : absDir
+}
+
+/**
+ * 结构性失败闸:必需的东西压根不在,所以**没有子进程可跑**,但闸里必须留下一条显式失败。
+ *
+ * ⚠️ 这是本轮修的核心缺陷(外部核查者 Luna 实测):原来 defaultPlan 对「test/ 目录不存在」
+ * 和「目录里没有 .mjs」都是 `continue` —— 于是「整个必需套件消失」变成「计划里没这一项」,
+ * 闸没有任何东西可抓。Luna 实测:把全部插件的 test/ 挪走,tests=0、green=true、exit 0。
+ * 现在缺席的必需套件会产出下面这条 verdict:'fail' 的条目,进 failedGates,让进程退非零。
+ */
+function structuralFailure(id, reason, detail) {
+	return { id, cwd: '.', argv: [], kind: 'structural', required: true, reason, detail }
+}
+
+/**
+ * 取某个必需套件的计数下限。
+ * 基线里**没有**这个套件的条目 → 结构性失败:一个没有下限的必需套件等于没被这道门保护,
+ * 而「往基线里少写一个条目」正是最省事的绕过方式(比删整个基线文件隐蔽得多)。
+ */
+function floorFor(id) {
+	if (FLOORS_DISABLED) return { minTests: null, minPass: null }
+	const f = FLOORS[id]
+	if (!f) return { missing: true }
+	return { minTests: f.minTests, minPass: f.minPass }
 }
 
 /** 默认计划:与 scripts/test-all.sh 同一个 glob(test/*.mjs),保证闸的范围一致。 */
 function defaultPlan() {
 	const codeGates = []
 	for (const p of PLUGINS) {
-		const dir = join(REPO_ROOT, 'plugins', p, 'test')
-		if (!existsSync(dir)) continue
+		const pluginDir = join(PLUGINS_ROOT, p)
+		const dir = join(pluginDir, 'test')
+		if (!existsSync(dir)) {
+			codeGates.push(structuralFailure(p, `missing-test-suite:${p}`,
+				`必需套件的 test/ 目录不存在(期望 ${gateCwd(dir)})。必需套件缺席是失败,不是"计划里少一项"。`))
+			continue
+		}
 		const files = readdirSync(dir).filter((f) => f.endsWith('.mjs')).sort()
-		if (files.length === 0) continue
-		const floor = FLOORS[p] ?? {}
-		codeGates.push({ id: p, cwd: `plugins/${p}`, argv: ['node', '--test', ...files.map((f) => join('test', f))], kind: 'node-test', required: true, minTests: floor.minTests ?? null, minPass: floor.minPass ?? null })
+		if (files.length === 0) {
+			codeGates.push(structuralFailure(p, `empty-test-suite:${p}`,
+				`必需套件的 test/ 目录存在但没有任何 .mjs(期望 ${gateCwd(dir)})。空套件是失败,不是"计划里少一项"。`))
+			continue
+		}
+		const floor = floorFor(p)
+		if (floor.missing) {
+			codeGates.push(structuralFailure(p, `missing-floor-entry:${p}`,
+				`计数下限基线里没有 ${p} 的条目 —— 这个必需套件没有下限保护,删测试抓不到。重建基线或补上该条目。`))
+			continue
+		}
+		codeGates.push({
+			id: p, plugin: p, cwd: gateCwd(pluginDir),
+			argv: ['node', '--test', ...files.map((f) => join('test', f))],
+			kind: 'node-test', required: true,
+			minTests: floor.minTests ?? null, minPass: floor.minPass ?? null,
+		})
 	}
 	if (withFrontend) {
-		const floor = FLOORS['frontend-verify'] ?? {}
-		codeGates.push({ id: 'frontend-verify', cwd: 'frontend', argv: ['npm', 'run', 'verify'], kind: 'node-test', required: true, minTests: floor.minTests ?? null, minPass: floor.minPass ?? null })
+		const floor = floorFor('frontend-verify')
+		if (floor.missing) {
+			codeGates.push(structuralFailure('frontend-verify', 'missing-floor-entry:frontend-verify',
+				'计数下限基线里没有 frontend-verify 的条目。'))
+		} else {
+			codeGates.push({ id: 'frontend-verify', cwd: 'frontend', argv: ['npm', 'run', 'verify'], kind: 'node-test', required: true, minTests: floor.minTests ?? null, minPass: floor.minPass ?? null })
+		}
 	}
+
+	// ---- 自检接进正式门(缺陷 3)----
+	// 上一轮 927 个测试全绿、而自检自己 14 项里 13 项失败,原因就是这里压根没接。
+	if (!selftestSuppressed) {
+		if (!existsSync(SELFTEST_FILE)) {
+			codeGates.push(structuralFailure('selftest', 'missing-selftest-file',
+				`自检文件不存在(期望 ${gateCwd(SELFTEST_FILE)})。验收器的负控自检缺席 = 没人证明验收器不会谎报成功。`))
+		} else {
+			const floor = floorFor('selftest')
+			if (floor.missing) {
+				codeGates.push(structuralFailure('selftest', 'missing-floor-entry:selftest',
+					'计数下限基线里没有 selftest 的条目 —— 删掉几条负控不会被抓到。'))
+			} else {
+				codeGates.push({
+					id: 'selftest', cwd: '.', argv: ['node', '--test', gateCwd(SELFTEST_FILE)],
+					kind: 'node-test', required: true,
+					minTests: floor.minTests ?? null, minPass: floor.minPass ?? null,
+				})
+			}
+		}
+	}
+
+	// ---- 隔离宿主依赖树的校验接进正式门 ----
+	// 这两个脚本是别人的文件,这里只**调用**它们的 CLI,不碰源码。
+	// 合成运行(--required-plugins/--plugins-root/--selftest-file)跳过:那种运行本来就不代表真实环境。
+	if (!SYNTHETIC) {
+		codeGates.push({
+			id: 'host-modules-check', cwd: '.',
+			argv: ['node', 'scripts/acceptance/prepare-host-modules.mjs', '--check'],
+			kind: 'command', required: true,
+			note: '只核验不安装:实测需要的裸包能不能从消费者角度解析。不就绪退 1。',
+		})
+		codeGates.push({
+			id: 'host-tree', cwd: '.',
+			argv: ['node', 'scripts/acceptance/verify-host-tree.mjs'],
+			kind: 'command', required: true,
+			note: '隔离宿主依赖树的逐字节内容校验:树的内容偏离「产出绿色结果的那份」就大声失败。',
+		})
+	}
+
 	const advisory = noAdvisory ? [] : [{
 		id: 'deploy-drift',
 		cwd: '.',
@@ -94,7 +260,27 @@ function defaultPlan() {
 	return { codeGates, advisory }
 }
 
+if (planPath === null && PLUGINS.length === 0) {
+	console.error('❌ 必需套件清单为空,拒绝运行(fail-closed):empty-required-plugins')
+	console.error('   --required-plugins= 把必需清单清空了。0 个必需套件的运行永远不能算通过。')
+	process.exit(78)
+}
+
 const plan = planPath ? JSON.parse(readFileSync(resolve(planPath), 'utf8')) : defaultPlan()
+
+if (printPlanOnly) {
+	console.log(JSON.stringify({ plan, syntheticSeams: SYNTHETIC, recursionGuard: { sentinel: SELFTEST_SENTINEL, active: selftestSuppressed, selftestGateIncluded: plan.codeGates.some((g) => g.id === 'selftest') } }, null, 2))
+	// 故意退非零:--print-plan 一个闸都没跑,任何 `... --print-plan && echo 通过` 都必须失败。
+	console.error('PLAN-ONLY:只打印了计划,没有运行任何闸 —— 退出码 78,确保它永远不会被当成"通过"。')
+	process.exit(78)
+}
+
+// 0 个代码闸的运行永远不能算通过(否则「让计划变空」就是最省事的假绿手段)。
+if (!Array.isArray(plan.codeGates) || plan.codeGates.length === 0) {
+	console.error('❌ 计划里没有任何代码闸,拒绝运行(fail-closed):empty-code-gates')
+	console.error('   一个闸都不跑的运行不是"全过",是"什么都没验"。')
+	process.exit(78)
+}
 
 /** 依赖面体检:实测需要的包,从消费者角度能不能解析。 */
 function preflight() {
@@ -149,13 +335,35 @@ if (pre.available) {
 }
 console.log(`   计数下限基线: ${FLOORS_DISABLED
 	? '⚠️  已用 --floors=none 显式关闭 —— 本次运行不设下限,删测试抓不到'
-	: `${Object.keys(FLOORS).length} 个闸有下限(抓删测试;缺基线文件会 fail-closed 退 78)`}`)
+	: `${Object.keys(FLOORS).length} 个闸有下限(抓删测试;缺基线文件/空基线/坏 JSON 都 fail-closed 退 78)`}`)
+console.log(`   自检闸: ${selftestSuppressed
+	? `⚠️  已被防递归哨兵 ${SELFTEST_SENTINEL}=1 排除 —— 本进程是自检自己 spawn 的子进程,不能再把自检放进计划`
+	: plan.codeGates.some((g) => g.id === 'selftest') ? '在计划里(node --test scripts/acceptance/selftest.mjs)' : '不在计划里(自定义 --plan)'}`)
+if (SYNTHETIC) {
+	console.log('   ⚠️  合成运行:必需套件清单/根/自检文件被 --required-plugins / --plugins-root / --selftest-file 覆盖。')
+	console.log('       本次结果 authoritative=false,不代表真实仓库状态;宿主依赖体检已跳过。')
+}
 console.log('')
 
 function runGate(gate, channel) {
 	const cwd = resolve(REPO_ROOT, gate.cwd)
 	const logPath = join(logDir, `${gate.id}.txt`)
-	const plugin = gate.cwd.startsWith('plugins/') ? gate.cwd.slice('plugins/'.length) : null
+	const plugin = gate.plugin ?? (gate.cwd.startsWith('plugins/') ? gate.cwd.slice('plugins/'.length) : null)
+
+	// 结构性失败:必需的东西压根不在,没有子进程可跑,但必须留下一条显式失败(不许从计划里消失)。
+	if (gate.kind === 'structural') {
+		const msg = [`structural-failure: ${gate.id}: ${gate.reason}`, `  ${gate.detail ?? ''}`].join('\n')
+		mkdirSync(dirname(logPath), { recursive: true })
+		writeFileSync(logPath, msg + '\n')
+		console.log(`▸ ${gate.id}: ❌ FAIL (${gate.reason})`)
+		console.log(`     原因: ${gate.detail ?? gate.reason}`)
+		return {
+			id: gate.id, channel, cwd: gate.cwd, argv: gate.argv, exitCode: 78, durationSeconds: 0,
+			counts: null, verdict: 'fail', reason: gate.reason, structural: true,
+			missingModules: [], required: gate.required !== false,
+			log: relative(REPO_ROOT, logPath), logSha256: sha256(msg + '\n'), summary: [msg],
+		}
+	}
 
 	// 预检拦截:实测需要的包缺了 → 直接判失败并说清缺什么,绝不跑成"跳过"。
 	const missingForPlugin = plugin && pre.blockedPlugins[plugin] ? pre.blockedPlugins[plugin] : null
@@ -175,11 +383,22 @@ function runGate(gate, channel) {
 		}
 	}
 
-	const r = runCommand({ argv: gate.argv, cwd, env, logPath, timeoutMs: gate.timeoutMs ?? 900000 })
+	const timeoutMs = gate.timeoutMs ?? 900000
+	const r = runCommand({ argv: gate.argv, cwd, env, logPath, timeoutMs })
 	const counts = gate.kind === 'node-test' ? parseNodeTestCounts(r.output) : null
 	const v = gate.kind === 'node-test'
 		? verdictOf({ exitCode: r.exitCode, counts, spawnError: r.spawnError, minTests: gate.minTests ?? null, minPass: gate.minPass ?? null })
 		: { verdict: r.exitCode === 0 ? 'pass' : 'fail', reason: r.exitCode === 0 ? 'ok' : `nonzero-exit:${r.exitCode}` }
+
+	// 超时必须**看得出来是超时**。spawnSync 到点发 SIGTERM,而 node --test 会接住信号、
+	// 自己退 1 —— 于是 res.status 是 1、res.signal 是 null,超时长得和一次普通失败一模一样
+	// (实测:dsh-fleet 跑 900.02s 后报 `exit 1`,reason 只写 nonzero-exit:1)。
+	// 判定不变(超时就是失败,绝不放绿、绝不提高超时),但诊断要说实话:被砍了 ≠ 断言失败。
+	if (r.durationSeconds * 1000 >= timeoutMs - 100) {
+		v.reason = `timeout-after:${timeoutMs}ms (真实退出码 ${r.exitCode};子进程可能把 SIGTERM 转成了普通退出码,别把它读成断言失败)`
+		if (v.verdict === 'pass') v.verdict = 'fail'   // 恰好在超时点退 0 也不算过
+	}
+	const timedOut = r.durationSeconds * 1000 >= timeoutMs - 100
 	const summary = r.output.split('\n').filter((l) => /^(?:ℹ|info)\s+(tests|pass|fail|cancelled|skipped|todo)\s+\d+|零漂移|漂移 \d+|verified:|✅|⚠️|❌/.test(l.trim())).slice(0, 40)
 
 	const label = channel === 'advisory' ? 'ADVISORY' : v.verdict.toUpperCase()
@@ -191,7 +410,7 @@ function runGate(gate, channel) {
 
 	return {
 		id: gate.id, channel, cwd: gate.cwd, argv: gate.argv, exitCode: r.exitCode,
-		durationSeconds: r.durationSeconds, counts, verdict: v.verdict, reason: v.reason,
+		durationSeconds: r.durationSeconds, timeoutMs, timedOut, counts, verdict: v.verdict, reason: v.reason,
 		missingModules: detectMissingModules(r.output), required: gate.required !== false,
 		log: relative(REPO_ROOT, logPath), logSha256: sha256(readFileSync(logPath)), summary,
 		note: gate.note ?? null,
@@ -220,11 +439,28 @@ const out = {
 	repoRoot: REPO_ROOT,
 	gitHead: runCommand({ argv: ['git', 'rev-parse', 'HEAD'], cwd: REPO_ROOT, timeoutMs: 20000 }).output.trim(),
 	gitDirty: runCommand({ argv: ['git', 'status', '--porcelain'], cwd: REPO_ROOT, timeoutMs: 20000 }).output.trim().split('\n').filter(Boolean).length,
+	// 合成接缝一旦用过,本次结果就不代表真实仓库状态。这个事实必须在 JSON 里,不能只在终端。
+	authoritative: !SYNTHETIC,
+	syntheticSeams: SYNTHETIC ? { requiredPlugins: pluginsOverride, pluginsRoot: pluginsRootOverride, selftestFile: selftestFileOverride } : null,
+	requiredPlugins: PLUGINS,
+	recursionGuard: {
+		sentinel: SELFTEST_SENTINEL,
+		active: selftestSuppressed,
+		selftestGateIncluded: plan.codeGates.some((g) => g.id === 'selftest'),
+		note: '自检 spawn 验收器时置哨兵=1,验收器据此不把自检放进计划。排除自检这件事不静默:见 active 字段。',
+	},
 	environment: {
 		node: process.version, platform: process.platform,
 		corpusDir: env.SESSION_MEMORY_CORPUS_DIR,
 		corpusDirExists: existsSync(env.SESSION_MEMORY_CORPUS_DIR),
 		providerKeysCleared: ['Z_AI_API_KEY', 'GLM_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY'],
+		// 嵌套 node --test 卫生:验收器**自己**是否被 node --test 的上下文污染。
+		// 自检是 `node --test` 跑的、又要 spawn 验收器,若把 NODE_TEST_CONTEXT 传下来,
+		// 孙子进程的 node --test 会"skipping running files"、一个测试不跑却退 0 —— 最危险的假绿。
+		// lib/exec.mjs neutralEnv 会为**子进程**剔除它;这两个字段记录**本进程**收到了什么,
+		// 让自检能钉住「spawn 验收器时也已经清干净」。
+		nodeTestContext: process.env.NODE_TEST_CONTEXT ?? null,
+		nodeOptions: process.env.NODE_OPTIONS ?? null,
 	},
 	preflight: pre,
 	codeGate: {
@@ -255,6 +491,13 @@ if (writeFloors) {
 	if (codeGateExit !== 0) {
 		console.error('   ❌ --write-floors 拒绝执行:本次运行不是全绿,不能把红状态固化成基线。')
 		process.exit(codeGateExit)
+	}
+	// 合成运行是绿的没有任何意义:一棵 /tmp 里的假套件树也能全绿,而它写出的基线只含假套件,
+	// 等于把真基线换成一份不设防的清单。可测性接缝不许变成"洗基线"的通道。
+	if (SYNTHETIC) {
+		console.error('   ❌ --write-floors 拒绝执行:本次是合成运行(用了 --required-plugins/--plugins-root/--selftest-file/--surface)。')
+		console.error('      合成套件树全绿不代表任何东西,用它写基线等于把真基线换成一份不设防的清单。')
+		process.exit(78)
 	}
 	const floors = {}
 	for (const r of codeResults) {

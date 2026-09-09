@@ -10,8 +10,9 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
-  ARTIFACT_DIR, claimPorts, makeTempRoots, redact, removeTemp,
+  ARTIFACT_DIR, claimPorts, redact,
 } from './host-env.mjs';
+import { createRunRoot, disposeRunRoot } from './run-registry.mjs';
 import { startHost } from './start-host.mjs';
 
 const findings = []
@@ -89,7 +90,9 @@ function openStream(host, endpoint, args) {
   }
 }
 
-const roots = await makeTempRoots()
+// One owned run root: its manifest is what lets `cleanup.mjs` tell an orphan
+// left by a crashed probe from a suite that is still running.
+const roots = await createRunRoot()
 const [hostPort, uiPort] = await claimPorts(2)
 const controlFile = path.join(roots.dshHome, 'fake-control.json')
 await writeFile(controlFile, JSON.stringify({ toolLabel: 'probe-action' }) + '\n')
@@ -99,7 +102,17 @@ const logPath = path.join(ARTIFACT_DIR, 'probe-host.log')
 let host
 let exitCode = 1
 try {
-  host = await startHost({ ...roots, hostPort, uiPort, controlFile, logPath })
+  host = await startHost({
+    dshHome: roots.dshHome,
+    workspace: roots.workspace,
+    hostPort,
+    uiPort,
+    controlFile,
+    logPath,
+    runDir: roots.runDir,
+    runId: roots.runId,
+    ownerToken: roots.ownerToken,
+  })
   note(true, 'real pinned host booted on an isolated DSH_HOME', `${host.command} (cwd=${roots.workspace})`)
 
   const list = await unary(host, 'session/list', { _request: {} })
@@ -178,8 +191,7 @@ try {
     path.join(ARTIFACT_DIR, 'probe-host-findings.json'),
     JSON.stringify({ findings, hostPort, uiPort, at: new Date().toISOString() }, undefined, 2) + '\n',
   )
-  await removeTemp(roots.dshHome)
-  await removeTemp(roots.workspace)
+  await disposeRunRoot(roots)
 }
 
 console.log(`\n${findings.filter((f) => f.ok).length}/${findings.length} probe checks passed`)

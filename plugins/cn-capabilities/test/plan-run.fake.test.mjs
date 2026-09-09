@@ -17,6 +17,21 @@ const PLAN_DIR = process.env.DSH_CN_PLAN_DIR
 
 // ⚠️ env 必须在 import 之前设好:PLAN_DIR 在 apply() 时读一次
 const { apply, ownSessionEvents, snapshotSessionEvents } = await import('../lib/index.js')
+const { resolveSwarmModule, SWARM_OPT_IN_ENV } = await import('../../dsh-agos/lib/swarm-host-integration.mjs')
+
+// swarm 是**宿主环境集成**而非本仓依赖(为什么:见 dsh-agos/lib/swarm-host-integration.mjs
+// 的模块注释,registry 版不导出 runNormalizedBatch,且自身导入 installSettingsSection
+// 会把整棵依赖树拖回 peer 冲突,于是 npm ci 无法复现)。
+//
+// 下面四条 A4 系检查的立意是**真调度器**的分波行为(见文首第 2 行),打桩替代就不再是
+// 这条检查 —— 所以干净依赖树里解析不到 swarm 时,如实标成 blocked 并点名开启方式,
+// 既不假装通过,也不让它从计划里静默消失。本机跑满覆盖:把 AGOS_SWARM_MODULE 指向
+// 一份可用的 swarm 模块(实测 12/12 exit 0)。
+const swarmProbe = await resolveSwarmModule()
+const SWARM_BLOCKED = swarmProbe.available
+  ? false
+  : `未覆盖(blocked):本检查需要真实 swarm 调度器,当前不可用。${swarmProbe.reason}`
+  + ` 设 ${SWARM_OPT_IN_ENV} 指向一份可用 swarm 即可恢复覆盖。`
 
 // ── 假子代理:swarm 调度器的 spawnOneShot 与本插件的 runPanelist 都走 subagents.start('spawn', {...}) ──
 function fakeSubagents(script) {
@@ -257,7 +272,7 @@ test('A3: exit_plan_mode 批准 → dsh-plan 块落盘;拒绝 / 无块 / 重复�
   assert.equal(listPlans().length, before + 1)
 })
 
-test('A4: plan_run approve=true(plan JSON 直传)→ 复用 A3 落的文件 → 两波执行 → 上游注入 → 验收 → 写回 → XML/presentationMeta', async () => {
+test('A4: plan_run approve=true(plan JSON 直传)→ 复用 A3 落的文件 → 两波执行 → 上游注入 → 验收 → 写回 → XML/presentationMeta', { skip: SWARM_BLOCKED }, async () => {
   // 上一个 test 已经把同一份 STEPS 落成 plan-*.json 且未执行 → 这里应复用它,不新建
   const filesBefore = listPlans()
   assert.ok(filesBefore.length >= 1)
@@ -331,7 +346,7 @@ test('A4: plan_run approve=true(plan JSON 直传)→ 复用 A3 落的文件 → 
   assert.match(out, new RegExp('file="' + file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '"'))
 })
 
-test('A4: 裸 JSON 即使 approve 也只落盘;planFile 批准后执行并记录依赖校验', async () => {
+test('A4: 裸 JSON 即使 approve 也只落盘;planFile 批准后执行并记录依赖校验', { skip: SWARM_BLOCKED }, async () => {
   const sub = fakeSubagents(async (rec) => (rec.label.startsWith('council:') ? '验收:部分达成。' : '产出 ' + rec.label))
   const { ctx, tools } = fakeCtx({ subagents: sub })
   apply(ctx)
@@ -451,7 +466,7 @@ test('production council malformed arbiter structure renders inconclusive rather
   assert.equal(saved.consensus, false)
 })
 
-test('plan execution never writes old results over steps edited during execution', async () => {
+test('plan execution never writes old results over steps edited during execution', { skip: SWARM_BLOCKED }, async () => {
   mkdirSync(PLAN_DIR, { recursive: true })
   const file = join(PLAN_DIR, 'plan-9100000000001.json')
   writeFileSync(file, JSON.stringify({ sessionId: 'changed-plan', steps: STEPS }))
@@ -474,7 +489,7 @@ test('plan execution never writes old results over steps edited during execution
   assert.equal(after.results, undefined)
 })
 
-test('missing plan at writeback preserves returned execution results and reports persistence failure', async () => {
+test('missing plan at writeback preserves returned execution results and reports persistence failure', { skip: SWARM_BLOCKED }, async () => {
   const file = join(PLAN_DIR, 'plan-9100000000002.json')
   writeFileSync(file, JSON.stringify({ sessionId: 'deleted-plan', steps: STEPS }))
   let removed = false

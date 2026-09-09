@@ -1,6 +1,26 @@
 #!/usr/bin/env node
 // A1:实测每个插件测试套件的真实依赖面,不靠猜。
 //
+// ⚠️ 这份产物**不能**用来证明「依赖面完整」(R3 降级说明,原为 P1 缺陷)。
+//
+// 原因是方法本身的:本脚本靠**运行时观测** —— 跑 node --test,看它报哪个包找不到。
+// 而 Node 遇到模块图里**第一个**未解析说明符就抛 ERR_MODULE_NOT_FOUND 退出,
+// 后面的说明符压根没被求值过。所以每个套件每轮只暴露**一个**缺包:
+// dsh-fleet 因此只留下 @deepseek-ai/schemastery 一条记录,而它在模块层还需要
+// dsh-tools、dsh-llm 等(实测:静态全图 8 个包,本方法只观测到 2 个)。
+// 后果:曾让 prepare-host-modules.mjs --check 在「套件其实都加载不了」的机器上
+// 报「依赖面就绪」并 exit 0(HANDOFF.md:169/176 已记录,本轮已修)。
+//
+// 权威的完整依赖面改由**静态导入图**给出:
+//   scripts/acceptance/lib/import-graph.mjs + prepare-host-modules.mjs --check
+// 从各插件入口递归跟随相对导入,一次拿到全部裸说明符,不需要「跑一次修一个」的迭代。
+//
+// 本脚本仍然有独立价值,但价值不在「列全依赖」:
+//   · 它区分「缺包」与「依赖 ~/.dsh 下的绝对路径」—— 后者装包解决不了,静态图看不出来;
+//   · 它给出每个套件在真实环境里的**通过/失败**事实与日志;
+//   · 它用 Seatbelt 拒读来模拟缺失,非破坏性,不动其他实现者的依赖树。
+// 换句话说:本脚本能**证伪**(某套件确实跑不起来),不能**证全**(依赖就这些)。
+//
 // 两种模式各跑一遍每个套件文件:
 //   natural  —— 仓里零 node_modules(当前真实状态),宿主 profile 可读
 //   shielded —— 同上,外加 macOS Seatbelt 拒读/拒写 ~/.dsh
@@ -189,6 +209,10 @@ const manifest = {
 	},
 	method: {
 		note: 'Dependency trees are NOT removed to measure — other implementers may own them. Absence is simulated with macOS Seatbelt read-denial, which is non-destructive and reproducible regardless of what is installed.',
+		// 机读版的能力边界声明,防止下游把这份清单当成「完整依赖面」使用。
+		proves: 'Per-suite pass/fail in the real environment, and whether a suite needs absolute paths under ~/.dsh (which installing packages cannot fix).',
+		doesNotProve: 'NOT a complete dependency surface. Node aborts at the FIRST unresolved specifier in the module graph, so each suite reveals at most one missing package per run. The authoritative complete surface comes from static import-graph traversal: scripts/acceptance/lib/import-graph.mjs via `prepare-host-modules.mjs --check`.',
+		authoritativeSurface: 'scripts/acceptance/prepare-host-modules.mjs --check (static import graph)',
 		modes: {
 			natural: 'node --test test/<file> in the plugin cwd, no sandbox — the environment exactly as it is',
 			'no-dsh': 'same, wrapped in /usr/bin/sandbox-exec denying read+write of ~/.dsh',

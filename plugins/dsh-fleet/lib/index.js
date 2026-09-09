@@ -19,7 +19,7 @@ import { chmodSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { publishProgress, parseResultsXml, escapeXml, textOf } from 'dsh-kimicode-swarm'
+import { parseResultsXml, escapeXml, textOf, resolveProgressPublisher } from './fleet-swarm-compat.mjs'
 import { createFleetLedger, scrubSecrets } from './fleet-ledger.mjs'
 import { createFleetRuntime, TERMINAL_RUN_STATUSES } from './fleet-runtime.mjs'
 import { registerFleetDispatchRoutes } from './fleet-dispatch.mjs'
@@ -39,6 +39,9 @@ import { probeLocalRun } from './local-probe.mjs'
 
 const name = '@dsh-local/fleet'
 const inject = ['tools', 'subagents', 'commands', 'systemPrompt']
+
+/** 进度通路不可用只警告一次:一个会话里可能跑几十批 fleet,每批一行会淹掉日志。 */
+let PROGRESS_UNAVAILABLE_WARNED = false
 
 const DEFAULT_HOSTS = [
   // kind:'local' = 本机进程内子代理;kind:'codex' = 本机 Codex SDK;kind:'remote' = ssh worker。
@@ -731,7 +734,16 @@ function apply(ctx, config, dependencies = {}) {
         if (args.tag) hs = hs.filter((h) => (h.tags || []).includes(String(args.tag)))
         if (!hs.length) throw new Error(scrubSecrets('没有可用的机(预检:' + [...HEALTH.entries()].map(([n, v]) => n + '=' + (v.ok ? 'ok' : (v.error || 'down'))).join(', ') + ')'))
         const parentSessionId = exec.agent?.session?.id ?? exec.agent?.id
-        const publish = (rows) => publishProgress(exec.callId, rows, parentSessionId)
+        // 进度发布是**跨插件**集成:写的是 swarm 模块级的 PROGRESS,由 swarm 自己的
+        // /api/swarm/progress 路由喂前端(frontend/src/stores/live.ts:689 消费 calls)。
+        // 真实宿主上 swarm 是同级插件,必然解析得到,行为与拆解前一致;干净依赖树里
+        // 解析不到就**显式**警告一次,而不是静默丢进虚空 —— 见 fleet-swarm-compat.mjs。
+        const progress = await resolveProgressPublisher()
+        if (!progress.available && !PROGRESS_UNAVAILABLE_WARNED) {
+          PROGRESS_UNAVAILABLE_WARNED = true
+          console.warn('[fleet] 批次进度不会发布到 /api/swarm/progress:' + progress.reason)
+        }
+        const publish = (rows) => progress.publish(exec.callId, rows, parentSessionId)
         ;({ results } = await scheduleAcross(tasks, hs, exec, publish, batchSignal, {
           origin: 'tool',
           label: ('fleet ×' + tasks.length + ' · ' + goal).slice(0, 120),

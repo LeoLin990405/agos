@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, extname, join, sep } from 'node:path'
 import { formatCodexBarUsage, readCodexBarUsage } from './usage.mjs'
 import { composeOptimizeAgentPrompt, composePlanAppendix } from '../../dsh-agos/lib/agent-prompts.js'
+import { resolveSwarmModule } from '../../dsh-agos/lib/swarm-host-integration.mjs'
 import { buildCouncilReviewRecord, councilReviewVerdict } from './council-record.js'
 import { parseCouncilVerdict, evaluateCouncilStructure } from './council-parse.mjs'
 import { PLAN_NAME, resolvePlanPath, openPlanFile } from './plan-path.mjs'
@@ -43,9 +44,17 @@ function ownSessionEvents(session) {
 // 与文首 webServer 那条教训同类(附加能力不该是全体工具的启动前提)。
 // 加载失败只让 plan_run 执行阶段报一条可读错误。两个插件经 node_modules 同一真实路径
 // 解析 → 同一个模块实例 → 进度表 PROGRESS 与分派表 CURRENT_CONFIG 都是共享的。
+// 2026-09-09 校正:swarm 不再是本仓的包依赖(它的 registry 版本不导出这里需要的
+// runNormalizedBatch,且自身导入 installSettingsSection 会把整棵依赖树拖回冲突)。
+// 定性改为**宿主环境集成**,解析策略集中在 swarm-host-integration.mjs;干净依赖树里
+// 解析不到属预期,plan_run 执行阶段照旧报一条可读错误(下方 catch),其余 21 个工具不受影响。
 let SWARM = null
 const loadSwarm = async () => {
-  if (SWARM === null) SWARM = await import('dsh-kimicode-swarm')
+  if (SWARM === null) {
+    const resolution = await resolveSwarmModule()
+    if (!resolution.available) throw new Error(resolution.reason)
+    SWARM = resolution.module
+  }
   return SWARM
 }
 // ⚠️ 这个 cordis 版本(4.0.1)的 inject **只认数组**,写成 { required, optional }

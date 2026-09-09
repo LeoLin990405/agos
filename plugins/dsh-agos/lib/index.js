@@ -29,6 +29,7 @@ import {
   loadSkillUsageCached,
 } from './skills-console.js'
 import { createSessionMemoryStore } from './session-memory.mjs'
+import { resolveSwarmModule } from './swarm-host-integration.mjs'
 import {
   bindSessionMemoryInject,
   describeSessionMemoryInject,
@@ -240,10 +241,15 @@ function overviewSkills() {
   }
 }
 async function overviewLineage() {
-  // 软 import swarm 的 PROGRESS(civ/fleet/plan_run 也发布到它);swarm 不在 → 缺席
+  // 软读 swarm 的 PROGRESS(civ/fleet/plan_run 也发布到它);swarm 不在 → 缺席。
+  // 2026-09-09:解析改走统一策略(swarm-host-integration.mjs) —— swarm 已从包依赖
+  // 重新定性为宿主环境集成,三个消费点(这里、fleet、cn-capabilities)共用同一份
+  // 解析与 opt-in 语义,不再各写一次 import。缺席仍是**返回 undefined**(概览里这一
+  // 节缺失),不是伪造零值:0 calls 与"没有这张表"在界面上意思完全不同。
   try {
-    const swarm = await import('dsh-kimicode-swarm')
-    const P = swarm.PROGRESS
+    const resolution = await resolveSwarmModule()
+    if (!resolution.available) return undefined
+    const P = resolution.module.PROGRESS
     if (!P || typeof P.entries !== 'function') return undefined
     let calls = 0, running = 0, rows = 0, failed = 0
     for (const [, v] of P) {
@@ -372,107 +378,182 @@ async function hostArchivedFromContext(ctx) {
 let selfOrigin
 
 /**
+ * 固定协议的会话列表方法名。
+ *
+ * ⚠️ 2026-09-09 校正:原来写的是 `/api/session.list` + method `session.list`(点号形式),
+ * 那是 **0.1.2 之前**的命名。frontend/UPSTREAM.pin 明确记着 0.1.2 传输层把点号改成了
+ * 斜杠(`session.history→session/page+follow`、`session.models→session/modelCatalog`),
+ * 本仓 vendored membrane 的权威映射也在 `frontend/src/contract/api/rpc-map.ts:18`:
+ * `'session/list': SessionsApi['list']`,响应 schema 在
+ * `frontend/src/contract/api/sessions.schema.ts:46`(SessionSummary 行)。
+ * 旧名字在固定宿主上得不到结果,于是运行态永远 unavailable → 删除永久 503。
+ */
+const SESSION_LIST_ROUTE = '/api/session/list'
+const SESSION_LIST_METHOD = 'session/list'
+
+/**
  * 运行态的 RPC 兜底。web profile 里 ctx 不公开 agents 服务(desktop 才有),
- * 而 `running` 的权威定义就是「attached agent 的状态」,由 session.list 暴露。
+ * 而 `running` 的权威定义就是「attached agent 的状态」,由 session/list 暴露:
+ * SessionSummary 行里恰有 `running: boolean`(见上面 schema 位置)。
  * 内调走本机 loopback,同源无 Origin 头 → 宿主信任栅栏放行(已实测)。
  */
-async function runningFromRpc(sessionId) {
-  if (!selfOrigin) return { available: false, running: false }
+export async function runningFromRpc(sessionId, deps = {}) {
+  // deps 只为测试注入 origin/fetch:这条内调此前零覆盖,host.describe 才能腐烂一整轮没人发现。
+  const origin = deps.selfOrigin !== undefined ? deps.selfOrigin : selfOrigin
+  const doFetch = typeof deps.fetch === 'function' ? deps.fetch : fetch
+  if (!origin) {
+    return { available: false, running: false, reason: '插件未取到自身 origin，无法内调 session/list' }
+  }
   try {
-    const response = await fetch(new URL('/api/session.list', selfOrigin), {
+    const response = await doFetch(new URL(SESSION_LIST_ROUTE, origin), {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'application/json' },
       body: JSON.stringify({
         type: 'client-request',
         rpcId: `agos-running-${Date.now().toString(36)}`,
-        method: 'session.list',
+        method: SESSION_LIST_METHOD,
         payload: {},
       }),
     })
-    if (!response.ok) return { available: false, running: false }
+    if (!response.ok) {
+      return {
+        available: false,
+        running: false,
+        reason: `${SESSION_LIST_ROUTE} 返回 HTTP ${response.status}`,
+      }
+    }
     const envelope = await response.json()
     const result = envelope && envelope.result
-    if (!result || result.ok !== true) return { available: false, running: false }
-    const items = result.value && Array.isArray(result.value.items) ? result.value.items : undefined
-    if (items === undefined) return { available: false, running: false }
-    const hit = items.find((item) => item && item.sessionId === sessionId)
-    // 列表里没有该 id:会话已不在宿主视野(冷会话/已移走),按「未运行」处理 —— 
-    // 这是 available 的,因为我们确实拿到了权威列表,不该再退回 503。
-    return { available: true, running: hit ? hit.running === true : false }
-  } catch {
-    return { available: false, running: false }
-  }
-}
-
-async function runningFromContext(ctx, sessionId) {
-  try {
-    const agents = ctx.agents ?? ctx.get('agents')
-    if (agents && typeof agents.get === 'function') {
-      return { available: true, running: agents.get(sessionId)?.status === 'running' }
+    if (!result || result.ok !== true) {
+      const code = result && result.error && result.error.code
+      return {
+        available: false,
+        running: false,
+        reason: `${SESSION_LIST_METHOD} 返回错误${code ? `：${code}` : ''}`,
+      }
     }
-  } catch {}
-  // desktop 组合走上面的 agents 服务;web profile 没有,落到 session.list 内调。
-  return runningFromRpc(sessionId)
+    const items = result.value && Array.isArray(result.value.items) ? result.value.items : undefined
+    if (items === undefined) {
+      return { available: false, running: false, reason: `${SESSION_LIST_METHOD} 响应缺少 items 数组` }
+    }
+    const hit = items.find((item) => item && item.sessionId === sessionId)
+    // 列表里没有该 id:会话已不在宿主视野(冷会话/已移走),按「未运行」处理 ——
+    // 这是 available 的,因为我们确实拿到了权威列表,不该再退回 503。
+    return { available: true, running: hit ? hit.running === true : false, reason: null }
+  } catch (error) {
+    return {
+      available: false,
+      running: false,
+      reason: `内调 ${SESSION_LIST_ROUTE} 失败：${(error && error.message) || error}`,
+    }
+  }
 }
 
 /**
- * 挂载态的 RPC 兜底。web profile 的 ctx 不公开 sessions 服务(desktop 才有),
- * 而 host.describe 给的是**计数**不是 id 列表 —— 但计数为 0 就足以断定
- * 「没有任何会话挂载」,那么目标会话必然是 detached,这是确定的答案。
- * 计数 > 0 却分不清是哪一个时,继续保持 fail-closed(available:false)。
- * 内调走本机 loopback,同源无 Origin 头 → 宿主信任栅栏放行(已实测)。
+ * 运行态判据。ctx.agents 优先,失败一律落到 session/list 内调。
+ *
+ * 这里读 ctx 出错**可以**继续走内调,而挂载态那边不行 —— 区别在于内调对运行态是
+ * **等价权威**:宿主 list.ts:125 的 `running` 就是同一个 `ctx.agents.get(id)?.status`
+ * 算出来的,只是在宿主进程里算。挂载态则没有任何一元 RPC 能回答(见
+ * ATTACHED_UNAVAILABLE_REASON),所以那边读不到就只能 fail-closed。
  */
-async function attachedFromRpc() {
-  if (!selfOrigin) return { available: false, attached: false }
+export async function runningFromContext(ctx, sessionId, deps = {}) {
   try {
-    const response = await fetch(new URL('/api/host.describe', selfOrigin), {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json' },
-      body: JSON.stringify({
-        type: 'client-request',
-        rpcId: `agos-attached-${Date.now().toString(36)}`,
-        method: 'host.describe',
-        payload: {},
-      }),
-    })
-    if (!response.ok) return { available: false, attached: false }
-    const envelope = await response.json()
-    const result = envelope && envelope.result
-    if (!result || result.ok !== true) return { available: false, attached: false }
-    const count = result.value && result.value.attachedSessions
-    if (typeof count !== 'number') return { available: false, attached: false }
-    if (count === 0) return { available: true, attached: false }
-    // 有挂载但分不清是哪个 —— 不猜,交回 fail-closed
-    return { available: false, attached: false }
+    const agents = ctx.agents ?? ctx.get('agents')
+    if (agents && typeof agents.get === 'function') {
+      // 宿主同款谓词(list.ts:125)。
+      return { available: true, running: agents.get(sessionId)?.status === 'running', reason: null }
+    }
   } catch {
-    return { available: false, attached: false }
+    // ctx 读不出来(服务未注册/ctx 形状异常)→ 交给等价权威的内调,不在这里下结论。
+  }
+  return runningFromRpc(sessionId, deps)
+}
+
+/**
+ * 挂载态**没有**一元 RPC 兜底 —— 这是查过固定宿主源码后的结论,不是省事。
+ *
+ * ⚠️ 2026-09-09 校正。原来这里调 `host.describe` 拿 `attachedSessions` 计数。
+ * 该方法在 0.1.2 已删除:
+ *  - `frontend/UPSTREAM.pin` 的 vendoring 记录原文:「host.describe removed
+ *    (home via $events ready)」;
+ *  - 在固定提交 a66e470204 全仓 grep `host.describe` **零匹配**。
+ * 那次内调必然 404 → available:false → 删除永久 503。这就是 Luna 报的病根。
+ *
+ * 也**没有**别的一元方法能替代:固定协议(frontend/src/contract/api/rpc-map.ts)
+ * 与会话挂载有关的只有 `session/list`,其行类型 SessionSummary =
+ * {sessionId,updatedAt,running,blank,parentSessionId?,origin?,cwd?,projections?},没有 attached。
+ * (同名的 `session/attachment` 是取提示词里的**图片附件**,与挂载无关。)
+ *
+ * 更要紧的是 `running` **不能**当挂载判据。宿主自己的实现
+ * packages/api/session-controller/src/list.ts 分两条路产出该字段:
+ *    已挂载(在 ctx.sessions 里):running = ctx.agents.get(id)?.status === 'running'   (:125)
+ *    冷会话(不在 ctx.sessions 里):running = false                     无条件         (:178)
+ * 于是「已挂载但空闲」与「磁盘冷会话」都得 running:false,二者不可区分。
+ * 拿 running:false 放行删除,等于把挂载着的空闲会话当已分离删掉 —— 正是要防的事。
+ *
+ * 挂载的**权威**谓词就是宿主用的那一个:`ctx.sessions.get(id) !== undefined`
+ * (同文件 list.ts:172 `const raced = this.ctx.sessions.get(header.id)`)。
+ * 拿不到它时唯一诚实的回答是 available:false → fail-closed 拒绝删除。
+ */
+export const ATTACHED_UNAVAILABLE_REASON =
+  'ctx 未公开 sessions 服务;固定协议(0.1.2-rc.1)没有任何一元 RPC 暴露挂载态'
+  + '(host.describe 已删除;session/list 的 running 无法区分「挂载但空闲」与「冷会话」)'
+
+/**
+ * 判定会话是否仍挂载在宿主中,谓词与宿主 list.ts 逐字一致。
+ *
+ * `sessions` 由 core 包 packages/core/session 提供,`agents` 由 packages/core/agent 提供;
+ * 服务 `session/list` 的 session-controller 声明了 `static inject = ['agents','sessions',…]`,
+ * cordis 里 inject 未满足则该插件不加载 —— 所以宿主只要能应答 session/list,
+ * 这两个服务就在同一 context 树里可见(第二轮记的「web profile 没有 sessions」不成立)。
+ * 这里仍用可选取值而不声明 inject:声明了会让整个 AgOS 在极简 profile 上直接不加载,
+ * 代价过大;取不到时只让删除这一条路 fail-closed,其余功能照常。
+ */
+export async function attachedFromContext(ctx, sessionId) {
+  let sessions
+  try {
+    // 先看直挂属性,再看 ctx.get —— 但只在它真是函数时调,免得把「没有 get 的 ctx」
+    // 报成一句 TypeError 文本,那对运维没有诊断价值。
+    sessions = ctx?.sessions
+    if (sessions === undefined && typeof ctx?.get === 'function') sessions = ctx.get('sessions')
+  } catch (error) {
+    return {
+      available: false,
+      attached: false,
+      reason: `读取 ctx.sessions 抛错：${(error && error.message) || error}`,
+    }
+  }
+  if (!sessions || typeof sessions.get !== 'function') {
+    return { available: false, attached: false, reason: ATTACHED_UNAVAILABLE_REASON }
+  }
+  try {
+    // 宿主同款谓词(list.ts:172)。
+    return { available: true, attached: sessions.get(sessionId) !== undefined, reason: null }
+  } catch (error) {
+    return {
+      available: false,
+      attached: false,
+      reason: `sessions.get 抛错：${(error && error.message) || error}`,
+    }
   }
 }
 
-async function attachedFromContext(ctx, sessionId) {
-  try {
-    const sessions = ctx.sessions ?? ctx.get('sessions')
-    if (sessions && typeof sessions.get === 'function') {
-      return { available: true, attached: sessions.get(sessionId) !== undefined }
-    }
-  } catch {}
-  // desktop 组合走上面的 sessions 服务;web profile 没有,落到 host.describe 内调。
-  return attachedFromRpc()
-}
-
 function normalizeRunningStatus(value) {
-  if (typeof value === 'boolean') return { available: true, running: value }
+  if (typeof value === 'boolean') return { available: true, running: value, reason: null }
   return {
     available: value && value.available === true,
     running: value && value.running === true,
+    reason: (value && typeof value.reason === 'string' && value.reason) || null,
   }
 }
 
 function normalizeAttachedStatus(value) {
-  if (typeof value === 'boolean') return { available: true, attached: value }
+  if (typeof value === 'boolean') return { available: true, attached: value, reason: null }
   return {
     available: value && value.available === true,
     attached: value && value.attached === true,
+    reason: (value && typeof value.reason === 'string' && value.reason) || null,
   }
 }
 
@@ -632,10 +713,13 @@ export function createAgosSessionManager(options = {}) {
   const now = typeof options.now === 'function' ? options.now : () => new Date()
   const readHostArchived = typeof options.readHostArchived === 'function'
     ? options.readHostArchived : async () => ({ hostArchived: [], hostArchivedAvailable: false })
+  // 未注入判据时默认 unavailable(不是「未运行/已分离」)—— 删除因此 fail-closed。
   const readRunning = typeof options.readRunning === 'function'
-    ? options.readRunning : async () => ({ available: false, running: false })
+    ? options.readRunning
+    : async () => ({ available: false, running: false, reason: '未注入运行态判据(readRunning)' })
   const readAttached = typeof options.readAttached === 'function'
-    ? options.readAttached : async () => ({ available: false, attached: false })
+    ? options.readAttached
+    : async () => ({ available: false, attached: false, reason: '未注入挂载态判据(readAttached)' })
   const pruneProjectionCache = typeof options.pruneProjectionCache === 'function'
     ? options.pruneProjectionCache : async () => ({ pruned: false, reason: 'unavailable' })
   const sessionMemory = options.sessionMemory
@@ -850,7 +934,12 @@ export function createAgosSessionManager(options = {}) {
   const assertNotRunning = async (sessionId) => {
     const status = normalizeRunningStatus(await readRunning(sessionId))
     if (!status.available) {
-      throw new HttpRouteError(503, 'RUNNING_STATUS_UNAVAILABLE', '暂时无法确认会话运行状态，未执行删除')
+      // 未知 ≠ 未运行:拿不到权威状态就拒绝,不放行。
+      throw new HttpRouteError(
+        503,
+        'RUNNING_STATUS_UNAVAILABLE',
+        `暂时无法确认会话运行状态，未执行删除${status.reason ? `（${status.reason}）` : ''}`,
+      )
     }
     if (status.running) {
       throw new HttpRouteError(409, 'SESSION_RUNNING', '会话正在运行，请先中止')
@@ -860,7 +949,12 @@ export function createAgosSessionManager(options = {}) {
   const assertDetached = async (sessionId) => {
     const status = normalizeAttachedStatus(await readAttached(sessionId))
     if (!status.available) {
-      throw new HttpRouteError(503, 'LIVE_STATUS_UNAVAILABLE', '暂时无法确认会话是否仍挂载，未执行删除')
+      // 未知 ≠ 已分离。理由带进响应,否则运维只看到裸 503 无从下手。
+      throw new HttpRouteError(
+        503,
+        'LIVE_STATUS_UNAVAILABLE',
+        `暂时无法确认会话是否仍挂载，未执行删除${status.reason ? `（${status.reason}）` : ''}`,
+      )
     }
     if (status.attached) {
       throw new HttpRouteError(409, 'SESSION_LIVE', '会话仍挂载在宿主中，请先关闭会话再删除')
