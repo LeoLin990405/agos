@@ -1,5 +1,5 @@
 // 离线集成:用假 ctx / 假子代理 / 假 permissionPresets 把「计划模式合并」三件事跑一遍(不花 token)。
-//   A4 plan_run approve=true → 真的 swarm 调度器(dsh-kimicode-swarm.runNormalizedBatch)分波跑步骤
+//   A4 plan_run approve=true → 合成调度器覆盖本插件的分波/注入/写回业务接线
 //      → 上游结论注入 → 验收 → 写回计划文件 → XML/presentationMeta 能被前端解析
 //   A2 plan/mode 事件 ↔ permissionPresets 联动(进入切 read-only、退出恢复;写操作不能在 append 边界内重入)
 //   A3 exit_plan_mode 批准 → dsh-plan 块落盘;拒绝/无块 → 不落盘;plan_run 复用 A3 落的那份不重建
@@ -7,31 +7,77 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { basename, join } from 'node:path'
 
 const tmp = mkdtempSync(join(tmpdir(), 'dsh-cn-plan-'))
 process.env.DSH_CN_PLAN_DIR = join(tmp, 'plans')
 process.env.DSH_CN_COUNCIL_LOG = join(tmp, 'council.jsonl')
 const PLAN_DIR = process.env.DSH_CN_PLAN_DIR
+const REAL_MODE = process.env.AGOS_PLAN_RUN_REAL_SWARM === '1'
+const ORIGINAL_SWARM_MODULE = process.env.AGOS_SWARM_MODULE
+
+// A4 exercises this plugin's business wiring. Opt into a synthetic swarm so the
+// fake subagent scenarios remain covered on a clean checkout without importing
+// the incompatible public registry package. A real scheduler differential remains
+// a host integration check; these tests make no claim to cover it.
+if (!REAL_MODE) process.env.AGOS_SWARM_MODULE = 'data:text/javascript,' + encodeURIComponent(`
+const textOf = (v) => String(v ?? '')
+export const escapeXml = (v) => textOf(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+export const parseResultsXml = (xml) => [...textOf(xml).matchAll(/<subagent([^>]*)>([\\s\\S]*?)<\\/subagent>/g)].map((m, i) => {
+  const attr = (name) => ((m[1].match(new RegExp(name + '=\\"([^\\"]*)\\"')) || [])[1] || '')
+  const item = attr('item')
+  const route = attr('model') || 'qwen/qwen3.8-max'
+  const [provider, model] = route.split('/')
+  return { task: { index: i + 1, item, type: null, model: { provider, model } }, modelLabel: route, status: attr('outcome') || 'completed', state: 'completed', result: m[2] }
+})
+export const publishProgress = () => {}
+export async function runNormalizedBatch(ctx, _exec, batch, options = {}) {
+  const tasks = batch.tasks || []
+  const rows = await Promise.all(tasks.map(async (task) => {
+    const handle = await ctx.subagents.start('spawn', {
+      label: task.description,
+      prompt: [{ type: 'text', text: task.prompt }],
+      agentOptions: task.model,
+    })
+    const answer = await handle.result
+    return {
+      task,
+      status: 'completed',
+      result: answer?.output?.find((part) => part?.type === 'text')?.text ?? '',
+      agentId: handle.id,
+      elapsedMs: 1,
+      toolCalls: 0,
+      tools: [],
+    }
+  }))
+  options.collect.rows = rows
+  options.onRows?.(rows)
+}
+`)
 
 // ⚠️ env 必须在 import 之前设好:PLAN_DIR 在 apply() 时读一次
 const { apply, ownSessionEvents, snapshotSessionEvents } = await import('../lib/index.js')
 const { resolveSwarmModule, SWARM_OPT_IN_ENV } = await import('../../dsh-agos/lib/swarm-host-integration.mjs')
 
-// swarm 是**宿主环境集成**而非本仓依赖(为什么:见 dsh-agos/lib/swarm-host-integration.mjs
-// 的模块注释,registry 版不导出 runNormalizedBatch,且自身导入 installSettingsSection
-// 会把整棵依赖树拖回 peer 冲突,于是 npm ci 无法复现)。
-//
-// 下面四条 A4 系检查的立意是**真调度器**的分波行为(见文首第 2 行),打桩替代就不再是
-// 这条检查 —— 所以干净依赖树里解析不到 swarm 时,如实标成 blocked 并点名开启方式,
-// 既不假装通过,也不让它从计划里静默消失。本机跑满覆盖:把 AGOS_SWARM_MODULE 指向
-// 一份可用的 swarm 模块(实测 12/12 exit 0)。
-const swarmProbe = await resolveSwarmModule()
-const SWARM_BLOCKED = swarmProbe.available
-  ? false
-  : `未覆盖(blocked):本检查需要真实 swarm 调度器,当前不可用。${swarmProbe.reason}`
-  + ` 设 ${SWARM_OPT_IN_ENV} 指向一份可用 swarm 即可恢复覆盖。`
+if (!REAL_MODE) test('real swarm scheduler integration runs the existing fake business scenarios when available', async (t) => {
+  const env = { ...process.env }
+  if (ORIGINAL_SWARM_MODULE === undefined) delete env[SWARM_OPT_IN_ENV]
+  else env[SWARM_OPT_IN_ENV] = ORIGINAL_SWARM_MODULE
+  const resolved = await resolveSwarmModule({ env })
+  if (!resolved.available) {
+    t.skip('host scheduler unavailable: ' + resolved.reason)
+    return
+  }
+  const child = spawnSync(process.execPath, ['--test', fileURLToPath(import.meta.url)], {
+    env: { ...env, AGOS_PLAN_RUN_REAL_SWARM: '1', NODE_TEST_CONTEXT: undefined, NODE_OPTIONS: undefined },
+    encoding: 'utf8',
+    timeout: 60_000,
+  })
+  assert.equal(child.status, 0, child.stdout + child.stderr)
+})
 
 // ── 假子代理:swarm 调度器的 spawnOneShot 与本插件的 runPanelist 都走 subagents.start('spawn', {...}) ──
 function fakeSubagents(script) {
@@ -272,7 +318,7 @@ test('A3: exit_plan_mode 批准 → dsh-plan 块落盘;拒绝 / 无块 / 重复�
   assert.equal(listPlans().length, before + 1)
 })
 
-test('A4: plan_run approve=true(plan JSON 直传)→ 复用 A3 落的文件 → 两波执行 → 上游注入 → 验收 → 写回 → XML/presentationMeta', { skip: SWARM_BLOCKED }, async () => {
+test('A4: plan_run approve=true(plan JSON 直传)→ 复用 A3 落的文件 → 两波执行 → 上游注入 → 验收 → 写回 → XML/presentationMeta', async () => {
   // 上一个 test 已经把同一份 STEPS 落成 plan-*.json 且未执行 → 这里应复用它,不新建
   const filesBefore = listPlans()
   assert.ok(filesBefore.length >= 1)
@@ -298,10 +344,13 @@ test('A4: plan_run approve=true(plan JSON 直传)→ 复用 A3 落的文件 → 
   assert.match(out, /验收:目标达成/)
 
   // 分波:步骤 1 先起,2/3 都在 1 结束后才起(上游注入证明它们拿到了 1 的产出)
-  const steps = sub.started.filter((r) => /^plan:plan-\d+\.json:\d+$/.test(r.label))
+  const executedFile = (out.match(/<plan[^>]*\bfile="([^"]+)"/) || [])[1]
+  assert.ok(executedFile)
+  const executedName = basename(executedFile)
+  const steps = sub.started.filter((r) => r.label.startsWith('plan:' + executedName + ':'))
   assert.equal(steps.length, 3)
-  assert.match(steps[0].label, /:1$/)
-  assert.deepEqual(steps.slice(1).map((r) => r.label.slice(-1)).sort(), ['2', '3'])
+  assert.equal(steps[0].label, 'plan:' + executedName + ':1')
+  assert.deepEqual(steps.slice(1).map((r) => r.label.split(':').at(-1)).sort(), ['2', '3'])
   for (const r of steps.slice(1)) {
     assert.match(r.prompt, /上游结论/)
     assert.match(r.prompt, /配置里有 A=1、B=2/)
@@ -341,12 +390,13 @@ test('A4: plan_run approve=true(plan JSON 直传)→ 复用 A3 落的文件 → 
   assert.equal(saved.markdown, PLAN_MD)
   assert.equal(saved.steps.length, 3)
   assert.equal(saved.results.length, 3)
+
   assert.ok(saved.results.every((r) => r.ok && r.provider === 'qwen' && typeof r.text === 'string'))
   assert.match(saved.review, /目标达成/)
   assert.match(out, new RegExp('file="' + file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '"'))
 })
 
-test('A4: 裸 JSON 即使 approve 也只落盘;planFile 批准后执行并记录依赖校验', { skip: SWARM_BLOCKED }, async () => {
+test('A4: 裸 JSON 即使 approve 也只落盘;planFile 批准后执行并记录依赖校验', async () => {
   const sub = fakeSubagents(async (rec) => (rec.label.startsWith('council:') ? '验收:部分达成。' : '产出 ' + rec.label))
   const { ctx, tools } = fakeCtx({ subagents: sub })
   apply(ctx)
@@ -385,6 +435,8 @@ test('A4: 裸 JSON 即使 approve 也只落盘;planFile 批准后执行并记录
   assert.equal(saved.goal, '环与悬空依赖')
   assert.equal(saved.source, 'plan-mode')
   assert.equal(saved.results.length, 3)
+  const stringIdMeta = t.output.presentationMeta({ planFile: file }, out)
+  assert.deepEqual(stringIdMeta.subagents.map((r) => r.index), [1, 2, 3])
 
   // 再用 planFile 路径跑一次(approve=false → 只显示,不执行;approve=true → 执行并写回同一文件)
   const shown = await t.execute({ planFile: file }, exec)
@@ -466,7 +518,7 @@ test('production council malformed arbiter structure renders inconclusive rather
   assert.equal(saved.consensus, false)
 })
 
-test('plan execution never writes old results over steps edited during execution', { skip: SWARM_BLOCKED }, async () => {
+test('plan execution never writes old results over steps edited during execution', async () => {
   mkdirSync(PLAN_DIR, { recursive: true })
   const file = join(PLAN_DIR, 'plan-9100000000001.json')
   writeFileSync(file, JSON.stringify({ sessionId: 'changed-plan', steps: STEPS }))
@@ -489,7 +541,7 @@ test('plan execution never writes old results over steps edited during execution
   assert.equal(after.results, undefined)
 })
 
-test('missing plan at writeback preserves returned execution results and reports persistence failure', { skip: SWARM_BLOCKED }, async () => {
+test('missing plan at writeback preserves returned execution results and reports persistence failure', async () => {
   const file = join(PLAN_DIR, 'plan-9100000000002.json')
   writeFileSync(file, JSON.stringify({ sessionId: 'deleted-plan', steps: STEPS }))
   let removed = false

@@ -91,9 +91,10 @@ async function spawnStandIn(label, dir) {
  *   early, so the late-arrival path can be exercised.
  * @param options.abortAt - abort the caller's controller during this stage.
  * @param options.controller - the caller's AbortController.
+ * @param options.throwAfterBrowserSpawn - fail after spawning an identifiable browser child.
  * @returns `{ deps, seen }` where `seen` collects the real resources created.
  */
-function realDeps({ failAt, hangAt, hangMs = 1500, skipRegister = [], abortAt, controller } = {}) {
+function realDeps({ failAt, hangAt, hangMs = 1500, skipRegister = [], abortAt, controller, throwAfterBrowserSpawn = false } = {}) {
   const seen = { hostChild: undefined, browserChild: undefined, uiPort: undefined, runDir: undefined, contextClosed: false, pageClosed: false }
 
   /** Should this stage hand its resource over the moment it exists? */
@@ -163,6 +164,15 @@ function realDeps({ failAt, hangAt, hangMs = 1500, skipRegister = [], abortAt, c
       return { chromium: {}, modulePath: '(stand-in)', source: 'test', warnings: [] }
     },
     launchBrowser: async ({ register }) => {
+      if (throwAfterBrowserSpawn) {
+        const script = path.join(seen.runDir, 'chromium-standin.mjs')
+        await writeFile(script, 'setTimeout(() => process.exit(0), 300_000)\n')
+        const child = spawn(process.execPath, [script], { stdio: 'ignore' })
+        seen.browserChild = child
+        strays.add(child)
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        throw new Error('injected launcher failure after browser spawn')
+      }
       const child = await spawnStandIn('stand-in-browser', seen.runDir)
       seen.browserChild = child
       const close = async () => { child.kill('SIGTERM'); await waitForExit(child.pid, 5000) }
@@ -264,6 +274,14 @@ describe('createHarness unwinds every stage it already started', () => {
   it('browser launch fails → everything under it is released', async () => {
     const { deps, seen } = realDeps({ failAt: 'browser' })
     await assert.rejects(() => createHarness({ deps }), /injected failure at browser/)
+    await assertFullyReclaimed(seen)
+  })
+
+  it('launcher throws after spawning browser → partial browser is reclaimed', async () => {
+    const { deps, seen } = realDeps({ throwAfterBrowserSpawn: true })
+    await assert.rejects(() => createHarness({ deps }), /launcher failure after browser spawn/)
+    assert.ok(seen.browserChild !== undefined, 'the launcher really spawned a browser child')
+    assert.ok(await waitForExit(seen.browserChild.pid), 'the partial browser must be killed before unwind returns')
     await assertFullyReclaimed(seen)
   })
 

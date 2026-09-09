@@ -115,6 +115,11 @@ export async function childPids(parentPid = process.pid) {
  * @returns what was signalled, for the evidence log.
  */
 export async function killRecorded(entry, signal) {
+  // This helper is also used by the launcher-error path, before the normal
+  // signalRecorded gate runs. Refresh identity here so every caller gets the
+  // same PID/start-time/argv protection immediately before signalling.
+  const verdict = await processMatches(entry)
+  if (!verdict.ok) return { pid: entry?.pid, signal, sent: false, reason: verdict.reason }
   const ownGroup = (await processIdentity(process.pid))?.pgid
   const leadsOwnGroup = Number.isInteger(entry?.pgid) && entry.pgid === entry.pid
   if (leadsOwnGroup && entry.pgid !== ownGroup) {
@@ -125,6 +130,8 @@ export async function killRecorded(entry, signal) {
       // The group may already be gone; fall through to the single-pid attempt.
     }
   }
+  const refreshed = await processMatches(entry)
+  if (!refreshed.ok) return { pid: entry?.pid, signal, sent: false, reason: refreshed.reason }
   process.kill(entry.pid, signal)
   return { pid: entry.pid, signal, sent: true, scope: 'process' }
 }
@@ -311,6 +318,17 @@ export async function classifyRun(runDir, { runId, ownerToken } = {}) {
       return { runDir, state: 'active', reason: 'runId matches but owner token does not', manifest }
     }
     return { runDir, state: 'self', reason: 'this run', manifest }
+  }
+  // A manifest without a trustworthy owner identity is ambiguous: the owner
+  // may still be alive, or the file may have been truncated by an older
+  // launcher. Treat it as active until an operator can inspect it; reaping an
+  // unknown owner would recreate the original cross-run deletion hazard.
+  const ownerIdentity = manifest.owner
+  const knownText = (value) => typeof value === 'string'
+    && value.trim() !== '' && value.trim().toLowerCase() !== 'unknown'
+  if (!ownerIdentity || !Number.isSafeInteger(ownerIdentity.pid) || ownerIdentity.pid <= 0
+    || !knownText(ownerIdentity.startedAt) || !knownText(ownerIdentity.command)) {
+    return { runDir, state: 'active', reason: 'owner identity unavailable; left untouched', manifest }
   }
   // The owner is identified by pid + start time + argv equality, but NOT by the
   // runId: it started before the run existed.

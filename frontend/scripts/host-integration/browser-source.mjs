@@ -157,8 +157,8 @@ export function resolveBrowserExecutable({ env = process.env } = {}) {
   return { executablePath: found, source: 'installed' }
 }
 
-/** Schemes that cannot leave the machine, so they need no fence. */
-const LOCAL_SCHEMES = new Set(['data:', 'blob:', 'about:', 'file:'])
+/** Inline/document schemes that cannot perform a network fetch. */
+const LOCAL_SCHEMES = new Set(['data:', 'blob:', 'about:'])
 
 /**
  * Is this URL one the hermetic run is allowed to fetch?
@@ -177,7 +177,20 @@ export function isAllowedRequest(url, allowedOrigins) {
   // purpose: the mux socket and the REST calls both speak to our own host.
   const authority = parsed.host
   return allowedOrigins.some((origin) => {
-    try { return new URL(origin).host === authority } catch { return false }
+    try {
+      const allowed = new URL(origin)
+      if (allowed.host !== authority) return false
+      // The mux deliberately upgrades http↔ws (and https↔wss) as the same
+      // local authority. Do not let an HTTPS or WSS request bypass an HTTP
+      // origin declaration: it is a different endpoint and can be external
+      // even when the hostname happens to be loopback.
+      const sameSchemeFamily = (allowed.protocol === 'http:' && parsed.protocol === 'ws:')
+        || (allowed.protocol === 'ws:' && parsed.protocol === 'http:')
+        || (allowed.protocol === 'https:' && parsed.protocol === 'wss:')
+        || (allowed.protocol === 'wss:' && parsed.protocol === 'https:')
+        || allowed.protocol === parsed.protocol
+      return sameSchemeFamily
+    } catch { return false }
   })
 }
 

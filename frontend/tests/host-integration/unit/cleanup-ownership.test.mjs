@@ -21,7 +21,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  classifyRun, cleanupRuns, createRunRoot, disposeRunRoot, processIdentity, processMatches, reapRun, recordProcess,
+  classifyRun, cleanupRuns, createRunRoot, disposeRunRoot, killRecorded, processIdentity, processMatches, reapRun, recordProcess,
 } from '../../../scripts/host-integration/run-registry.mjs';
 
 const CLEANUP_CLI = fileURLToPath(new URL('../../../scripts/host-integration/cleanup.mjs', import.meta.url))
@@ -275,6 +275,46 @@ setTimeout(() => process.exit(0), 300_000)
     assert.equal(existsSync(halfBorn), true, 'a run root without a manifest yet must not be deleted')
     assert.ok(report.skipped.some((entry) => entry.runDir === halfBorn && entry.state === 'unreadable'))
     await rm(halfBorn, { recursive: true, force: true })
+  })
+
+  it('leaves runs with missing or empty owner identity untouched', async () => {
+    const baseRun = await createRunRoot({ root: sandbox })
+    const base = JSON.parse(await readFile(path.join(baseRun.runDir, 'owner.json'))).owner
+    await rm(baseRun.runDir, { recursive: true, force: true })
+    const mutations = [
+      { pid: 0 },
+      { startedAt: '' },
+      { startedAt: 'unknown' },
+      { command: '' },
+      { command: 'unknown' },
+    ]
+    for (const mutation of mutations) {
+      const run = await createRunRoot({ root: sandbox })
+      const manifestPath = path.join(run.runDir, 'owner.json')
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+      manifest.owner = { ...base, ...mutation }
+      await writeFile(manifestPath, JSON.stringify(manifest))
+      const verdict = await classifyRun(run.runDir)
+      assert.equal(verdict.state, 'active')
+      assert.match(verdict.reason, /identity unavailable/)
+      const report = await cleanupRuns({ root: sandbox })
+      assert.ok(report.skipped.some((entry) => entry.runDir === run.runDir))
+      assert.equal(existsSync(run.runDir), true, 'ambiguous ownership must never be deleted')
+      await rm(run.runDir, { recursive: true, force: true })
+    }
+  })
+
+  it('killRecorded refreshes identity before signalling', async () => {
+    const child = await startStandInHost(sandbox)
+    const captured = await processIdentity(child.pid)
+    assert.ok(captured)
+    const drifted = { ...captured, command: `${captured.command} changed` }
+    const refused = await killRecorded(drifted, 'SIGKILL')
+    assert.equal(refused.sent, false)
+    assert.equal(isAlive(child.pid), true, 'identity drift must leave the child alive')
+    const accepted = await killRecorded(captured, 'SIGKILL')
+    assert.equal(accepted.sent, true)
+    assert.ok(await waitForExit(child.pid), 'matching identity must still be reclaimed')
   })
 
   it('lets a run dispose itself, killing only its own recorded process', async () => {

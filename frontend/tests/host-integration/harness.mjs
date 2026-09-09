@@ -288,7 +288,16 @@ export async function createHarness(options = {}) {
     //    between a stray browser and the network.
     const browser = await stack.use('browser', async (register) => {
       const before = new Set(await childPids())
-      const launched = await launchBrowser({ chromium: playwright.chromium, register })
+      let launched
+      try {
+        launched = await launchBrowser({ chromium: playwright.chromium, register })
+      } catch (error) {
+        // A launcher can create Chrome and then fail before returning its
+        // Browser handle. Reclaim that partial resource before stage unwind.
+        const recorded = await recordBrowserProcess(run, before, log)
+        if (recorded !== undefined) await killRecorded(recorded, 'SIGKILL').catch(() => undefined)
+        throw error
+      }
       // Identify the new child by what it IS, not by the order it appeared in:
       // recording the wrong pid would put a stranger in the manifest, and the
       // manifest is what cleanup acts on.

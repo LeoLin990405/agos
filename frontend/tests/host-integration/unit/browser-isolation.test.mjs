@@ -170,6 +170,8 @@ describe('the origin fence', () => {
       'https://example.com/beacon',
       'http://127.0.0.1:39999/other-run',
       'http://localhost:39411/looks-close-but-is-a-different-authority',
+      'https://127.0.0.1:39411/looks-close-but-is-a-different-scheme',
+      'file:///Users/leo/.dsh/credentials.json',
       'chrome-extension://abcdef/background.js',
     ]) {
       assert.equal(isAllowedRequest(url, allowed), false, `${url} should be blocked`)

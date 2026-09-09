@@ -352,8 +352,18 @@ export function evaluateRetrieval(rows, deps = {}) {
     // (notRecall 点名的与 fixture 没提名的条目在这里统一覆盖)。
     const expectedIds = new Set((row.expect.recall ?? [])
       .map((key) => keyOf(key)).filter((item) => item !== undefined).map((item) => item.id))
-    const wrong = proposal.items.filter((item) => !expectedIds.has(item.id))
-      .map((item) => ({ id: item.id, text: item.text?.slice(0, 24) }))
+    // 集合比较还要检查基数: Set 只看 membership,会把同一条被重复回注两次
+    // 当成一次命中。重复曝光也是误召回,否则实现可以靠重复项绕过完整集合闸。
+    const expectedCounts = new Map([...expectedIds].map((id) => [id, 1]))
+    const servedCounts = new Map()
+    const wrong = []
+    for (const item of proposal.items) {
+      const count = (servedCounts.get(item.id) ?? 0) + 1
+      servedCounts.set(item.id, count)
+      if (!expectedCounts.has(item.id) || count > expectedCounts.get(item.id)) {
+        wrong.push({ id: item.id, text: item.text?.slice(0, 24) })
+      }
+    }
     const fallbackOk = (proposal.fallback ?? null) === (row.expect.fallback ?? null)
       && proposal.reserved === row.expect.reserved
     const ok = missed.length === 0 && wrong.length === 0 && fallbackOk
@@ -420,6 +430,14 @@ test('F2-3 负控(评估器自检):错拒期望条目的 pin 与超集回注必�
   const reportDump = evaluateRetrieval(rows, { propose: dumpingPropose })
   assert.ok(reportDump.falseRecall.some((row) => row.id === 'ret-01'),
     '超集回注(serve 期望之外的条目)必须报误召回')
+  // 形状三:重复回注同一条期望条目。Set membership 不能把它当成完整集合通过。
+  const duplicatePropose = (items, query, state) => {
+    const report = proposeSessionMemory(items, query, state)
+    return report.items.length === 0 ? report : { ...report, items: [report.items[0], ...report.items] }
+  }
+  const reportDuplicate = evaluateRetrieval(rows, { propose: duplicatePropose })
+  assert.ok(reportDuplicate.falseRecall.some((row) => row.id === 'ret-01'),
+    '重复回注同一条条目也必须报误召回')
   // 基准:真实现上这两个桶不该因负控路径出现(负控只在注入的假实现上成立)。
   const reportReal = evaluateRetrieval(rows)
   assert.equal(reportReal.unexpectedRefused.length, 0)

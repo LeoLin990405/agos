@@ -63,9 +63,9 @@ const floorsPath = opt('floors', join(HERE, 'expected-counts.json'))
 //
 // 位置在参数解析处而不是写盘处:放在后面会先把整套门跑完、打完"退出码 = 0",
 // 再补一句报错,读者容易只看见前一句。
-if (args.includes('--write-floors')) {
+if (args.includes('--write-floors') || args.includes('--write-floors=')) {
 	console.error('❌ --write-floors 需要显式路径:--write-floors=scripts/acceptance/expected-counts.json')
-	console.error('   裸标志会被静默忽略(输出与没加时一模一样),于是「我已重算下限」变成一个没人验证的错觉。')
+	console.error('   裸标志或空路径会被静默忽略(输出与没加时一模一样),于是「我已重算下限」变成一个没人验证的错觉。')
 	process.exit(78)
 }
 
@@ -78,7 +78,11 @@ const pluginsOverride = opt('required-plugins', null)
 const pluginsRootOverride = opt('plugins-root', null)
 const selftestFileOverride = opt('selftest-file', null)
 // --surface 也算:注入合成依赖面等于关掉包级预检,这件事同样不该静默。
-const SYNTHETIC = pluginsOverride !== null || pluginsRootOverride !== null || selftestFileOverride !== null || surfaceOverride !== null || hostIntegrationsOverride !== null
+// --plan 同样算:自定义计划会绕过 defaultPlan 的必需套件、自检和宿主依赖闸,
+// 因而不能把一次局部/实验运行冒充正式门,也不能拿来写正式 floors 基线。
+// 自检子进程会抑制 selftest 闸并可使用 --floors=none;它只能作为负控运行,
+// 不能把结果当正式验收或写入正式基线。
+const SYNTHETIC = planPath !== null || process.env.AGOS_ACCEPTANCE_SELFTEST === '1' || pluginsOverride !== null || pluginsRootOverride !== null || selftestFileOverride !== null || surfaceOverride !== null || hostIntegrationsOverride !== null
 const PLUGINS = pluginsOverride === null
 	? REQUIRED_PLUGINS
 	: pluginsOverride.split(',').map((s) => s.trim()).filter(Boolean)
@@ -447,7 +451,15 @@ console.log(`   自检闸: ${selftestSuppressed
 	? `⚠️  已被防递归哨兵 ${SELFTEST_SENTINEL}=1 排除 —— 本进程是自检自己 spawn 的子进程,不能再把自检放进计划`
 	: plan.codeGates.some((g) => g.id === 'selftest') ? '在计划里(node --test scripts/acceptance/selftest.mjs)' : '不在计划里(自定义 --plan)'}`)
 if (SYNTHETIC) {
-	console.log('   ⚠️  合成运行:必需套件清单/根/自检文件被 --required-plugins / --plugins-root / --selftest-file 覆盖。')
+	const sources = []
+	if (planPath !== null) sources.push('--plan')
+	if (pluginsOverride !== null) sources.push('--required-plugins')
+	if (pluginsRootOverride !== null) sources.push('--plugins-root')
+	if (selftestFileOverride !== null) sources.push('--selftest-file')
+	if (surfaceOverride !== null) sources.push('--surface')
+	if (hostIntegrationsOverride !== null) sources.push('--host-integrations')
+	if (selftestSuppressed) sources.push(`${SELFTEST_SENTINEL}=1`)
+	console.log(`   ⚠️  合成运行(非权威):触发来源 ${sources.join('、')}`)
 	console.log('       本次结果 authoritative=false,不代表真实仓库状态;宿主依赖体检已跳过。')
 }
 console.log('')
@@ -547,8 +559,18 @@ const out = {
 	gitHead: runCommand({ argv: ['git', 'rev-parse', 'HEAD'], cwd: REPO_ROOT, timeoutMs: 20000 }).output.trim(),
 	gitDirty: runCommand({ argv: ['git', 'status', '--porcelain'], cwd: REPO_ROOT, timeoutMs: 20000 }).output.trim().split('\n').filter(Boolean).length,
 	// 合成接缝一旦用过,本次结果就不代表真实仓库状态。这个事实必须在 JSON 里,不能只在终端。
-	authoritative: !SYNTHETIC,
-	syntheticSeams: SYNTHETIC ? { requiredPlugins: pluginsOverride, pluginsRoot: pluginsRootOverride, selftestFile: selftestFileOverride } : null,
+	// --floors=none 是显式维护/引导模式:仍可跑完整默认门并重建基线,
+	// 但本次结果没有计数下限约束,不能被消费方当作正式权威验收。
+	authoritative: !SYNTHETIC && !FLOORS_DISABLED,
+	syntheticSeams: SYNTHETIC ? {
+		plan: planPath,
+		requiredPlugins: pluginsOverride,
+		pluginsRoot: pluginsRootOverride,
+		selftestFile: selftestFileOverride,
+		surface: surfaceOverride,
+		hostIntegrations: hostIntegrationsOverride,
+		selftestSentinel: selftestSuppressed,
+	} : null,
 	requiredPlugins: PLUGINS,
 	recursionGuard: {
 		sentinel: SELFTEST_SENTINEL,
@@ -602,7 +624,7 @@ if (writeFloors) {
 	// 合成运行是绿的没有任何意义:一棵 /tmp 里的假套件树也能全绿,而它写出的基线只含假套件,
 	// 等于把真基线换成一份不设防的清单。可测性接缝不许变成"洗基线"的通道。
 	if (SYNTHETIC) {
-		console.error('   ❌ --write-floors 拒绝执行:本次是合成运行(用了 --required-plugins/--plugins-root/--selftest-file/--surface)。')
+		console.error('   ❌ --write-floors 拒绝执行:本次是合成/自定义计划运行(用了 --plan 或可测性接缝)。')
 		console.error('      合成套件树全绿不代表任何东西,用它写基线等于把真基线换成一份不设防的清单。')
 		process.exit(78)
 	}

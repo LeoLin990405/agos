@@ -709,6 +709,40 @@ test('NC19c: 裸 --write-floors(无 =路径)必须立刻退 78,不许被静默�
 		`应在执行任何闸之前退出,实际 stdout 里已有闸结果:${r.stdout.slice(0, 200)}`)
 })
 
+test('NC19e: --write-floors= 空路径必须和裸标志一样早退 78', () => {
+	const r = spawnSync(process.execPath, [RUNNER, '--write-floors='], {
+		cwd: REPO_ROOT, encoding: 'utf8', env: runnerEnv(), timeout: 60_000,
+	})
+	assert.equal(r.status, 78, `空路径必须退 78,实际 ${r.status}`)
+	assert.match(r.stderr, /需要显式路径/)
+	assert.ok(!/PASS|FAIL|代码闸/.test(r.stdout), '空路径应在执行任何闸之前拒绝')
+})
+
+test('NC19d: 自定义 --plan 也必须标成不权威且不能写正式基线', () => {
+	const work = mkdtempSync(join(tmpdir(), 'agos-selftest-planfloors-'))
+	const planPath = join(work, 'plan.json')
+	writeFileSync(planPath, JSON.stringify({ codeGates: [nodeTestGate('ctl-passing', 'passing')], advisory: [] }))
+	const target = join(work, 'floors.json')
+	const jsonPath = join(work, 'probe.json')
+	const isolatedEnv = { ...process.env }
+	delete isolatedEnv[SELFTEST_SENTINEL]
+	delete isolatedEnv.NODE_TEST_CONTEXT
+	delete isolatedEnv.NODE_OPTIONS
+	const probe = spawnSync(process.execPath, [RUNNER, `--plan=${planPath}`, '--floors=none', '--no-advisory', `--json=${jsonPath}`, `--logdir=${join(work, 'probe-logs')}`], {
+		cwd: REPO_ROOT, encoding: 'utf8', env: isolatedEnv, timeout: 60_000,
+	})
+	assert.equal(probe.status, 0)
+	assert.equal(JSON.parse(readFileSync(jsonPath, 'utf8')).authoritative, false, '绕过 defaultPlan 的自定义计划绝不能自称权威')
+
+	const r = runRunner({
+		plan: { codeGates: [nodeTestGate('ctl-passing', 'passing')], advisory: [] },
+		extraArgs: [`--write-floors=${target}`],
+	})
+	assert.equal(r.exitCode, 78, '自定义计划即使全绿也不能写正式基线')
+	assert.equal(existsSync(target), false, '自定义计划不许写出 floors')
+	assert.match(r.stderr, /自定义计划/, '拒绝原因必须指出自定义计划')
+})
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 控制 18:超时必须**看得出来是超时**,不能长得像一次普通断言失败。
 // (实测起因:dsh-fleet 跑满 900s 被 SIGTERM 砍掉,node --test 接住信号自己退 1,
