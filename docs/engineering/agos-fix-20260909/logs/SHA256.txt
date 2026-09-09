@@ -1,16 +1,16 @@
-# 交付日志 SHA256 —— 摘要针对**脱敏后**的文件本身
-# 脱敏口径见每份文件头部三行:一次路径前缀替换(<HOME>/<REPO>/<TMP>),此外未作删改。
-# 本文件不含自身摘要(自指无意义)。生成于 2026-09-09 16:55 CST,提交 d60ae14
+# 交付日志 SHA256
+# 摘要针对**处理后**的文件本身。处理口径见每份日志头部(路径前缀替换一次 + 末尾空白规范化,此外未作删改)。
+# 本文件不含自身摘要(自指无意义)。生成于 2026-09-09 16:57 CST
 #
-ade9b32b7f8853ef56962b9c4ad3dbde5f9556570eef1e98237046b6f9e6f8ee  acceptance-gate.txt
-2d0456577ee214493ebea609593bb7bf9ab3f95c9389a19b0460dcae96b1673b  acceptance-unit.txt
-bd0a52ce172c585b3ec506259ced5cf48eb329a9ac4efc6f693ebed4e0d7312f  clean-npm-ci.txt
-b01cbcc8c922b773cb77a05d5b63d334a9e9a8aa8a09d9df9e4a6a22c779180f  host-integration.txt
-f26bb9fb475775af2ef860fe698d40aeaad805a2a47e715a0865b56e38f540d5  mutation-meta.txt
-3235cdd3071263c0a062a734c6dd1413eb1e7f84f0f9d9b640c5b9488d0e0dfe  selftest.txt
-d1b3df46c9560c4c9fae3acd5c2abe7c78e253126f76903f30c1f1e0044bb961  suite-cn-capabilities.txt
-3671b2862bee9e20fc5f11c8bbf0a569755518ccc287cad55a64652571203131  suite-dsh-agos-router.txt
-07b559b897d787fe285b2bab9f00c168d68022afe0f6a083b9f9c39ca3695ab7  suite-dsh-agos.txt
-2d79630f355c67f9212a01e161c0c01a5f8925cb2534f7930c3f1941fc23093a  suite-dsh-fleet.txt
-a0eaf3ede75e398602201a6ce4e807805af098f351c30010c5d6b4e554b0164b  suite-dsh-mcp-bridge.txt
-2d29674bf3744c4f039dcb5cd97d3f5d383d3dc8b144509945578d351915e62c  suite-frontend.txt
+ef7dfe9576130b6be4cb21f0b76d783327e34ca53c18fe39112a404c65e7bfdd  acceptance-gate.txt
+a3ff6cd7f9c1b3253c96e63e3b34602cac351da89807033b377a4ce6eadef770  acceptance-unit.txt
+dde8e8ff1ef0b7e40edf55ff3245d9b463f879aa2341b873b6e32a3c28288055  clean-npm-ci.txt
+494e3a09602a4defd9ecc2458423b7b38c3d6d9985b8bf25023d7c7a459bfc5d  host-integration.txt
+200d3a25152368f43ea4ca4f7182c56a0ad472950fd92052e5d2e27335313c60  mutation-meta.txt
+678f8f594448c0429a7713dab095d28c94b13c86a14df8212d0deec7e623478f  selftest.txt
+3092be09a14e09b7e0348146b21a68762c4a38c1ebb56f0b9a21c31c9128bbeb  suite-cn-capabilities.txt
+d70637a4e461afc9c3c857d8e7267fcf18a8ead572e7f43fb7e0476880bf2dca  suite-dsh-agos-router.txt
+a392f7b5535b07c90325109d5642eaded4995e952efaee2d9bc5e26dc4f63373  suite-dsh-agos.txt
+0f5051c33fff712f3f9d8e243e3d3c1c26fe9eb99ff1b281b2b6795187bb25a7  suite-dsh-fleet.txt
+1e683aded50256bf5d3607d47c46489d0e2464752fd3d84b4d8dbc16f51cf2ae  suite-dsh-mcp-bridge.txt
+db7cbd90c6baa418e1600bbeb69a6a5221443bb59977c0fb22005d02420a499e  suite-frontend.txt

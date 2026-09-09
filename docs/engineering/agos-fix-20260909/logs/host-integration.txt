@@ -1,6 +1,8 @@
 # 真实宿主浏览器联测(node frontend/tests/host-integration/run.mjs)—— 9 passed / 0 failed / 0 blocked / 0 skipped
-# 脱敏:本文件经过一次路径前缀替换 —— /Users/leo → <HOME>、/Users/leo/Projects/agos-cursor-fix-20260909 → <REPO>、临时目录 → <TMP>。
-# 除此之外未作任何删改;SHA256.txt 里的摘要是**脱敏后**这份文件的。
+# 处理口径(全部日志一致,共两步,此外未作任何删改):
+#   1) 路径前缀替换一次:用户主目录 → <HOME>、本 worktree 根 → <REPO>、系统临时目录 → <TMP>;
+#   2) 正文末尾空白规范化为恰好一个换行(捕获噪音);行内空白一字未动。
+# SHA256.txt 里的摘要是**经上述两步之后**这份文件本身的。
 #
 [2026-09-09T08:45:27.982Z] real pinned host up: <HOME>/.npm-global/bin/dsh --profile web --patch <TMP> --port 39411 --host 127.0.0.1 --no-open --trusted-host 127.0.0.1:39412
 [2026-09-09T08:45:27.982Z] run root <TMP> (runId mttusbaq-c45f8554b66c)
