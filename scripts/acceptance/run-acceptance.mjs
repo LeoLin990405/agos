@@ -29,7 +29,10 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, relative, resolve, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
+import { spawnSync } from 'node:child_process'
 import { REPO_ROOT, runCommand, parseNodeTestCounts, detectMissingModules, neutralEnv, verdictOf, isGreen, sha256 } from './lib/exec.mjs'
+import { loadHostIntegrations } from './lib/host-integrations.mjs'
+import { surfaceInputsDigest } from './lib/surface-inputs.mjs'
 
 const HERE = dirname(new URL(import.meta.url).pathname)
 /** 必需套件清单。少一个都不许从计划里消失(见 defaultPlan 的结构性失败)。 */
@@ -45,6 +48,9 @@ const printPlanOnly = flag('print-plan')
 const logDir = resolve(opt('logdir', join(tmpdir(), 'agos-acceptance-logs')))
 const jsonOut = opt('json', null)
 const surfaceOverride = opt('surface', null)   // A4 自检注入合成依赖面用
+// 同族:让负控能注入合成的宿主集成清单,而不必去动仓里那份真清单。
+// 与 --surface 一样计入 SYNTHETIC —— 用了它的运行不许写基线。
+const hostIntegrationsOverride = opt('host-integrations', null)
 const floorsPath = opt('floors', join(HERE, 'expected-counts.json'))
 
 // ---- 可测性接缝 ----
@@ -56,7 +62,7 @@ const pluginsOverride = opt('required-plugins', null)
 const pluginsRootOverride = opt('plugins-root', null)
 const selftestFileOverride = opt('selftest-file', null)
 // --surface 也算:注入合成依赖面等于关掉包级预检,这件事同样不该静默。
-const SYNTHETIC = pluginsOverride !== null || pluginsRootOverride !== null || selftestFileOverride !== null || surfaceOverride !== null
+const SYNTHETIC = pluginsOverride !== null || pluginsRootOverride !== null || selftestFileOverride !== null || surfaceOverride !== null || hostIntegrationsOverride !== null
 const PLUGINS = pluginsOverride === null
 	? REQUIRED_PLUGINS
 	: pluginsOverride.split(',').map((s) => s.trim()).filter(Boolean)
@@ -282,13 +288,78 @@ if (!Array.isArray(plan.codeGates) || plan.codeGates.length === 0) {
 	process.exit(78)
 }
 
-/** 依赖面体检:实测需要的包,从消费者角度能不能解析。 */
+/**
+ * 本次运行的 HEAD,用来判断依赖面产物是不是在量当前这棵树。拿不到就返回 null。
+ */
+function currentHead() {
+	const res = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' })
+	return res.status === 0 ? String(res.stdout).trim() : null
+}
+
+/**
+ * 快照还算不算数。
+ * 有 inputsDigest 就按内容比(权威);没有的话是旧格式产物 —— 按 gitHead 退化比对,
+ * 并且把「它连指纹都没有」当成陈旧,免得旧产物靠"缺字段"绕过这层判断。
+ */
+function surfaceStaleness(surface) {
+	if (typeof surface.inputsDigest === 'string') {
+		const now = surfaceInputsDigest(REPO_ROOT)
+		return surface.inputsDigest === now
+			? { stale: false, how: null }
+			: { stale: true, how: `测量时的输入指纹 ${surface.inputsDigest.slice(0, 12)} ≠ 当前 ${now.slice(0, 12)}` }
+	}
+	const head = currentHead()
+	if (head !== null && typeof surface.gitHead === 'string' && surface.gitHead !== head) {
+		return { stale: true, how: `产物无输入指纹(旧格式),且测于 ${surface.gitHead.slice(0, 8)},与本次 HEAD 不同` }
+	}
+	return { stale: true, how: '产物没有输入指纹(旧格式),无法判断它测的是不是当前这棵树' }
+}
+
+/**
+ * 依赖面体检:实测需要的包,从消费者角度能不能解析。
+ *
+ * 两条本轮补上的约束,都是踩过的坑:
+ *
+ * 1. **宿主环境集成要豁免。** 有些说明符在干净依赖树里解析不到是**预期**
+ *    (swarm 在真实宿主上是同级插件,不是本仓的包依赖),它们在
+ *    `host-integrations.json` 里逐条声明并被独立核验过降级路径。这里不豁免的话,
+ *    预检会把「按设计优雅降级、实跑 exit 0」的套件判成缺依赖失败 —— 假红。
+ *    豁免不等于不提:被豁免的说明符照样按名字打进输出,不许悄悄消失。
+ *
+ * 2. **陈旧的产物不许冒充当前树的结论。** 这份 JSON 是离线测出来的快照。本轮实测:
+ *    一份 2026-09-08 测的产物(比 swarm 解耦还早、只认识 69 个套件、通篇没有 swarm)
+ *    让预检报了「无缺失」—— 它描述的是一棵已经不存在的树,而输出看起来和真体检过一样。
+ *
+ *    判新旧按**内容**(inputsDigest),不按 gitHead:产物自己要被提交,一提交 HEAD 就变,
+ *    按 HEAD 判的结果只会是「永远陈旧」—— 那等于把这层预检永久关掉,比不加还糟。
+ *    内容指纹覆盖产物真正依赖的文件(各插件 test/ 与 lib/、宿主依赖树 package.json),
+ *    一个字没改就仍然算数,提交多少次都不影响。
+ *
+ *    陈旧时不硬失败(它可能只是没重测),但**降级为参考**:不再据此判任何套件失败,
+ *    并写明权威判定在 host-modules-check(完整静态导入图)那一闸。
+ */
 function preflight() {
 	const surfaceFile = surfaceOverride ? resolve(surfaceOverride) : join(HERE, 'dependency-surface.json')
 	if (!existsSync(surfaceFile)) return { available: false, surfaceFile, note: 'dependency-surface.json 不存在(先跑 measure-dependency-surface.mjs);不做包级预检', blockedPlugins: {} }
 	const surface = JSON.parse(readFileSync(surfaceFile, 'utf8'))
+
+	// 清单:读不了就当没有豁免(更严),不静默放行 —— 真正的 fail-closed 由
+	// host-modules-check 那一闸负责,那里清单缺失/损坏是硬退 2。
+	let exempt = new Set()
+	let exemptNote = null
+	try {
+		const manifestFile = hostIntegrationsOverride ? resolve(hostIntegrationsOverride) : join(HERE, 'host-integrations.json')
+		const manifest = loadHostIntegrations({ file: manifestFile, repoRoot: REPO_ROOT })
+		exempt = new Set(manifest.integrations.map((entry) => entry.specifier))
+	} catch (err) {
+		exemptNote = `宿主集成清单不可用(${err.message.split('\n')[0]});本次不豁免任何说明符`
+	}
+
+	const { stale, how: staleHow } = surfaceStaleness(surface)
+
 	const need = surface.summary?.externalToSuites ?? {}
 	const blockedPlugins = {}
+	const exempted = new Set()
 	const resolved = []
 	for (const [pkg, suiteIds] of Object.entries(need)) {
 		for (const suiteId of suiteIds) {
@@ -304,15 +375,24 @@ function preflight() {
 				if (up === d) break
 				d = up
 			}
-			if (found) { resolved.push({ package: pkg, plugin, at: found }) } else { (blockedPlugins[plugin] ??= new Set()).add(pkg) }
+			if (found) resolved.push({ package: pkg, plugin, at: found })
+			else if (exempt.has(pkg)) exempted.add(pkg)
+			else (blockedPlugins[plugin] ??= new Set()).add(pkg)
 		}
 	}
 	return {
 		available: true,
 		surfaceFile: relative(REPO_ROOT, surfaceFile),
 		measuredAt: surface.generatedAt,
+		measuredAtHead: surface.gitHead ?? null,
+		stale,
+		staleHow,
+		exemptNote,
+		exempted: [...exempted].sort(),
 		resolved: [...new Map(resolved.map((r) => [`${r.plugin}|${r.package}`, r])).values()],
-		blockedPlugins: Object.fromEntries(Object.entries(blockedPlugins).map(([k, v]) => [k, [...v].sort()])),
+		// 陈旧的快照不据以判任何套件失败:它描述的可能是另一棵树。
+		blockedPlugins: stale ? {} : Object.fromEntries(Object.entries(blockedPlugins).map(([k, v]) => [k, [...v].sort()])),
+		staleBlocked: stale ? Object.fromEntries(Object.entries(blockedPlugins).map(([k, v]) => [k, [...v].sort()])) : {},
 		hostPathSuites: surface.summary?.suitesRequiringHostPaths ?? [],
 	}
 }
@@ -329,6 +409,17 @@ console.log(`   Fleet 历史: DSH_FLEET_RUNS_FILE=${env.DSH_FLEET_RUNS_FILE}(不
 if (pre.available) {
 	const blocked = Object.keys(pre.blockedPlugins)
 	console.log(`   依赖面预检: ${pre.resolved.length} 个 (插件,包) 对可解析;${blocked.length ? `❌ 缺依赖的插件: ${blocked.join(', ')}` : '无缺失'}`)
+	if (pre.stale) {
+		console.log(`   ⚠️  依赖面产物已陈旧(${pre.staleHow})—— 它描述的可能是另一棵树,`)
+		console.log(`      故本次**不据此判任何套件失败**;权威判定见 host-modules-check(完整静态导入图)那一闸。`)
+		const wouldBlock = Object.keys(pre.staleBlocked)
+		if (wouldBlock.length) console.log(`      (若按这份陈旧快照,会被判缺依赖的是: ${wouldBlock.join(', ')} —— 仅供参考)`)
+		console.log(`      重新测量: node scripts/acceptance/measure-dependency-surface.mjs`)
+	}
+	if (pre.exempted.length) {
+		console.log(`   宿主环境集成(清单已声明,干净树里解析不到属预期,不判失败): ${pre.exempted.join(', ')}`)
+	}
+	if (pre.exemptNote) console.log(`   ⚠️  ${pre.exemptNote}`)
 	if (pre.hostPathSuites.length) console.log(`   ⚠️  依赖 ~/.dsh 绝对路径的套件(装包解决不了): ${pre.hostPathSuites.join(', ')}`)
 } else {
 	console.log(`   依赖面预检: ${pre.note}`)

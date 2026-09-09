@@ -65,10 +65,17 @@ function portIsFree(port) {
   })
 }
 
-/** A real, long-lived child process standing in for the host or the browser. */
+/**
+ * A real, long-lived child process standing in for the host or the browser.
+ *
+ * It exits on its own after five minutes. These tests exist to prove nothing is
+ * stranded, so a stand-in that outlives a runner killed mid-suite (a hard
+ * timeout, a `kill -9`) would be the very leak under test — with no `after`
+ * hook left to clean it up.
+ */
 async function spawnStandIn(label, dir) {
   const script = path.join(dir, `${label}.mjs`)
-  await writeFile(script, 'setInterval(() => {}, 1 << 30)\n')
+  await writeFile(script, 'setTimeout(() => process.exit(0), 300_000)\n')
   const child = spawn(process.execPath, [script], { stdio: 'ignore' })
   strays.add(child)
   return child

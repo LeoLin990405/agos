@@ -125,6 +125,18 @@ async function arriveAtPendingApproval(ctx, { title }) {
  * guessed from a timer: `session/page` with `throughSeq: -1` is the EMPTY cut
  * by definition and can never be used to observe growth.
  */
+/**
+ * 每一跳的 prompt 都带自己的轮次号,于是「两个可区分轮次」不是靠数字巧合,
+ * 而是每跳有一段只属于它的原文。证据条会把本跳的 query 原样显示在「问句」后面,
+ * 所以串轮次会直接变成页面上认得出的另一段话 —— scenario 8 的判据就建在这上面。
+ */
+const turnPrompt = (turn) => `历史构建 ${turn}`
+
+/** 从证据条文本里抓出它究竟摆着**哪些**轮次的原文。`(?!\d)` 防止 1 命中 10。 */
+function turnsNamedInStrip(text) {
+  return new Set(Array.from(text.matchAll(/历史构建 (\d+)(?!\d)/g), (m) => Number(m[1])))
+}
+
 async function buildLongSession(ctx, { title, turns = 30 }) {
   await ctx.setControl({ noTool: true })
   const sessionId = await ctx.createSession(title)
@@ -138,7 +150,7 @@ async function buildLongSession(ctx, { title, turns = 30 }) {
   }
 
   for (let index = 0; index < turns; index += 1) {
-    await ctx.prompt(sessionId, `历史构建 ${index + 1}`)
+    await ctx.prompt(sessionId, turnPrompt(index + 1))
     await ctx.waitFor(async () => {
       const state = await turnCount()
       return state.turns >= index + 1 && !state.running
@@ -786,15 +798,31 @@ export const scenarios = [
       ctx.record(await strip.count() > 0, 'the evidence strip is rendered (turn-evidence answered)')
 
       const text = (await strip.first().innerText()).replace(/\s+/g, ' ')
-      // Two distinguishable turns exist in the window by construction: the
-      // newest (before.currentStep.turn) and the oldest paged-in one.
+      const current = Number(after.currentStep.turn)
+
+      // 判据建在**内容**上,不建在数字出现与否上。每跳的 prompt 只属于它自己
+      // (`历史构建 N`),证据条把本跳的 query 原样摆在「问句」后面,于是串轮次
+      // 就是页面上多出另一段话 —— 这正是「两个可区分轮次的证据不串」的直接观测。
+      //
+      // 早先这里写的是「数字 N 不得出现在证据条任何位置」。那条断言在真宿主上
+      // 立刻误报:最旧轮次是 1,而证据条本来就写着「步骤 1」。它测的不是本场景
+      // 要测的东西,只是撞上了一个无关的合法数字。
       ctx.record(
-        text.includes(String(after.currentStep.turn)),
-        `the strip names the current turn ${after.currentStep.turn}: ${text.slice(0, 90)}`,
+        new RegExp(`轮次 ${current} ·`).test(text),
+        `the strip's binding names the current turn ${current}: ${text.slice(0, 90)}`,
       )
       ctx.record(
-        !text.includes(`历史构建 ${oldestTurnAfter}`) && !new RegExp(`\\b${oldestTurnAfter}\\b`).test(text),
-        `the strip does NOT name the paged-in historical turn ${oldestTurnAfter}: ${text.slice(0, 90)}`,
+        text.includes(`问句 ${turnPrompt(current)}`),
+        `the strip carries the CURRENT turn's own prompt (问句 ${turnPrompt(current)})`,
+      )
+      // 收口到集合相等:不止「最旧那轮没串进来」,而是**任何**别的轮次都没有。
+      // 证据若从别处漏,漏的是哪一轮都会被这条抓住。
+      const named = turnsNamedInStrip(text)
+      const strays = [...named].filter((turn) => turn !== current)
+      ctx.record(
+        strays.length === 0,
+        `the strip names no other turn's evidence (paged-in oldest is ${oldestTurnAfter}; `
+        + `strays: ${strays.length === 0 ? 'none' : strays.join(', ')})`,
       )
       return ctx.screenshot('8-history-evidence-does-not-leak')
     },

@@ -32,7 +32,7 @@ import {
   createOriginFence, resolveBrowserExecutable, resolvePlaywrightModule,
 } from '../../scripts/host-integration/browser-source.mjs';
 import { bringUpSignal, createResourceStack } from '../../scripts/host-integration/resource-stack.mjs';
-import { createRunRoot, disposeRunRoot } from '../../scripts/host-integration/run-registry.mjs';
+import { childPids, createRunRoot, disposeRunRoot, killRecorded, processIdentity, recordProcess } from '../../scripts/host-integration/run-registry.mjs';
 import { startHost } from '../../scripts/host-integration/start-host.mjs';
 
 /**
@@ -114,6 +114,69 @@ async function defaultLoadPlaywright() {
 async function defaultLaunchBrowser({ chromium }) {
   const { executablePath } = resolveBrowserExecutable()
   return chromium.launch({ headless: true, executablePath })
+}
+
+/** How long a browser gets to close politely before its group is signalled. */
+const BROWSER_CLOSE_GRACE_MS = 2500
+
+/** What a browser process looks like in an argv, for identifying the one we launched. */
+const BROWSER_COMMAND = /chrom|firefox|webkit|headless_shell/i
+
+/**
+ * Find and record the browser Playwright just spawned.
+ *
+ * Playwright does not expose the pid of the browser it launches, so an
+ * abandoned run would leave behind a browser that no manifest names and no
+ * cleanup can identify. The pid is recovered by diffing our own direct children
+ * across the launch, and then CONFIRMED against the process's argv — recording
+ * a pid we merely guessed would put a stranger into the manifest that cleanup
+ * later acts on.
+ * @param run - the run handle (for runDir and ownerToken).
+ * @param before - direct child pids captured before the launch.
+ * @param log - the run transcript.
+ * @returns the recorded identity, or undefined when no browser child was found.
+ */
+async function recordBrowserProcess(run, before, log) {
+  const spawned = (await childPids()).filter((pid) => !before.has(pid))
+  for (const pid of spawned) {
+    const identity = await processIdentity(pid)
+    if (identity === undefined || !BROWSER_COMMAND.test(identity.command)) continue
+    const recorded = await recordProcess(run.runDir, { pid, role: 'browser', ownerToken: run.ownerToken })
+    if (recorded !== undefined) {
+      log(`browser pid ${recorded.pid} recorded (group ${recorded.pgid}${recorded.pgid === recorded.pid ? ', own group' : ', shared group'})`)
+      return recorded
+    }
+  }
+  // Not fatal: the browser is still closed through Playwright, and the origin
+  // fence still applies. Only the orphan path loses a handle, so say so.
+  log('browser pid not identified: an abandoned run would leave this browser for the OS to reap')
+  return undefined
+}
+
+/**
+ * Close a browser within a bounded time.
+ *
+ * `browser.close()` against an installed Google Chrome takes a measured 30
+ * seconds: Playwright waits on the whole process tree, and Chrome's renderer
+ * and GPU helpers outlive the parent. Thirty seconds is paid on every dispose
+ * AND on every unwind of a failed bring-up, which turns a prompt reclamation
+ * into a stall. So: ask politely, and if the browser has not gone by the grace
+ * period, signal its process group and stop waiting. The profile is a
+ * throwaway, so there is nothing for a graceful exit to preserve.
+ * @param browser - the launched browser.
+ * @param recorded - its recorded identity (pid + pgid), when known.
+ */
+async function closeBrowser(browser, recorded) {
+  // Kept alive deliberately: once the group is signalled this settles on its
+  // own, and an unobserved rejection here must not fail the run.
+  const closing = Promise.resolve(browser.close()).then(() => 'closed', () => 'closed')
+  if (recorded?.pid === undefined) { await closing; return }
+  let timer
+  const grace = new Promise((resolve) => { timer = setTimeout(() => resolve('grace expired'), BROWSER_CLOSE_GRACE_MS) })
+  const first = await Promise.race([closing, grace])
+  clearTimeout(timer)
+  if (first === 'closed') return
+  try { await killRecorded(recorded, 'SIGKILL') } catch { /* already gone */ }
 }
 
 /**
@@ -217,10 +280,20 @@ export async function createHarness(options = {}) {
     log(`playwright: ${playwright.modulePath} (${playwright.source})`)
     for (const warning of playwright.warnings ?? []) log(`playwright warning: ${warning}`)
 
-    // 5. The browser process.
+    // 5. The browser process. Playwright does not hand back the pid of the
+    //    browser it spawns, so it is discovered by diffing our own direct
+    //    children around the launch and then recorded in the run manifest —
+    //    otherwise an abandoned run leaks a headless browser that no cleanup
+    //    can identify, and the origin fence would be the only thing standing
+    //    between a stray browser and the network.
     const browser = await stack.use('browser', async (register) => {
+      const before = new Set(await childPids())
       const launched = await launchBrowser({ chromium: playwright.chromium, register })
-      return { value: launched, dispose: () => launched.close() }
+      // Identify the new child by what it IS, not by the order it appeared in:
+      // recording the wrong pid would put a stranger in the manifest, and the
+      // manifest is what cleanup acts on.
+      const recorded = await recordBrowserProcess(run, before, log)
+      return { value: launched, dispose: () => closeBrowser(launched, recorded) }
     })
 
     const blockedRequests = []

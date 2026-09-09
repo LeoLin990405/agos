@@ -114,20 +114,51 @@ async function boot(audit, extra = {}) {
   return routes
 }
 
+/** 同一窗口、同一间隔下数定时器 tick —— 用来给「持锁期间」取一个同进程基线。 */
+async function countTicks(windowMs, everyMs) {
+  let ticks = 0
+  const interval = setInterval(() => { ticks += 1 }, everyMs)
+  try {
+    await new Promise((resolve) => setTimeout(resolve, windowMs))
+  } finally {
+    clearInterval(interval)
+  }
+  return ticks
+}
+
+const TICK_WINDOW_MS = 350
+const TICK_EVERY_MS = 25
+
 test('WIRING: 外部持锁期间 host 不被 park —— 无关 HTTP 端点照常响应,定时器照常走,POST /outcome 等住后成功', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'agos-wiring-liveness-'))
+  let interval
+  let holder
+  let postPromise
   try {
     const audit = join(dir, 'route-outcome.jsonl')
     await writeFile(audit, JSON.stringify(DECISION) + '\n')
     const routes = await boot(audit)
 
+    // 无锁基线:同进程、同窗口、同间隔先数一遍。
+    //
+    // 这条基线是本轮加的。原判据是「持锁期间 tick 必须 ≥ 10」—— 那是个**绝对吞吐**
+    // 阈值,量的是机器有多闲,不是事件循环有没有被 park。六套件并行把机器跑满时
+    // 它只走了 7 tick,于是把「机器忙」报成了「循环被 park」(实测误报一次)。
+    // 判据换成两条都不看机器绝对速度的:
+    //   · 硬底线 tick > 0 —— 单线程事件循环一旦被同步自旋占住,定时器**恰好**一个都不走,
+    //     所以「大于零」本身就已证明没被 park,且与负载无关;
+    //   · 归一化 —— 与刚量到的同进程基线比,持锁窗口不得掉到 1/4 以下。
+    //     负载升高时两个窗口一起降,比值稳定;真被 park 时分子是 0,比值必然崩。
+    const baselineTicks = await countTicks(TICK_WINDOW_MS, TICK_EVERY_MS)
+    assert.ok(baselineTicks > 0, `无锁基线就是 ${baselineTicks} tick:本次测量环境无效,判定作废`)
+
     // 持锁 2s(>500ms 正当争用、<5s 写路径预算):POST /outcome 必须等住并最终成功,
     // 而等待期间整个 host 必须保持响应。
-    const holder = await holdLockElsewhere(audit, 2_000)
+    holder = await holdLockElsewhere(audit, 2_000)
     let ticks = 0
-    const interval = setInterval(() => { ticks += 1 }, 25)
+    interval = setInterval(() => { ticks += 1 }, TICK_EVERY_MS)
 
-    const postPromise = call(routes.get('/api/agos/routes/outcome'), 'POST', '/api/agos/routes/outcome', {
+    postPromise = call(routes.get('/api/agos/routes/outcome'), 'POST', '/api/agos/routes/outcome', {
       ref: DECISION.id, result: 'ok',
     })
 
@@ -139,24 +170,35 @@ test('WIRING: 外部持锁期间 host 不被 park —— 无关 HTTP 端点照�
     assert.equal(outcomes.status, 200, `持锁期间无关端点被拖死(${outcomes.status})`)
     assert.ok(outcomesElapsed < 800, `无关端点花了 ${outcomesElapsed}ms:事件循环被 park`)
 
-    // 再等 ~350ms(仍在外部持锁窗口内)采样定时器:park 的世界里这段时间
-    // 一个 tick 都不会走;异步等锁的世界里应当走了十几个。
-    await new Promise((resolve) => setTimeout(resolve, 350))
+    // 再等一个同样长的窗口(仍在外部持锁期内)采样定时器。
+    await new Promise((resolve) => setTimeout(resolve, TICK_WINDOW_MS))
     const ticksDuringHold = ticks
-    assert.ok(ticksDuringHold >= 10, `持锁期间定时器只走了 ${ticksDuringHold} tick:事件循环被 park`)
+    assert.ok(
+      ticksDuringHold > 0,
+      `持锁期间定时器一个 tick 都没走:事件循环被 park(无锁基线 ${baselineTicks} tick)`,
+    )
+    assert.ok(
+      ticksDuringHold * 4 >= baselineTicks,
+      `持锁期间只走了 ${ticksDuringHold} tick,不足无锁基线 ${baselineTicks} 的 1/4:`
+      + '事件循环大部分时间被占住',
+    )
 
-    let post
-    try {
-      post = await postPromise
-    } finally {
-      clearInterval(interval)
-      await holder.done
-    }
-
+    const post = await postPromise
     assert.equal(post.status, 200, `等锁释放后应成功,实际 ${post.status}: ${JSON.stringify(post.body)}`)
     const rows = (await readFile(audit, 'utf8')).split('\n').filter(Boolean).map((line) => JSON.parse(line))
     assert.equal(rows.filter((row) => row.kind === 'outcome' && row.ref === DECISION.id).length, 1)
   } finally {
+    // 清理必须在**所有**退出路径上跑,包括断言抛出的那条。
+    // 原来 clearInterval / await holder.done 写在断言之后,于是上面那次误报
+    // 把 interval 和持锁子进程一起漏在世界上:事件循环再也空不下来,
+    // node:test 报 "Promise resolution is still pending",整个文件挂到 runner
+    // 超时才被杀 —— 一条失败断言变成 40 分钟。失败要快,不能挂。
+    if (interval !== undefined) clearInterval(interval)
+    if (postPromise !== undefined) await postPromise.catch(() => {})
+    if (holder !== undefined) {
+      holder.child.kill('SIGKILL')
+      await holder.done
+    }
     await rm(dir, { recursive: true, force: true })
   }
 })

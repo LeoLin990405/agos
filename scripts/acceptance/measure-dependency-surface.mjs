@@ -33,11 +33,13 @@
 //
 // 用法:node scripts/acceptance/measure-dependency-surface.mjs [--out=<file>] [--plugin=<name>] [--no-shield]
 import { writeFileSync, mkdirSync, existsSync, readdirSync, lstatSync, readlinkSync } from 'node:fs'
+import { surfaceInputsDigest } from './lib/surface-inputs.mjs'
 import { join, relative, dirname } from 'node:path'
 import { homedir, tmpdir } from 'node:os'
 import { REPO_ROOT, runCommand, parseNodeTestCounts, detectMissingModules, neutralEnv, verdictOf } from './lib/exec.mjs'
 
 const PLUGINS = ['dsh-agos', 'dsh-agos-router', 'dsh-mcp-bridge', 'cn-capabilities', 'dsh-fleet']
+
 const DSH_HOME = join(process.env.HOME ?? '/nonexistent', '.dsh')
 // 三张 Seatbelt 画像。关键点:插件树里可能**已经**被别的实现者装好了 node_modules,
 // 所以"零 node_modules"不能靠删目录来测(那会毁掉别人的工作),只能靠拒读来测。
@@ -201,6 +203,9 @@ const manifest = {
 	generatedAt: new Date().toISOString(),
 	repoRoot: REPO_ROOT,
 	gitHead: runCommand({ argv: ['git', 'rev-parse', 'HEAD'], cwd: REPO_ROOT, timeoutMs: 20000 }).output.trim(),
+	// 输入指纹:本份快照测的是**这些文件的这个内容**。验收器据此判断它还算不算数 ——
+	// 比 gitHead 管用,因为产物自己要被提交,一提交 HEAD 就变、按 HEAD 判会永远陈旧。
+	inputsDigest: surfaceInputsDigest(REPO_ROOT),
 	environment: {
 		node: process.version,
 		platform: process.platform,

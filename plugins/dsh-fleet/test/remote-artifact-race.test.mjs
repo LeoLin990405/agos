@@ -246,6 +246,43 @@ const armedAnd = (condition) => (box) => `[ -e ${JSON.stringify(box.armed)} ] &&
 // 1. guard -> open (the window the old before/after stat could not close)
 // ---------------------------------------------------------------------------
 
+
+/**
+ * 拒绝有没有**上报给操作者通道**（onStreamError），以及上报的是不是那条理由。
+ *
+ * 原先这里写的是 `refusals.at(-1)?.refused === true` —— 它断言的是「拒绝必须是最后
+ * 一个事件」。那不是真属性:拒绝之后还有拆解。实测(整套件 + 8 路 CPU 负载,三跑复现两次)
+ * 数组长这样 ——
+ *   [{kind:'tgz', refused:true, error:'artifact refused: symlink'},
+ *    {kind:'tgz',               error:'ssh exit null'}]
+ * 第 0 条正是要断言的那条拒绝,第 1 条是清理阶段 ssh 子进程被杀留下的。机器一忙,
+ * 拆解事件先落进数组,`at(-1)` 就读到它 —— 红的是排序耦合,产品一点问题没有。
+ *
+ * 换成「存在一条 refused:true 且理由匹配」:去掉的只是无意义的顺序耦合,
+ * 判别力反而更强 —— 原来那条不看理由,现在看。
+ */
+function assertRefusalReported(refusals, reason, kind) {
+  const reported = refusals.filter((event) => event?.refused === true)
+  assert.ok(
+    reported.length > 0,
+    `拒绝必须上报到 onStreamError,实际一条都没有:${JSON.stringify(refusals)}`,
+  )
+  // reason 可省:有的路由(不可区分的 404)对内对外用同一句话,拒绝由 refused 标志承载。
+  const matching = reason === undefined
+    ? reported
+    : reported.filter((event) => reason.test(String(event.error ?? '')))
+  assert.ok(
+    matching.length > 0,
+    `上报的拒绝理由要匹配 ${reason},实际:${JSON.stringify(reported)}`,
+  )
+  if (kind !== undefined) {
+    assert.ok(
+      matching.some((event) => event.kind === kind),
+      `拒绝要归到 kind=${kind} 这条路由上,实际:${JSON.stringify(matching)}`,
+    )
+  }
+}
+
 test('remote file route: leaf swapped to a symlink between the path guard and the open is refused', async (t) => {
   const box = await fixture()
   t.after(box.cleanup)
@@ -268,7 +305,11 @@ test('remote file route: leaf swapped to a symlink between the path guard and th
   // the route confirm the existence of names outside the run.
   assert.equal(response.status, 404)
   assert.equal(JSON.parse(response.body).error, 'artifact not found')
-  assert.equal(refusals.at(-1)?.refused, true)
+  // 对外是不可区分的 404(不做存在性预言机),但操作者通道里必须留下「这是一次拒绝」。
+  // 这里**不**核对理由文案:本分支的设计就是对内对外都用同一句 'artifact not found',
+  // 拒绝这一事实由 refused 标志承载 —— 硬要求一个 'artifact refused: …' 的理由,
+  // 等于替代码规定了它没有也不该有的行为(我第一版就是这么写错的)。
+  assertRefusalReported(refusals, undefined, 'file')
   // One remote execution, so there is no second unbound resolution to attack.
   assert.equal(calls.spawn, 1)
   assert.equal(calls.read, 0)
@@ -291,7 +332,7 @@ test('remote file route: leaf swapped to a hardlink between the path guard and t
   assertNoSentinel(response, 'file route')
   assert.equal(response.status, 409)
   assert.match(JSON.parse(response.body).error, /artifact refused: hard-links/)
-  assert.equal(refusals.at(-1)?.refused, true)
+  assertRefusalReported(refusals, /artifact refused: hard-links/)
 })
 
 test('remote file route: a leaf replaced after validation still serves the bytes that were validated', async (t) => {
@@ -364,7 +405,7 @@ test('remote tgz route: a leaf swapped inside the archive worker fails the whole
   assertNoSentinel(response, 'tgz route')
   assert.equal(response.status, 409)
   assert.match(JSON.parse(response.body).error, /artifact refused: symlink/)
-  assert.equal(refusals.at(-1)?.refused, true)
+  assertRefusalReported(refusals, /artifact refused: symlink/)
 })
 
 // ---------------------------------------------------------------------------
@@ -450,7 +491,7 @@ test('remote tgz route: a directory component swapped between enumeration and th
   assertNoSentinel(response, 'tgz route')
   assert.equal(response.status, 409)
   assert.match(JSON.parse(response.body).error, /artifact refused: path-segment/)
-  assert.equal(refusals.at(-1)?.refused, true)
+  assertRefusalReported(refusals, /artifact refused: path-segment/)
 })
 
 test('remote tgz route: a leaf hardlinked to outside content between enumeration and the read is refused', async (t) => {
@@ -469,7 +510,7 @@ test('remote tgz route: a leaf hardlinked to outside content between enumeration
   assertNoSentinel(response, 'tgz route')
   assert.equal(response.status, 409)
   assert.match(JSON.parse(response.body).error, /artifact refused: hard-links/)
-  assert.equal(refusals.at(-1)?.refused, true)
+  assertRefusalReported(refusals, /artifact refused: hard-links/)
 })
 
 test('remote file route: a directory component swapped after the descent cannot redirect the held read', async (t) => {
@@ -506,8 +547,7 @@ test('remote manifest: a leaf swapped during the walk fails the listing closed i
   assertNoSentinel(response, 'manifest route')
   assert.equal(response.status, 409)
   assert.match(JSON.parse(response.body).error, /artifact refused: hard-links/)
-  assert.equal(refusals.at(-1)?.refused, true)
-  assert.equal(refusals.at(-1)?.kind, 'manifest')
+  assertRefusalReported(refusals, /artifact refused: hard-links/, 'manifest')
 })
 
 // ---------------------------------------------------------------------------

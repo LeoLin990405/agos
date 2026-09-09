@@ -70,13 +70,63 @@ const TERM_GRACE_MS = 3000
  */
 export async function processIdentity(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return undefined
-  const result = await run('ps', ['-o', 'pid=,lstart=,command=', '-p', String(pid)]).catch(() => undefined)
+  const result = await run('ps', ['-o', 'pid=,pgid=,lstart=,command=', '-p', String(pid)]).catch(() => undefined)
   if (result === undefined) return undefined
   const line = result.stdout.split('\n').find((entry) => entry.trim() !== '')
   if (line === undefined) return undefined
-  const match = /^\s*(\d+)\s+(\S{3}\s+\S{3}\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.*)$/.exec(line)
+  const match = /^\s*(\d+)\s+(\d+)\s+(\S{3}\s+\S{3}\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.*)$/.exec(line)
   if (match === null) return undefined
-  return { pid: Number(match[1]), startedAt: match[2].replace(/\s+/g, ' '), command: match[3] }
+  // pgid is carried so a process that leads its own group (a browser and its
+  // renderer/GPU helpers) can be reclaimed as a whole; see killRecorded.
+  return { pid: Number(match[1]), pgid: Number(match[2]), startedAt: match[3].replace(/\s+/g, ' '), command: match[4] }
+}
+
+/**
+ * Direct children of a process, as the OS reports them.
+ *
+ * Used to learn the pid of a process someone ELSE spawned on our behalf:
+ * Playwright launches the browser as a direct child of this process but does
+ * not expose its pid on the object it returns, so an orphaned run would leak a
+ * headless browser that no manifest names. Diffing the child list around the
+ * launch is what makes that pid recordable.
+ * @param parentPid - the parent to inspect (defaults to this process).
+ * @returns the child pids, or an empty array when pgrep finds none.
+ */
+export async function childPids(parentPid = process.pid) {
+  const result = await run('pgrep', ['-P', String(parentPid)]).catch(() => undefined)
+  if (result === undefined) return []
+  return result.stdout.split('\n').map((line) => Number(line.trim())).filter((pid) => Number.isInteger(pid) && pid > 0)
+}
+
+/**
+ * Signal a recorded process, taking its whole group when it leads one.
+ *
+ * A browser is a process TREE: killing only the parent leaves renderer and GPU
+ * helpers behind, and Playwright's own `close()` then waits 30s for them before
+ * giving up — measured, not assumed. Signalling the group reclaims the subtree
+ * at once.
+ *
+ * Two guards make the group signal safe, and both must hold:
+ * - the recorded pgid must equal the recorded pid, i.e. the process leads its
+ *   OWN group, so the group is exactly that subtree and nothing else;
+ * - that group must not be our own, so this can never signal the caller.
+ * @param entry - a recorded identity (pid, and pgid when it was captured).
+ * @param signal - the signal to send.
+ * @returns what was signalled, for the evidence log.
+ */
+export async function killRecorded(entry, signal) {
+  const ownGroup = (await processIdentity(process.pid))?.pgid
+  const leadsOwnGroup = Number.isInteger(entry?.pgid) && entry.pgid === entry.pid
+  if (leadsOwnGroup && entry.pgid !== ownGroup) {
+    try {
+      process.kill(-entry.pgid, signal)
+      return { pid: entry.pid, signal, sent: true, scope: 'group' }
+    } catch {
+      // The group may already be gone; fall through to the single-pid attempt.
+    }
+  }
+  process.kill(entry.pid, signal)
+  return { pid: entry.pid, signal, sent: true, scope: 'process' }
 }
 
 /**
@@ -187,9 +237,19 @@ export async function recordProcess(runDir, { pid, role, ownerToken }) {
   if (manifest.ownerToken !== ownerToken) throw new Error('run-registry: owner token mismatch, refusing to record')
   const identity = await processIdentity(pid)
   if (identity === undefined) return undefined
+  // Whether the argv names the runId is decided HERE, while the process is
+  // provably ours (we are its parent and its pid cannot have been recycled
+  // yet), and then demanded forever after. The host is launched with a
+  // `--patch` path inside the run directory, so its argv does name the runId.
+  // A browser launched by Playwright does not: its argv points at Playwright's
+  // own random profile directory. Demanding the runId there would make the
+  // browser permanently unreapable, so for those entries the identity rule is
+  // pid + kernel start second + byte-exact argv, which the random profile path
+  // in that argv already makes unique.
+  const runIdInCommand = typeof manifest.runId === 'string' && identity.command.includes(manifest.runId)
   manifest.processes = [
     ...(manifest.processes ?? []).filter((entry) => entry.pid !== pid),
-    { ...identity, role },
+    { ...identity, role, runIdInCommand },
   ]
   await persist(runDir, manifest)
   return identity
@@ -270,12 +330,15 @@ export async function classifyRun(runDir, { runId, ownerToken } = {}) {
  * @returns what happened, for the evidence log.
  */
 async function signalRecorded(entry, runId, signal) {
-  // Killing is irreversible, so the strictest identity rule applies here.
-  const verdict = await processMatches(entry, { runId, requireRunIdInCommand: true })
+  // Killing is irreversible, so the strictest rule that CAN hold for this entry
+  // applies. `runIdInCommand` was decided when the process was recorded and was
+  // provably ours; an entry recorded before this field existed is treated as
+  // naming the runId, which is the stricter reading.
+  const demandRunId = entry?.runIdInCommand !== false
+  const verdict = await processMatches(entry, { runId, requireRunIdInCommand: demandRunId })
   if (!verdict.ok) return { pid: entry?.pid, signal, sent: false, reason: verdict.reason }
   try {
-    process.kill(entry.pid, signal)
-    return { pid: entry.pid, signal, sent: true }
+    return await killRecorded(entry, signal)
   } catch (error) {
     return { pid: entry.pid, signal, sent: false, reason: String(error) }
   }

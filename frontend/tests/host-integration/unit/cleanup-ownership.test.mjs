@@ -49,7 +49,9 @@ after(async () => {
  */
 async function startStandInHost(runDir) {
   const script = path.join(runDir, 'stand-in-host.mjs')
-  await writeFile(script, 'setInterval(() => {}, 1 << 30)\n')
+  // Self-terminating: a runner killed mid-suite skips `after`, and a stand-in
+  // that outlived it would be exactly the stray these tests are about.
+  await writeFile(script, 'setTimeout(() => process.exit(0), 300_000)\n')
   const child = spawn(process.execPath, [script], { stdio: 'ignore' })
   spawned.add(child)
   // Wait until the OS can see it, so the recorded identity is the real one.
@@ -191,6 +193,77 @@ describe('cleanup ownership', () => {
 
     stranger.kill('SIGKILL')
     await waitForExit(stranger.pid)
+  })
+
+  it('reaps a recorded process TREE, not just its root', async () => {
+    // A browser is a process tree: killing only the parent strands the renderer
+    // and GPU helpers, which then keep running (and keep the run's ports and
+    // profile busy) after cleanup reported success. The recorded process leads
+    // its own group, so the group is exactly that subtree.
+    const run = await createRunRoot({ root: sandbox })
+    const kidsFile = path.join(run.runDir, 'kids.json')
+    const script = path.join(run.runDir, 'stand-in-tree.mjs')
+    await writeFile(script, `
+import { spawn } from 'node:child_process'
+import { writeFileSync } from 'node:fs'
+const kids = [spawn('/bin/sleep', ['300'], { stdio: 'ignore' }), spawn('/bin/sleep', ['300'], { stdio: 'ignore' })]
+writeFileSync(${JSON.stringify(kidsFile)}, JSON.stringify(kids.map((k) => k.pid)))
+setTimeout(() => process.exit(0), 300_000)
+`)
+    // `detached` makes the child a process-group leader, which is what the real
+    // browser launch also produces.
+    const tree = spawn(process.execPath, [script], { stdio: 'ignore', detached: true })
+    spawned.add(tree)
+    for (let attempt = 0; attempt < 200 && !existsSync(kidsFile); attempt += 1) {
+      await new Promise((resolve) => { setTimeout(resolve, 25) })
+    }
+    const kidPids = JSON.parse(await readFile(kidsFile, 'utf8'))
+    assert.equal(kidPids.length, 2)
+    assert.ok(kidPids.every((pid) => isAlive(pid)), 'both helpers are running before the reap')
+
+    const recorded = await recordProcess(run.runDir, { pid: tree.pid, role: 'browser', ownerToken: run.ownerToken })
+    assert.equal(recorded.pgid, tree.pid, 'the stand-in leads its own process group')
+    await orphan(run.runDir)
+
+    const report = await reapRun(run.runDir, { root: sandbox })
+    assert.equal(report.processes[0].sent, true)
+    assert.equal(report.processes[0].scope, 'group', 'a group leader must be signalled as a group')
+    assert.ok(await waitForExit(tree.pid), 'the recorded process must be gone')
+    for (const pid of kidPids) {
+      assert.ok(await waitForExit(pid), `helper ${pid} must not survive the reap`)
+    }
+  })
+
+  it('a process whose argv cannot name the runId is still identified, and drift still refuses', async () => {
+    // Playwright launches the browser with ITS own random profile path, so that
+    // argv never mentions our runId. Demanding it would make the browser
+    // permanently unreapable; the rule that applies instead is pid + kernel
+    // start second + byte-exact argv, decided when we recorded it.
+    const run = await createRunRoot({ root: sandbox })
+    const outsider = spawn('/bin/sleep', ['300'], { stdio: 'ignore' })
+    spawned.add(outsider)
+    for (let attempt = 0; attempt < 100 && await processIdentity(outsider.pid) === undefined; attempt += 1) {
+      await new Promise((resolve) => { setTimeout(resolve, 20) })
+    }
+    const recorded = await recordProcess(run.runDir, { pid: outsider.pid, role: 'browser', ownerToken: run.ownerToken })
+    assert.equal(recorded !== undefined, true)
+
+    const manifestPath = path.join(run.runDir, 'owner.json')
+    const written = JSON.parse(await readFile(manifestPath, 'utf8'))
+    assert.equal(written.processes[0].runIdInCommand, false, 'the argv genuinely does not name the runId')
+
+    // Drift still protects it: same pid, different start second → no signal.
+    const drifted = JSON.parse(JSON.stringify(written))
+    drifted.processes[0].startedAt = 'Mon Jan  1 00:00:00 2001'
+    drifted.owner = await deadIdentity()
+    await writeFile(manifestPath, JSON.stringify(drifted, undefined, 2))
+    const refused = await reapRun(run.runDir, { root: sandbox })
+    assert.equal(refused.processes[0].sent, false)
+    assert.match(refused.processes[0].reason, /pid reused/)
+    assert.equal(isAlive(outsider.pid), true, 'a drifted browser entry must not be killed either')
+
+    outsider.kill('SIGKILL')
+    await waitForExit(outsider.pid)
   })
 
   it('leaves a directory with no manifest yet alone (a run that is starting up)', async () => {

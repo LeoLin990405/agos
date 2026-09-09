@@ -1,8 +1,9 @@
 {
   "schema": "agos-acceptance/dependency-surface@1",
-  "generatedAt": "2026-09-08T20:12:03.255Z",
+  "generatedAt": "2026-09-09T08:40:50.310Z",
   "repoRoot": "<REPO_ROOT>",
-  "gitHead": "7e7e359801644b77b302835f374f035e2836926d",
+  "gitHead": "b067830228630cb4b8d66713687da983dd43b518",
+  "inputsDigest": "02046c1ef77dc5730625cd1a9d31b0b995db6465ce449a0bac50443ecb2d16d3",
   "environment": {
     "node": "v26.7.0",
     "platform": "darwin",
@@ -32,6 +33,9 @@
   },
   "method": {
     "note": "Dependency trees are NOT removed to measure — other implementers may own them. Absence is simulated with macOS Seatbelt read-denial, which is non-destructive and reproducible regardless of what is installed.",
+    "proves": "Per-suite pass/fail in the real environment, and whether a suite needs absolute paths under ~/.dsh (which installing packages cannot fix).",
+    "doesNotProve": "NOT a complete dependency surface. Node aborts at the FIRST unresolved specifier in the module graph, so each suite reveals at most one missing package per run. The authoritative complete surface comes from static import-graph traversal: scripts/acceptance/lib/import-graph.mjs via `prepare-host-modules.mjs --check`.",
+    "authoritativeSurface": "scripts/acceptance/prepare-host-modules.mjs --check (static import graph)",
     "modes": {
       "natural": "node --test test/<file> in the plugin cwd, no sandbox — the environment exactly as it is",
       "no-dsh": "same, wrapped in /usr/bin/sandbox-exec denying read+write of ~/.dsh",
@@ -47,12 +51,12 @@
     }
   },
   "summary": {
-    "totalSuites": 69,
+    "totalSuites": 77,
     "byClassification": {
-      "hermetic": 53,
+      "hermetic": 59,
       "host-modules": 14,
-      "host-path": 1,
-      "sandbox-incompatible": 1
+      "host-path": 2,
+      "sandbox-incompatible": 2
     },
     "suitesRequiringHostModules": [
       "dsh-agos-router/dispatch.test.mjs",
@@ -71,9 +75,13 @@
       "dsh-fleet/trace-paging.test.mjs"
     ],
     "suitesRequiringHostPaths": [
-      "dsh-agos-router/http-routes.test.mjs"
+      "dsh-agos-router/http-routes.test.mjs",
+      "dsh-agos-router/index-async-wiring.test.mjs"
     ],
     "requiredExternalsBySuite": {
+      "dsh-agos-router/index-async-wiring.test.mjs": [
+        "@deepseek-ai/dsh-llm"
+      ],
       "dsh-agos-router/settings-012.test.mjs": [
         "@deepseek-ai/schemastery"
       ],
@@ -90,34 +98,43 @@
         "@deepseek-ai/schemastery"
       ],
       "cn-capabilities/plan-run.fake.test.mjs": [
-        "@deepseek-ai/schemastery"
+        "@deepseek-ai/schemastery",
+        "dsh-kimicode-swarm"
       ],
       "dsh-fleet/codex-host.test.mjs": [
         "@deepseek-ai/schemastery"
       ],
       "dsh-fleet/fake-jobs.test.mjs": [
-        "@deepseek-ai/schemastery"
+        "@deepseek-ai/schemastery",
+        "dsh-kimicode-swarm"
       ],
       "dsh-fleet/farm-integration.test.mjs": [
-        "@deepseek-ai/schemastery"
+        "@deepseek-ai/schemastery",
+        "dsh-kimicode-swarm"
       ],
       "dsh-fleet/fleet-hosts-route.test.mjs": [
         "@deepseek-ai/schemastery"
       ],
       "dsh-fleet/fleet.fake.test.mjs": [
-        "@deepseek-ai/schemastery"
+        "@deepseek-ai/schemastery",
+        "dsh-kimicode-swarm"
       ],
       "dsh-fleet/local-cleanup-integration.test.mjs": [
-        "@deepseek-ai/schemastery"
+        "@deepseek-ai/schemastery",
+        "dsh-kimicode-swarm"
       ],
       "dsh-fleet/remote-cmd.test.mjs": [
-        "@deepseek-ai/schemastery"
+        "@deepseek-ai/schemastery",
+        "dsh-kimicode-swarm"
       ],
       "dsh-fleet/trace-paging.test.mjs": [
         "@deepseek-ai/schemastery"
       ]
     },
     "externalToSuites": {
+      "@deepseek-ai/dsh-llm": [
+        "dsh-agos-router/index-async-wiring.test.mjs"
+      ],
       "@deepseek-ai/schemastery": [
         "dsh-agos-router/settings-012.test.mjs",
         "cn-capabilities/autoresearch-workspace.test.mjs",
@@ -135,6 +152,14 @@
       ],
       "@deepseek-ai/dsh-agent": [
         "dsh-mcp-bridge/mcp.test.mjs"
+      ],
+      "dsh-kimicode-swarm": [
+        "cn-capabilities/plan-run.fake.test.mjs",
+        "dsh-fleet/fake-jobs.test.mjs",
+        "dsh-fleet/farm-integration.test.mjs",
+        "dsh-fleet/fleet.fake.test.mjs",
+        "dsh-fleet/local-cleanup-integration.test.mjs",
+        "dsh-fleet/remote-cmd.test.mjs"
       ]
     }
   },
@@ -156,7 +181,7 @@
             "test/agent-kernel.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.13,
           "counts": {
             "tests": 3,
             "suites": 0,
@@ -183,7 +208,7 @@
             "test/agent-kernel.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.14,
           "counts": {
             "tests": 3,
             "suites": 0,
@@ -210,7 +235,7 @@
             "test/agent-kernel.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.14,
           "counts": {
             "tests": 3,
             "suites": 0,
@@ -247,7 +272,7 @@
             "test/input-limits.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.13,
           "counts": {
             "tests": 5,
             "suites": 0,
@@ -274,7 +299,7 @@
             "test/input-limits.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 5,
             "suites": 0,
@@ -301,7 +326,7 @@
             "test/input-limits.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 5,
             "suites": 0,
@@ -338,7 +363,7 @@
             "test/memory-desk.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -365,7 +390,7 @@
             "test/memory-desk.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -392,7 +417,7 @@
             "test/memory-desk.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.14,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -429,7 +454,7 @@
             "test/plugins-inventory.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 2,
             "suites": 0,
@@ -456,7 +481,7 @@
             "test/plugins-inventory.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 2,
             "suites": 0,
@@ -483,7 +508,7 @@
             "test/plugins-inventory.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.16,
           "counts": {
             "tests": 2,
             "suites": 0,
@@ -520,7 +545,7 @@
             "test/secrets-gate-bench.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.38,
+          "durationSeconds": 0.71,
           "counts": {
             "tests": 3,
             "suites": 0,
@@ -547,7 +572,7 @@
             "test/secrets-gate-bench.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.38,
+          "durationSeconds": 0.74,
           "counts": {
             "tests": 3,
             "suites": 0,
@@ -574,7 +599,7 @@
             "test/secrets-gate-bench.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.4,
+          "durationSeconds": 0.74,
           "counts": {
             "tests": 3,
             "suites": 0,
@@ -611,7 +636,7 @@
             "test/secrets-gate.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.12,
+          "durationSeconds": 0.23,
           "counts": {
             "tests": 13,
             "suites": 0,
@@ -638,7 +663,7 @@
             "test/secrets-gate.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.13,
+          "durationSeconds": 0.26,
           "counts": {
             "tests": 13,
             "suites": 0,
@@ -665,7 +690,7 @@
             "test/secrets-gate.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.13,
+          "durationSeconds": 0.23,
           "counts": {
             "tests": 13,
             "suites": 0,
@@ -679,6 +704,97 @@
           "reason": "ok",
           "missingModules": [],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-host-modules/dsh-agos/secrets-gate.test.mjs.txt",
+          "errorExcerpt": null
+        },
+        "permissive": null
+      },
+      "methodCaveat": null
+    },
+    {
+      "id": "dsh-agos/session-delete-host-verdict.test.mjs",
+      "plugin": "dsh-agos",
+      "file": "test/session-delete-host-verdict.test.mjs",
+      "cwd": "plugins/dsh-agos",
+      "classification": "hermetic",
+      "requiredExternals": [],
+      "hostPathDependency": false,
+      "modes": {
+        "natural": {
+          "mode": "natural",
+          "argv": [
+            "node",
+            "--test",
+            "test/session-delete-host-verdict.test.mjs"
+          ],
+          "exitCode": 0,
+          "durationSeconds": 0.18,
+          "counts": {
+            "tests": 13,
+            "suites": 0,
+            "pass": 13,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "verdict": "pass",
+          "reason": "ok",
+          "missingModules": [],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/natural/dsh-agos/session-delete-host-verdict.test.mjs.txt",
+          "errorExcerpt": null
+        },
+        "no-dsh": {
+          "mode": "no-dsh",
+          "argv": [
+            "/usr/bin/sandbox-exec",
+            "-f",
+            "/var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-sb-no-dsh.sb",
+            "node",
+            "--test",
+            "test/session-delete-host-verdict.test.mjs"
+          ],
+          "exitCode": 0,
+          "durationSeconds": 0.19,
+          "counts": {
+            "tests": 13,
+            "suites": 0,
+            "pass": 13,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "verdict": "pass",
+          "reason": "ok",
+          "missingModules": [],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-dsh/dsh-agos/session-delete-host-verdict.test.mjs.txt",
+          "errorExcerpt": null
+        },
+        "no-host-modules": {
+          "mode": "no-host-modules",
+          "argv": [
+            "/usr/bin/sandbox-exec",
+            "-f",
+            "/var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-sb-no-host-modules.sb",
+            "node",
+            "--test",
+            "test/session-delete-host-verdict.test.mjs"
+          ],
+          "exitCode": 0,
+          "durationSeconds": 0.19,
+          "counts": {
+            "tests": 13,
+            "suites": 0,
+            "pass": 13,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "verdict": "pass",
+          "reason": "ok",
+          "missingModules": [],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-host-modules/dsh-agos/session-delete-host-verdict.test.mjs.txt",
           "errorExcerpt": null
         },
         "permissive": null
@@ -702,7 +818,7 @@
             "test/session-management.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.26,
+          "durationSeconds": 0.43,
           "counts": {
             "tests": 36,
             "suites": 0,
@@ -729,7 +845,7 @@
             "test/session-management.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.27,
+          "durationSeconds": 0.4,
           "counts": {
             "tests": 36,
             "suites": 0,
@@ -756,7 +872,7 @@
             "test/session-management.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.27,
+          "durationSeconds": 0.41,
           "counts": {
             "tests": 36,
             "suites": 0,
@@ -793,7 +909,7 @@
             "test/session-memory-inject.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 10,
             "suites": 0,
@@ -820,7 +936,7 @@
             "test/session-memory-inject.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.16,
           "counts": {
             "tests": 10,
             "suites": 0,
@@ -847,7 +963,7 @@
             "test/session-memory-inject.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.16,
           "counts": {
             "tests": 10,
             "suites": 0,
@@ -884,11 +1000,11 @@
             "test/session-memory-rank.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.16,
           "counts": {
-            "tests": 11,
+            "tests": 12,
             "suites": 0,
-            "pass": 11,
+            "pass": 12,
             "fail": 0,
             "cancelled": 0,
             "skipped": 0,
@@ -911,11 +1027,11 @@
             "test/session-memory-rank.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.17,
           "counts": {
-            "tests": 11,
+            "tests": 12,
             "suites": 0,
-            "pass": 11,
+            "pass": 12,
             "fail": 0,
             "cancelled": 0,
             "skipped": 0,
@@ -938,11 +1054,11 @@
             "test/session-memory-rank.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.17,
           "counts": {
-            "tests": 11,
+            "tests": 12,
             "suites": 0,
-            "pass": 11,
+            "pass": 12,
             "fail": 0,
             "cancelled": 0,
             "skipped": 0,
@@ -975,7 +1091,7 @@
             "test/session-memory-rules.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.1,
+          "durationSeconds": 0.2,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -1002,7 +1118,7 @@
             "test/session-memory-rules.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.11,
+          "durationSeconds": 0.21,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -1029,7 +1145,7 @@
             "test/session-memory-rules.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.1,
+          "durationSeconds": 0.2,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -1066,11 +1182,11 @@
             "test/session-memory-zh-eval.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.18,
           "counts": {
-            "tests": 9,
+            "tests": 11,
             "suites": 0,
-            "pass": 9,
+            "pass": 11,
             "fail": 0,
             "cancelled": 0,
             "skipped": 0,
@@ -1093,11 +1209,11 @@
             "test/session-memory-zh-eval.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.19,
           "counts": {
-            "tests": 9,
+            "tests": 11,
             "suites": 0,
-            "pass": 9,
+            "pass": 11,
             "fail": 0,
             "cancelled": 0,
             "skipped": 0,
@@ -1120,11 +1236,11 @@
             "test/session-memory-zh-eval.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.2,
           "counts": {
-            "tests": 9,
+            "tests": 11,
             "suites": 0,
-            "pass": 9,
+            "pass": 11,
             "fail": 0,
             "cancelled": 0,
             "skipped": 0,
@@ -1157,7 +1273,7 @@
             "test/session-memory.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.14,
+          "durationSeconds": 0.24,
           "counts": {
             "tests": 14,
             "suites": 0,
@@ -1184,7 +1300,7 @@
             "test/session-memory.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.14,
+          "durationSeconds": 0.26,
           "counts": {
             "tests": 14,
             "suites": 0,
@@ -1211,7 +1327,7 @@
             "test/session-memory.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.14,
+          "durationSeconds": 0.28,
           "counts": {
             "tests": 14,
             "suites": 0,
@@ -1248,7 +1364,7 @@
             "test/session-trash.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.1,
+          "durationSeconds": 0.16,
           "counts": {
             "tests": 5,
             "suites": 0,
@@ -1275,7 +1391,7 @@
             "test/session-trash.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.18,
           "counts": {
             "tests": 5,
             "suites": 0,
@@ -1302,7 +1418,7 @@
             "test/session-trash.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.17,
           "counts": {
             "tests": 5,
             "suites": 0,
@@ -1339,7 +1455,7 @@
             "test/skills-console.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.53,
+          "durationSeconds": 0.65,
           "counts": {
             "tests": 9,
             "suites": 0,
@@ -1366,7 +1482,7 @@
             "test/skills-console.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.51,
+          "durationSeconds": 0.66,
           "counts": {
             "tests": 9,
             "suites": 0,
@@ -1393,7 +1509,7 @@
             "test/skills-console.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.52,
+          "durationSeconds": 0.65,
           "counts": {
             "tests": 9,
             "suites": 0,
@@ -1430,7 +1546,7 @@
             "test/skills-evolve.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.1,
+          "durationSeconds": 0.18,
           "counts": {
             "tests": 18,
             "suites": 0,
@@ -1457,7 +1573,7 @@
             "test/skills-evolve.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.1,
+          "durationSeconds": 0.2,
           "counts": {
             "tests": 18,
             "suites": 0,
@@ -1484,7 +1600,7 @@
             "test/skills-evolve.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.1,
+          "durationSeconds": 0.2,
           "counts": {
             "tests": 18,
             "suites": 0,
@@ -1521,7 +1637,7 @@
             "test/skills-studio.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.14,
           "counts": {
             "tests": 8,
             "suites": 0,
@@ -1548,7 +1664,7 @@
             "test/skills-studio.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 8,
             "suites": 0,
@@ -1575,7 +1691,7 @@
             "test/skills-studio.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.16,
           "counts": {
             "tests": 8,
             "suites": 0,
@@ -1612,7 +1728,7 @@
             "test/turn-evidence-capacity.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.19,
           "counts": {
             "tests": 7,
             "suites": 0,
@@ -1639,7 +1755,7 @@
             "test/turn-evidence-capacity.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.11,
+          "durationSeconds": 0.2,
           "counts": {
             "tests": 7,
             "suites": 0,
@@ -1666,7 +1782,7 @@
             "test/turn-evidence-capacity.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.1,
+          "durationSeconds": 0.2,
           "counts": {
             "tests": 7,
             "suites": 0,
@@ -1703,11 +1819,11 @@
             "test/turn-evidence.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.24,
           "counts": {
-            "tests": 9,
+            "tests": 15,
             "suites": 0,
-            "pass": 9,
+            "pass": 15,
             "fail": 0,
             "cancelled": 0,
             "skipped": 0,
@@ -1730,11 +1846,11 @@
             "test/turn-evidence.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.22,
           "counts": {
-            "tests": 9,
+            "tests": 15,
             "suites": 0,
-            "pass": 9,
+            "pass": 15,
             "fail": 0,
             "cancelled": 0,
             "skipped": 0,
@@ -1757,11 +1873,11 @@
             "test/turn-evidence.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.24,
           "counts": {
-            "tests": 9,
+            "tests": 15,
             "suites": 0,
-            "pass": 9,
+            "pass": 15,
             "fail": 0,
             "cancelled": 0,
             "skipped": 0,
@@ -1794,7 +1910,7 @@
             "test/yolo-decisions.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.14,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -1821,7 +1937,7 @@
             "test/yolo-decisions.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -1848,7 +1964,7 @@
             "test/yolo-decisions.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -1885,7 +2001,7 @@
             "test/allocation-score.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.13,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -1912,7 +2028,7 @@
             "test/allocation-score.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.14,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -1939,7 +2055,7 @@
             "test/allocation-score.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.14,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -1976,7 +2092,7 @@
             "test/assemble.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.11,
+          "durationSeconds": 0.21,
           "counts": {
             "tests": 7,
             "suites": 0,
@@ -2003,7 +2119,7 @@
             "test/assemble.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.1,
+          "durationSeconds": 0.2,
           "counts": {
             "tests": 7,
             "suites": 0,
@@ -2030,7 +2146,7 @@
             "test/assemble.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.1,
+          "durationSeconds": 0.2,
           "counts": {
             "tests": 7,
             "suites": 0,
@@ -2044,6 +2160,97 @@
           "reason": "ok",
           "missingModules": [],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-host-modules/dsh-agos-router/assemble.test.mjs.txt",
+          "errorExcerpt": null
+        },
+        "permissive": null
+      },
+      "methodCaveat": null
+    },
+    {
+      "id": "dsh-agos-router/binding-authenticity.test.mjs",
+      "plugin": "dsh-agos-router",
+      "file": "test/binding-authenticity.test.mjs",
+      "cwd": "plugins/dsh-agos-router",
+      "classification": "hermetic",
+      "requiredExternals": [],
+      "hostPathDependency": false,
+      "modes": {
+        "natural": {
+          "mode": "natural",
+          "argv": [
+            "node",
+            "--test",
+            "test/binding-authenticity.test.mjs"
+          ],
+          "exitCode": 0,
+          "durationSeconds": 0.21,
+          "counts": {
+            "tests": 11,
+            "suites": 0,
+            "pass": 11,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "verdict": "pass",
+          "reason": "ok",
+          "missingModules": [],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/natural/dsh-agos-router/binding-authenticity.test.mjs.txt",
+          "errorExcerpt": null
+        },
+        "no-dsh": {
+          "mode": "no-dsh",
+          "argv": [
+            "/usr/bin/sandbox-exec",
+            "-f",
+            "/var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-sb-no-dsh.sb",
+            "node",
+            "--test",
+            "test/binding-authenticity.test.mjs"
+          ],
+          "exitCode": 0,
+          "durationSeconds": 0.22,
+          "counts": {
+            "tests": 11,
+            "suites": 0,
+            "pass": 11,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "verdict": "pass",
+          "reason": "ok",
+          "missingModules": [],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-dsh/dsh-agos-router/binding-authenticity.test.mjs.txt",
+          "errorExcerpt": null
+        },
+        "no-host-modules": {
+          "mode": "no-host-modules",
+          "argv": [
+            "/usr/bin/sandbox-exec",
+            "-f",
+            "/var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-sb-no-host-modules.sb",
+            "node",
+            "--test",
+            "test/binding-authenticity.test.mjs"
+          ],
+          "exitCode": 0,
+          "durationSeconds": 0.22,
+          "counts": {
+            "tests": 11,
+            "suites": 0,
+            "pass": 11,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "verdict": "pass",
+          "reason": "ok",
+          "missingModules": [],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-host-modules/dsh-agos-router/binding-authenticity.test.mjs.txt",
           "errorExcerpt": null
         },
         "permissive": null
@@ -2067,7 +2274,7 @@
             "test/dispatch.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.11,
+          "durationSeconds": 0.22,
           "counts": {
             "tests": 13,
             "suites": 0,
@@ -2094,7 +2301,7 @@
             "test/dispatch.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.1,
+          "durationSeconds": 0.21,
           "counts": {
             "tests": 13,
             "suites": 0,
@@ -2121,7 +2328,7 @@
             "test/dispatch.test.mjs"
           ],
           "exitCode": 1,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.14,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -2139,9 +2346,9 @@
             "    throw new ERR_MODULE_NOT_FOUND(",
             "Error [ERR_MODULE_NOT_FOUND]: Cannot find module '<REPO_ROOT>/plugins/node_modules/@deepseek-ai/dsh-llm/lib/types/assembler.js' imported from <REPO_ROOT>/plugins/dsh-agos-router/test/dispatch.test.mjs",
             "  code: 'ERR_MODULE_NOT_FOUND',",
-            "✖ test/dispatch.test.mjs (37.866083ms)",
+            "✖ test/dispatch.test.mjs (58.958209ms)",
             "✖ failing tests:",
-            "✖ test/dispatch.test.mjs (37.866083ms)"
+            "✖ test/dispatch.test.mjs (58.958209ms)"
           ]
         },
         "permissive": {
@@ -2155,7 +2362,7 @@
             "test/dispatch.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.11,
+          "durationSeconds": 0.22,
           "counts": {
             "tests": 13,
             "suites": 0,
@@ -2191,7 +2398,7 @@
             "test/feedback-bind.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 7,
             "suites": 0,
@@ -2218,7 +2425,7 @@
             "test/feedback-bind.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.16,
           "counts": {
             "tests": 7,
             "suites": 0,
@@ -2245,7 +2452,7 @@
             "test/feedback-bind.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.12,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 7,
             "suites": 0,
@@ -2282,7 +2489,7 @@
             "test/feedback-routes.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.31,
+          "durationSeconds": 0.39,
           "counts": {
             "tests": 6,
             "suites": 0,
@@ -2309,7 +2516,7 @@
             "test/feedback-routes.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.29,
+          "durationSeconds": 0.41,
           "counts": {
             "tests": 6,
             "suites": 0,
@@ -2336,7 +2543,7 @@
             "test/feedback-routes.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.3,
+          "durationSeconds": 0.4,
           "counts": {
             "tests": 6,
             "suites": 0,
@@ -2373,7 +2580,7 @@
             "test/gate.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.13,
           "counts": {
             "tests": 2,
             "suites": 0,
@@ -2400,7 +2607,7 @@
             "test/gate.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.1,
+          "durationSeconds": 0.14,
           "counts": {
             "tests": 2,
             "suites": 0,
@@ -2427,7 +2634,7 @@
             "test/gate.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.14,
           "counts": {
             "tests": 2,
             "suites": 0,
@@ -2464,7 +2671,7 @@
             "test/honesty.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.15,
+          "durationSeconds": 0.22,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -2491,7 +2698,7 @@
             "test/honesty.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.15,
+          "durationSeconds": 0.24,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -2518,7 +2725,7 @@
             "test/honesty.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.14,
+          "durationSeconds": 0.23,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -2555,7 +2762,7 @@
             "test/http-routes.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.12,
+          "durationSeconds": 0.22,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -2582,7 +2789,7 @@
             "test/http-routes.test.mjs"
           ],
           "exitCode": 1,
-          "durationSeconds": 0.12,
+          "durationSeconds": 0.21,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -2597,9 +2804,9 @@
           "missingModules": [],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-dsh/dsh-agos-router/http-routes.test.mjs.txt",
           "errorExcerpt": [
-            "✖ apply() 注册的 GET /api/agos/routes 与 /routes/outcomes 真跑一遍:posterior 分母、七字段行、覆盖表 (36.270334ms)",
+            "✖ apply() 注册的 GET /api/agos/routes 与 /routes/outcomes 真跑一遍:posterior 分母、七字段行、覆盖表 (62.598292ms)",
             "✖ failing tests:",
-            "✖ apply() 注册的 GET /api/agos/routes 与 /routes/outcomes 真跑一遍:posterior 分母、七字段行、覆盖表 (36.270334ms)",
+            "✖ apply() 注册的 GET /api/agos/routes 与 /routes/outcomes 真跑一遍:posterior 分母、七字段行、覆盖表 (62.598292ms)",
             "  Error: EPERM: operation not permitted, scandir '<HOME>/.dsh/logs/civ/runs'",
             "    code: 'EPERM',"
           ]
@@ -2615,7 +2822,7 @@
             "test/http-routes.test.mjs"
           ],
           "exitCode": 1,
-          "durationSeconds": 0.11,
+          "durationSeconds": 0.21,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -2630,9 +2837,9 @@
           "missingModules": [],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-host-modules/dsh-agos-router/http-routes.test.mjs.txt",
           "errorExcerpt": [
-            "✖ apply() 注册的 GET /api/agos/routes 与 /routes/outcomes 真跑一遍:posterior 分母、七字段行、覆盖表 (33.080583ms)",
+            "✖ apply() 注册的 GET /api/agos/routes 与 /routes/outcomes 真跑一遍:posterior 分母、七字段行、覆盖表 (58.688333ms)",
             "✖ failing tests:",
-            "✖ apply() 注册的 GET /api/agos/routes 与 /routes/outcomes 真跑一遍:posterior 分母、七字段行、覆盖表 (33.080583ms)",
+            "✖ apply() 注册的 GET /api/agos/routes 与 /routes/outcomes 真跑一遍:posterior 分母、七字段行、覆盖表 (58.688333ms)",
             "  Error: EPERM: operation not permitted, scandir '<HOME>/.dsh/logs/civ/runs'",
             "    code: 'EPERM',"
           ]
@@ -2648,7 +2855,7 @@
             "test/http-routes.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.12,
+          "durationSeconds": 0.22,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -2664,6 +2871,97 @@
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/permissive/dsh-agos-router/http-routes.test.mjs.txt",
           "errorExcerpt": null
         }
+      },
+      "methodCaveat": null
+    },
+    {
+      "id": "dsh-agos-router/http-task-fingerprint-leak.test.mjs",
+      "plugin": "dsh-agos-router",
+      "file": "test/http-task-fingerprint-leak.test.mjs",
+      "cwd": "plugins/dsh-agos-router",
+      "classification": "hermetic",
+      "requiredExternals": [],
+      "hostPathDependency": false,
+      "modes": {
+        "natural": {
+          "mode": "natural",
+          "argv": [
+            "node",
+            "--test",
+            "test/http-task-fingerprint-leak.test.mjs"
+          ],
+          "exitCode": 0,
+          "durationSeconds": 0.32,
+          "counts": {
+            "tests": 4,
+            "suites": 0,
+            "pass": 4,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "verdict": "pass",
+          "reason": "ok",
+          "missingModules": [],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/natural/dsh-agos-router/http-task-fingerprint-leak.test.mjs.txt",
+          "errorExcerpt": null
+        },
+        "no-dsh": {
+          "mode": "no-dsh",
+          "argv": [
+            "/usr/bin/sandbox-exec",
+            "-f",
+            "/var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-sb-no-dsh.sb",
+            "node",
+            "--test",
+            "test/http-task-fingerprint-leak.test.mjs"
+          ],
+          "exitCode": 0,
+          "durationSeconds": 0.33,
+          "counts": {
+            "tests": 4,
+            "suites": 0,
+            "pass": 4,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "verdict": "pass",
+          "reason": "ok",
+          "missingModules": [],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-dsh/dsh-agos-router/http-task-fingerprint-leak.test.mjs.txt",
+          "errorExcerpt": null
+        },
+        "no-host-modules": {
+          "mode": "no-host-modules",
+          "argv": [
+            "/usr/bin/sandbox-exec",
+            "-f",
+            "/var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-sb-no-host-modules.sb",
+            "node",
+            "--test",
+            "test/http-task-fingerprint-leak.test.mjs"
+          ],
+          "exitCode": 0,
+          "durationSeconds": 0.34,
+          "counts": {
+            "tests": 4,
+            "suites": 0,
+            "pass": 4,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "verdict": "pass",
+          "reason": "ok",
+          "missingModules": [],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-host-modules/dsh-agos-router/http-task-fingerprint-leak.test.mjs.txt",
+          "errorExcerpt": null
+        },
+        "permissive": null
       },
       "methodCaveat": null
     },
@@ -2684,7 +2982,7 @@
             "test/ids.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.17,
+          "durationSeconds": 0.3,
           "counts": {
             "tests": 5,
             "suites": 0,
@@ -2711,7 +3009,7 @@
             "test/ids.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.17,
+          "durationSeconds": 0.33,
           "counts": {
             "tests": 5,
             "suites": 0,
@@ -2738,7 +3036,7 @@
             "test/ids.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.17,
+          "durationSeconds": 0.32,
           "counts": {
             "tests": 5,
             "suites": 0,
@@ -2759,6 +3057,140 @@
       "methodCaveat": null
     },
     {
+      "id": "dsh-agos-router/index-async-wiring.test.mjs",
+      "plugin": "dsh-agos-router",
+      "file": "test/index-async-wiring.test.mjs",
+      "cwd": "plugins/dsh-agos-router",
+      "classification": "host-path",
+      "requiredExternals": [
+        "@deepseek-ai/dsh-llm"
+      ],
+      "hostPathDependency": true,
+      "modes": {
+        "natural": {
+          "mode": "natural",
+          "argv": [
+            "node",
+            "--test",
+            "test/index-async-wiring.test.mjs"
+          ],
+          "exitCode": 0,
+          "durationSeconds": 2.7,
+          "counts": {
+            "tests": 2,
+            "suites": 0,
+            "pass": 2,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "verdict": "pass",
+          "reason": "ok",
+          "missingModules": [],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/natural/dsh-agos-router/index-async-wiring.test.mjs.txt",
+          "errorExcerpt": null
+        },
+        "no-dsh": {
+          "mode": "no-dsh",
+          "argv": [
+            "/usr/bin/sandbox-exec",
+            "-f",
+            "/var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-sb-no-dsh.sb",
+            "node",
+            "--test",
+            "test/index-async-wiring.test.mjs"
+          ],
+          "exitCode": 1,
+          "durationSeconds": 2.73,
+          "counts": {
+            "tests": 2,
+            "suites": 0,
+            "pass": 1,
+            "fail": 1,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "verdict": "fail",
+          "reason": "nonzero-exit:1",
+          "missingModules": [],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-dsh/dsh-agos-router/index-async-wiring.test.mjs.txt",
+          "errorExcerpt": [
+            "✖ WIRING: 外部持锁期间 host 不被 park —— 无关 HTTP 端点照常响应,定时器照常走,POST /outcome 等住后成功 (2529.860125ms)",
+            "✖ failing tests:",
+            "✖ WIRING: 外部持锁期间 host 不被 park —— 无关 HTTP 端点照常响应,定时器照常走,POST /outcome 等住后成功 (2529.860125ms)",
+            "  Error: EPERM: operation not permitted, scandir '<HOME>/.dsh/logs/civ/runs'",
+            "    code: 'EPERM',"
+          ]
+        },
+        "no-host-modules": {
+          "mode": "no-host-modules",
+          "argv": [
+            "/usr/bin/sandbox-exec",
+            "-f",
+            "/var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-sb-no-host-modules.sb",
+            "node",
+            "--test",
+            "test/index-async-wiring.test.mjs"
+          ],
+          "exitCode": 1,
+          "durationSeconds": 2.67,
+          "counts": {
+            "tests": 2,
+            "suites": 0,
+            "pass": 0,
+            "fail": 2,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "verdict": "fail",
+          "reason": "nonzero-exit:1",
+          "missingModules": [
+            "@deepseek-ai/dsh-llm"
+          ],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-host-modules/dsh-agos-router/index-async-wiring.test.mjs.txt",
+          "errorExcerpt": [
+            "✖ WIRING: 外部持锁期间 host 不被 park —— 无关 HTTP 端点照常响应,定时器照常走,POST /outcome 等住后成功 (2478.277625ms)",
+            "✖ WIRING: dispatch 中途配置改变仍写原 auditFile —— pin 在 dispatch 开始时就钉住 (33.063459ms)",
+            "✖ failing tests:",
+            "✖ WIRING: 外部持锁期间 host 不被 park —— 无关 HTTP 端点照常响应,定时器照常走,POST /outcome 等住后成功 (2478.277625ms)",
+            "  Error: EPERM: operation not permitted, scandir '<HOME>/.dsh/logs/civ/runs'",
+            "    code: 'EPERM',"
+          ]
+        },
+        "permissive": {
+          "mode": "permissive",
+          "argv": [
+            "/usr/bin/sandbox-exec",
+            "-f",
+            "/var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-sb-permissive.sb",
+            "node",
+            "--test",
+            "test/index-async-wiring.test.mjs"
+          ],
+          "exitCode": 0,
+          "durationSeconds": 2.7,
+          "counts": {
+            "tests": 2,
+            "suites": 0,
+            "pass": 2,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "verdict": "pass",
+          "reason": "ok",
+          "missingModules": [],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/permissive/dsh-agos-router/index-async-wiring.test.mjs.txt",
+          "errorExcerpt": null
+        }
+      },
+      "methodCaveat": null
+    },
+    {
       "id": "dsh-agos-router/index-lock-timeout.test.mjs",
       "plugin": "dsh-agos-router",
       "file": "test/index-lock-timeout.test.mjs",
@@ -2775,7 +3207,7 @@
             "test/index-lock-timeout.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 6.16,
+          "durationSeconds": 6.33,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -2802,7 +3234,7 @@
             "test/index-lock-timeout.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 6.15,
+          "durationSeconds": 6.34,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -2829,7 +3261,7 @@
             "test/index-lock-timeout.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 6.13,
+          "durationSeconds": 6.32,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -2866,7 +3298,7 @@
             "test/index-transaction.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 1.91,
+          "durationSeconds": 2.13,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -2893,7 +3325,7 @@
             "test/index-transaction.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 1.9,
+          "durationSeconds": 2.12,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -2920,7 +3352,7 @@
             "test/index-transaction.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 1.9,
+          "durationSeconds": 2.14,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -2957,7 +3389,7 @@
             "test/labels.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.14,
           "counts": {
             "tests": 3,
             "suites": 0,
@@ -2984,7 +3416,7 @@
             "test/labels.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 3,
             "suites": 0,
@@ -3011,7 +3443,7 @@
             "test/labels.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 3,
             "suites": 0,
@@ -3025,6 +3457,97 @@
           "reason": "ok",
           "missingModules": [],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-host-modules/dsh-agos-router/labels.test.mjs.txt",
+          "errorExcerpt": null
+        },
+        "permissive": null
+      },
+      "methodCaveat": null
+    },
+    {
+      "id": "dsh-agos-router/ledger-lock-async.test.mjs",
+      "plugin": "dsh-agos-router",
+      "file": "test/ledger-lock-async.test.mjs",
+      "cwd": "plugins/dsh-agos-router",
+      "classification": "hermetic",
+      "requiredExternals": [],
+      "hostPathDependency": false,
+      "modes": {
+        "natural": {
+          "mode": "natural",
+          "argv": [
+            "node",
+            "--test",
+            "test/ledger-lock-async.test.mjs"
+          ],
+          "exitCode": 0,
+          "durationSeconds": 7.84,
+          "counts": {
+            "tests": 8,
+            "suites": 0,
+            "pass": 8,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "verdict": "pass",
+          "reason": "ok",
+          "missingModules": [],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/natural/dsh-agos-router/ledger-lock-async.test.mjs.txt",
+          "errorExcerpt": null
+        },
+        "no-dsh": {
+          "mode": "no-dsh",
+          "argv": [
+            "/usr/bin/sandbox-exec",
+            "-f",
+            "/var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-sb-no-dsh.sb",
+            "node",
+            "--test",
+            "test/ledger-lock-async.test.mjs"
+          ],
+          "exitCode": 0,
+          "durationSeconds": 7.82,
+          "counts": {
+            "tests": 8,
+            "suites": 0,
+            "pass": 8,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "verdict": "pass",
+          "reason": "ok",
+          "missingModules": [],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-dsh/dsh-agos-router/ledger-lock-async.test.mjs.txt",
+          "errorExcerpt": null
+        },
+        "no-host-modules": {
+          "mode": "no-host-modules",
+          "argv": [
+            "/usr/bin/sandbox-exec",
+            "-f",
+            "/var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-sb-no-host-modules.sb",
+            "node",
+            "--test",
+            "test/ledger-lock-async.test.mjs"
+          ],
+          "exitCode": 0,
+          "durationSeconds": 7.78,
+          "counts": {
+            "tests": 8,
+            "suites": 0,
+            "pass": 8,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "verdict": "pass",
+          "reason": "ok",
+          "missingModules": [],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-host-modules/dsh-agos-router/ledger-lock-async.test.mjs.txt",
           "errorExcerpt": null
         },
         "permissive": null
@@ -3048,7 +3571,7 @@
             "test/ledger-multiprocess.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 5.08,
+          "durationSeconds": 5.72,
           "counts": {
             "tests": 5,
             "suites": 0,
@@ -3075,7 +3598,7 @@
             "test/ledger-multiprocess.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 5.15,
+          "durationSeconds": 5.69,
           "counts": {
             "tests": 5,
             "suites": 0,
@@ -3102,7 +3625,7 @@
             "test/ledger-multiprocess.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 5.03,
+          "durationSeconds": 5.63,
           "counts": {
             "tests": 5,
             "suites": 0,
@@ -3139,7 +3662,7 @@
             "test/ledger.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.14,
+          "durationSeconds": 0.22,
           "counts": {
             "tests": 7,
             "suites": 0,
@@ -3166,7 +3689,7 @@
             "test/ledger.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.14,
+          "durationSeconds": 0.23,
           "counts": {
             "tests": 7,
             "suites": 0,
@@ -3193,7 +3716,7 @@
             "test/ledger.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.14,
+          "durationSeconds": 0.24,
           "counts": {
             "tests": 7,
             "suites": 0,
@@ -3230,7 +3753,7 @@
             "test/outcomes.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 10,
             "suites": 0,
@@ -3257,7 +3780,7 @@
             "test/outcomes.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.1,
+          "durationSeconds": 0.16,
           "counts": {
             "tests": 10,
             "suites": 0,
@@ -3284,7 +3807,7 @@
             "test/outcomes.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.17,
           "counts": {
             "tests": 10,
             "suites": 0,
@@ -3298,6 +3821,97 @@
           "reason": "ok",
           "missingModules": [],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-host-modules/dsh-agos-router/outcomes.test.mjs.txt",
+          "errorExcerpt": null
+        },
+        "permissive": null
+      },
+      "methodCaveat": null
+    },
+    {
+      "id": "dsh-agos-router/review-context.test.mjs",
+      "plugin": "dsh-agos-router",
+      "file": "test/review-context.test.mjs",
+      "cwd": "plugins/dsh-agos-router",
+      "classification": "hermetic",
+      "requiredExternals": [],
+      "hostPathDependency": false,
+      "modes": {
+        "natural": {
+          "mode": "natural",
+          "argv": [
+            "node",
+            "--test",
+            "test/review-context.test.mjs"
+          ],
+          "exitCode": 0,
+          "durationSeconds": 0.15,
+          "counts": {
+            "tests": 7,
+            "suites": 0,
+            "pass": 7,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "verdict": "pass",
+          "reason": "ok",
+          "missingModules": [],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/natural/dsh-agos-router/review-context.test.mjs.txt",
+          "errorExcerpt": null
+        },
+        "no-dsh": {
+          "mode": "no-dsh",
+          "argv": [
+            "/usr/bin/sandbox-exec",
+            "-f",
+            "/var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-sb-no-dsh.sb",
+            "node",
+            "--test",
+            "test/review-context.test.mjs"
+          ],
+          "exitCode": 0,
+          "durationSeconds": 0.16,
+          "counts": {
+            "tests": 7,
+            "suites": 0,
+            "pass": 7,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "verdict": "pass",
+          "reason": "ok",
+          "missingModules": [],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-dsh/dsh-agos-router/review-context.test.mjs.txt",
+          "errorExcerpt": null
+        },
+        "no-host-modules": {
+          "mode": "no-host-modules",
+          "argv": [
+            "/usr/bin/sandbox-exec",
+            "-f",
+            "/var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-sb-no-host-modules.sb",
+            "node",
+            "--test",
+            "test/review-context.test.mjs"
+          ],
+          "exitCode": 0,
+          "durationSeconds": 0.16,
+          "counts": {
+            "tests": 7,
+            "suites": 0,
+            "pass": 7,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "verdict": "pass",
+          "reason": "ok",
+          "missingModules": [],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-host-modules/dsh-agos-router/review-context.test.mjs.txt",
           "errorExcerpt": null
         },
         "permissive": null
@@ -3321,7 +3935,7 @@
             "test/roles.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.14,
           "counts": {
             "tests": 3,
             "suites": 0,
@@ -3348,7 +3962,7 @@
             "test/roles.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 3,
             "suites": 0,
@@ -3375,7 +3989,7 @@
             "test/roles.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 3,
             "suites": 0,
@@ -3412,7 +4026,7 @@
             "test/rsi.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 8,
             "suites": 0,
@@ -3439,7 +4053,7 @@
             "test/rsi.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 8,
             "suites": 0,
@@ -3466,7 +4080,7 @@
             "test/rsi.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 8,
             "suites": 0,
@@ -3503,7 +4117,7 @@
             "test/selector-llm.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.14,
+          "durationSeconds": 0.23,
           "counts": {
             "tests": 6,
             "suites": 0,
@@ -3530,7 +4144,7 @@
             "test/selector-llm.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.15,
+          "durationSeconds": 0.24,
           "counts": {
             "tests": 6,
             "suites": 0,
@@ -3557,7 +4171,7 @@
             "test/selector-llm.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.15,
+          "durationSeconds": 0.23,
           "counts": {
             "tests": 6,
             "suites": 0,
@@ -3594,7 +4208,7 @@
             "test/selector.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.14,
           "counts": {
             "tests": 8,
             "suites": 0,
@@ -3621,7 +4235,7 @@
             "test/selector.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 8,
             "suites": 0,
@@ -3648,7 +4262,7 @@
             "test/selector.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.16,
           "counts": {
             "tests": 8,
             "suites": 0,
@@ -3687,7 +4301,7 @@
             "test/settings-012.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.13,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -3714,7 +4328,7 @@
             "test/settings-012.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.13,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -3741,7 +4355,7 @@
             "test/settings-012.test.mjs"
           ],
           "exitCode": 1,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.13,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -3761,9 +4375,9 @@
             "  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);",
             "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@deepseek-ai/schemastery' imported from <REPO_ROOT>/plugins/dsh-agos-router/lib/settings.js",
             "  code: 'ERR_MODULE_NOT_FOUND'",
-            "✖ test/settings-012.test.mjs (32.6235ms)",
+            "✖ test/settings-012.test.mjs (48.904ms)",
             "✖ failing tests:",
-            "✖ test/settings-012.test.mjs (32.6235ms)"
+            "✖ test/settings-012.test.mjs (48.904ms)"
           ]
         },
         "permissive": {
@@ -3777,7 +4391,7 @@
             "test/settings-012.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -3813,7 +4427,7 @@
             "test/shadow.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.16,
+          "durationSeconds": 0.26,
           "counts": {
             "tests": 7,
             "suites": 0,
@@ -3840,7 +4454,7 @@
             "test/shadow.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.16,
+          "durationSeconds": 0.28,
           "counts": {
             "tests": 7,
             "suites": 0,
@@ -3867,7 +4481,7 @@
             "test/shadow.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.17,
+          "durationSeconds": 0.27,
           "counts": {
             "tests": 7,
             "suites": 0,
@@ -3904,7 +4518,7 @@
             "test/task-binding.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.11,
+          "durationSeconds": 0.19,
           "counts": {
             "tests": 9,
             "suites": 0,
@@ -3931,7 +4545,7 @@
             "test/task-binding.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.12,
+          "durationSeconds": 0.21,
           "counts": {
             "tests": 9,
             "suites": 0,
@@ -3958,7 +4572,7 @@
             "test/task-binding.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.12,
+          "durationSeconds": 0.22,
           "counts": {
             "tests": 9,
             "suites": 0,
@@ -3997,7 +4611,7 @@
             "test/mcp.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.12,
+          "durationSeconds": 0.22,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -4024,7 +4638,7 @@
             "test/mcp.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.13,
+          "durationSeconds": 0.22,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -4051,7 +4665,7 @@
             "test/mcp.test.mjs"
           ],
           "exitCode": 1,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.14,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -4071,9 +4685,9 @@
             "  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);",
             "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@deepseek-ai/dsh-agent' imported from <REPO_ROOT>/plugins/dsh-mcp-bridge/lib/index.js",
             "  code: 'ERR_MODULE_NOT_FOUND'",
-            "✖ test/mcp.test.mjs (39.862333ms)",
+            "✖ test/mcp.test.mjs (64.781834ms)",
             "✖ failing tests:",
-            "✖ test/mcp.test.mjs (39.862333ms)"
+            "✖ test/mcp.test.mjs (64.781834ms)"
           ]
         },
         "permissive": {
@@ -4087,7 +4701,7 @@
             "test/mcp.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.12,
+          "durationSeconds": 0.23,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -4111,7 +4725,7 @@
       "plugin": "cn-capabilities",
       "file": "test/autoresearch-sandbox.test.mjs",
       "cwd": "plugins/cn-capabilities",
-      "classification": "hermetic",
+      "classification": "sandbox-incompatible",
       "requiredExternals": [],
       "hostPathDependency": false,
       "modes": {
@@ -4123,11 +4737,11 @@
             "test/autoresearch-sandbox.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.28,
           "counts": {
-            "tests": 24,
+            "tests": 29,
             "suites": 0,
-            "pass": 24,
+            "pass": 29,
             "fail": 0,
             "cancelled": 0,
             "skipped": 0,
@@ -4149,22 +4763,27 @@
             "--test",
             "test/autoresearch-sandbox.test.mjs"
           ],
-          "exitCode": 0,
-          "durationSeconds": 0.09,
+          "exitCode": 1,
+          "durationSeconds": 0.2,
           "counts": {
-            "tests": 24,
+            "tests": 29,
             "suites": 0,
-            "pass": 24,
-            "fail": 0,
+            "pass": 28,
+            "fail": 1,
             "cancelled": 0,
             "skipped": 0,
             "todo": 0
           },
-          "verdict": "pass",
-          "reason": "ok",
+          "verdict": "fail",
+          "reason": "nonzero-exit:1",
           "missingModules": [],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-dsh/cn-capabilities/autoresearch-sandbox.test.mjs.txt",
-          "errorExcerpt": null
+          "errorExcerpt": [
+            "✖ THIS HOST: darwin selects seatbelt, smoke-verifies it, and reports a structured manifest (16.8725ms)",
+            "✖ failing tests:",
+            "✖ THIS HOST: darwin selects seatbelt, smoke-verifies it, and reports a structured manifest (16.8725ms)",
+            "  AssertionError [ERR_ASSERTION]: verification-unavailable: macos seatbelt smoke probe exited 71: sandbox-exec: sandbox_apply: Operation not permitted"
+          ]
         },
         "no-host-modules": {
           "mode": "no-host-modules",
@@ -4176,26 +4795,62 @@
             "--test",
             "test/autoresearch-sandbox.test.mjs"
           ],
-          "exitCode": 0,
-          "durationSeconds": 0.09,
+          "exitCode": 1,
+          "durationSeconds": 0.2,
           "counts": {
-            "tests": 24,
+            "tests": 29,
             "suites": 0,
-            "pass": 24,
-            "fail": 0,
+            "pass": 28,
+            "fail": 1,
             "cancelled": 0,
             "skipped": 0,
             "todo": 0
           },
-          "verdict": "pass",
-          "reason": "ok",
+          "verdict": "fail",
+          "reason": "nonzero-exit:1",
           "missingModules": [],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-host-modules/cn-capabilities/autoresearch-sandbox.test.mjs.txt",
-          "errorExcerpt": null
+          "errorExcerpt": [
+            "✖ THIS HOST: darwin selects seatbelt, smoke-verifies it, and reports a structured manifest (14.008292ms)",
+            "✖ failing tests:",
+            "✖ THIS HOST: darwin selects seatbelt, smoke-verifies it, and reports a structured manifest (14.008292ms)",
+            "  AssertionError [ERR_ASSERTION]: verification-unavailable: macos seatbelt smoke probe exited 71: sandbox-exec: sandbox_apply: Operation not permitted"
+          ]
         },
-        "permissive": null
+        "permissive": {
+          "mode": "permissive",
+          "argv": [
+            "/usr/bin/sandbox-exec",
+            "-f",
+            "/var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-sb-permissive.sb",
+            "node",
+            "--test",
+            "test/autoresearch-sandbox.test.mjs"
+          ],
+          "exitCode": 1,
+          "durationSeconds": 0.19,
+          "counts": {
+            "tests": 29,
+            "suites": 0,
+            "pass": 28,
+            "fail": 1,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "verdict": "fail",
+          "reason": "nonzero-exit:1",
+          "missingModules": [],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/permissive/cn-capabilities/autoresearch-sandbox.test.mjs.txt",
+          "errorExcerpt": [
+            "✖ THIS HOST: darwin selects seatbelt, smoke-verifies it, and reports a structured manifest (14.728375ms)",
+            "✖ failing tests:",
+            "✖ THIS HOST: darwin selects seatbelt, smoke-verifies it, and reports a structured manifest (14.728375ms)",
+            "  AssertionError [ERR_ASSERTION]: verification-unavailable: macos seatbelt smoke probe exited 71: sandbox-exec: sandbox_apply: Operation not permitted"
+          ]
+        }
       },
-      "methodCaveat": null
+      "methodCaveat": "This suite launches its own macOS Seatbelt sandbox, so it also fails under a zero-denial outer sandbox. The shield cannot measure it; treat its dependency surface as UNVERIFIED by this method and read the natural-mode result only."
     },
     {
       "id": "cn-capabilities/autoresearch-workspace.test.mjs",
@@ -4216,7 +4871,7 @@
             "test/autoresearch-workspace.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 12.72,
+          "durationSeconds": 41.55,
           "counts": {
             "tests": 15,
             "suites": 0,
@@ -4243,14 +4898,14 @@
             "test/autoresearch-workspace.test.mjs"
           ],
           "exitCode": 1,
-          "durationSeconds": 6.42,
+          "durationSeconds": 25.84,
           "counts": {
             "tests": 15,
             "suites": 0,
             "pass": 2,
-            "fail": 13,
+            "fail": 12,
             "cancelled": 0,
-            "skipped": 0,
+            "skipped": 1,
             "todo": 0
           },
           "verdict": "fail",
@@ -4258,12 +4913,12 @@
           "missingModules": [],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-dsh/cn-capabilities/autoresearch-workspace.test.mjs.txt",
           "errorExcerpt": [
-            "✖ staged + unstaged + untracked survive create, no-op, and dispose (637.557625ms)",
-            "✖ commit failure is evidenced and does not mutate the original repo (561.32075ms)",
-            "✖ no improvement rolls back isolated HEAD only (561.498417ms)",
-            "✖ improvement is kept in the isolated repo only (556.483125ms)",
-            "✖ cancel is trackable and does not claim rollback without a reset (567.325334ms)",
-            "✖ editing scorer, asserts, or fixtures is a protected violation (563.045167ms)"
+            "✖ staged + unstaged + untracked survive create, no-op, and dispose (2617.585625ms)",
+            "✖ commit failure is evidenced and does not mutate the original repo (2309.575375ms)",
+            "✖ no improvement rolls back isolated HEAD only (2314.907542ms)",
+            "✖ improvement is kept in the isolated repo only (2272.551916ms)",
+            "✖ cancel is trackable and does not claim rollback without a reset (2232.381333ms)",
+            "✖ editing scorer, asserts, or fixtures is a protected violation (2296.4895ms)"
           ]
         },
         "no-host-modules": {
@@ -4277,14 +4932,14 @@
             "test/autoresearch-workspace.test.mjs"
           ],
           "exitCode": 1,
-          "durationSeconds": 6.88,
+          "durationSeconds": 24.03,
           "counts": {
             "tests": 15,
             "suites": 0,
             "pass": 2,
-            "fail": 13,
+            "fail": 12,
             "cancelled": 0,
-            "skipped": 0,
+            "skipped": 1,
             "todo": 0
           },
           "verdict": "fail",
@@ -4294,12 +4949,12 @@
           ],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-host-modules/cn-capabilities/autoresearch-workspace.test.mjs.txt",
           "errorExcerpt": [
-            "✖ staged + unstaged + untracked survive create, no-op, and dispose (652.384125ms)",
-            "✖ commit failure is evidenced and does not mutate the original repo (755.41825ms)",
-            "✖ no improvement rolls back isolated HEAD only (1047.836125ms)",
-            "✖ improvement is kept in the isolated repo only (722.552708ms)",
-            "✖ cancel is trackable and does not claim rollback without a reset (571.05825ms)",
-            "✖ editing scorer, asserts, or fixtures is a protected violation (585.737958ms)"
+            "✖ staged + unstaged + untracked survive create, no-op, and dispose (2627.725958ms)",
+            "✖ commit failure is evidenced and does not mutate the original repo (2307.38375ms)",
+            "✖ no improvement rolls back isolated HEAD only (2305.605917ms)",
+            "✖ improvement is kept in the isolated repo only (2272.544791ms)",
+            "✖ cancel is trackable and does not claim rollback without a reset (2262.503875ms)",
+            "✖ editing scorer, asserts, or fixtures is a protected violation (2264.1425ms)"
           ]
         },
         "permissive": {
@@ -4313,14 +4968,14 @@
             "test/autoresearch-workspace.test.mjs"
           ],
           "exitCode": 1,
-          "durationSeconds": 6.44,
+          "durationSeconds": 26.03,
           "counts": {
             "tests": 15,
             "suites": 0,
             "pass": 2,
-            "fail": 13,
+            "fail": 12,
             "cancelled": 0,
-            "skipped": 0,
+            "skipped": 1,
             "todo": 0
           },
           "verdict": "fail",
@@ -4328,12 +4983,12 @@
           "missingModules": [],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/permissive/cn-capabilities/autoresearch-workspace.test.mjs.txt",
           "errorExcerpt": [
-            "✖ staged + unstaged + untracked survive create, no-op, and dispose (648.790917ms)",
-            "✖ commit failure is evidenced and does not mutate the original repo (591.069125ms)",
-            "✖ no improvement rolls back isolated HEAD only (567.242417ms)",
-            "✖ improvement is kept in the isolated repo only (584.653166ms)",
-            "✖ cancel is trackable and does not claim rollback without a reset (541.592834ms)",
-            "✖ editing scorer, asserts, or fixtures is a protected violation (552.651167ms)"
+            "✖ staged + unstaged + untracked survive create, no-op, and dispose (2673.720833ms)",
+            "✖ commit failure is evidenced and does not mutate the original repo (2334.764209ms)",
+            "✖ no improvement rolls back isolated HEAD only (2264.730042ms)",
+            "✖ improvement is kept in the isolated repo only (2320.100084ms)",
+            "✖ cancel is trackable and does not claim rollback without a reset (2255.852208ms)",
+            "✖ editing scorer, asserts, or fixtures is a protected violation (2330.638583ms)"
           ]
         }
       },
@@ -4356,7 +5011,7 @@
             "test/council-parse.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.13,
           "counts": {
             "tests": 12,
             "suites": 0,
@@ -4383,7 +5038,7 @@
             "test/council-parse.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.14,
           "counts": {
             "tests": 12,
             "suites": 0,
@@ -4410,7 +5065,7 @@
             "test/council-parse.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 12,
             "suites": 0,
@@ -4447,7 +5102,7 @@
             "test/council-record.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.13,
           "counts": {
             "tests": 10,
             "suites": 0,
@@ -4474,7 +5129,7 @@
             "test/council-record.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.16,
           "counts": {
             "tests": 10,
             "suites": 0,
@@ -4501,7 +5156,7 @@
             "test/council-record.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 10,
             "suites": 0,
@@ -4540,7 +5195,7 @@
             "test/media.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 2.09,
+          "durationSeconds": 2.18,
           "counts": {
             "tests": 12,
             "suites": 0,
@@ -4567,7 +5222,7 @@
             "test/media.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 2.1,
+          "durationSeconds": 2.2,
           "counts": {
             "tests": 12,
             "suites": 0,
@@ -4594,7 +5249,7 @@
             "test/media.test.mjs"
           ],
           "exitCode": 1,
-          "durationSeconds": 0.1,
+          "durationSeconds": 0.13,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -4614,9 +5269,9 @@
             "  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);",
             "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@deepseek-ai/schemastery' imported from <REPO_ROOT>/plugins/cn-capabilities/lib/index.js",
             "  code: 'ERR_MODULE_NOT_FOUND'",
-            "✖ test/media.test.mjs (40.251667ms)",
+            "✖ test/media.test.mjs (52.762417ms)",
             "✖ failing tests:",
-            "✖ test/media.test.mjs (40.251667ms)"
+            "✖ test/media.test.mjs (52.762417ms)"
           ]
         },
         "permissive": {
@@ -4630,7 +5285,7 @@
             "test/media.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 2.12,
+          "durationSeconds": 2.19,
           "counts": {
             "tests": 12,
             "suites": 0,
@@ -4666,7 +5321,7 @@
             "test/plan-approval.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.14,
           "counts": {
             "tests": 12,
             "suites": 0,
@@ -4693,7 +5348,7 @@
             "test/plan-approval.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 12,
             "suites": 0,
@@ -4720,7 +5375,7 @@
             "test/plan-approval.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.16,
           "counts": {
             "tests": 12,
             "suites": 0,
@@ -4759,7 +5414,7 @@
             "test/plan-filename-collision.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.16,
           "counts": {
             "tests": 6,
             "suites": 0,
@@ -4786,7 +5441,7 @@
             "test/plan-filename-collision.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.17,
           "counts": {
             "tests": 6,
             "suites": 0,
@@ -4813,7 +5468,7 @@
             "test/plan-filename-collision.test.mjs"
           ],
           "exitCode": 1,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.13,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -4833,9 +5488,9 @@
             "  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);",
             "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@deepseek-ai/schemastery' imported from <REPO_ROOT>/plugins/cn-capabilities/lib/index.js",
             "  code: 'ERR_MODULE_NOT_FOUND'",
-            "✖ test/plan-filename-collision.test.mjs (34.05875ms)",
+            "✖ test/plan-filename-collision.test.mjs (58.735875ms)",
             "✖ failing tests:",
-            "✖ test/plan-filename-collision.test.mjs (34.05875ms)"
+            "✖ test/plan-filename-collision.test.mjs (58.735875ms)"
           ]
         },
         "permissive": {
@@ -4849,7 +5504,7 @@
             "test/plan-filename-collision.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.18,
           "counts": {
             "tests": 6,
             "suites": 0,
@@ -4885,7 +5540,7 @@
             "test/plan-path.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.17,
           "counts": {
             "tests": 8,
             "suites": 0,
@@ -4912,7 +5567,7 @@
             "test/plan-path.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.17,
           "counts": {
             "tests": 8,
             "suites": 0,
@@ -4939,7 +5594,7 @@
             "test/plan-path.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.21,
           "counts": {
             "tests": 8,
             "suites": 0,
@@ -4966,7 +5621,8 @@
       "cwd": "plugins/cn-capabilities",
       "classification": "host-modules",
       "requiredExternals": [
-        "@deepseek-ai/schemastery"
+        "@deepseek-ai/schemastery",
+        "dsh-kimicode-swarm"
       ],
       "hostPathDependency": false,
       "modes": {
@@ -4978,19 +5634,21 @@
             "test/plan-run.fake.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.16,
+          "durationSeconds": 0.2,
           "counts": {
             "tests": 12,
             "suites": 0,
-            "pass": 12,
+            "pass": 8,
             "fail": 0,
             "cancelled": 0,
-            "skipped": 0,
+            "skipped": 4,
             "todo": 0
           },
           "verdict": "pass",
           "reason": "ok",
-          "missingModules": [],
+          "missingModules": [
+            "dsh-kimicode-swarm"
+          ],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/natural/cn-capabilities/plan-run.fake.test.mjs.txt",
           "errorExcerpt": null
         },
@@ -5005,19 +5663,21 @@
             "test/plan-run.fake.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.16,
+          "durationSeconds": 0.21,
           "counts": {
             "tests": 12,
             "suites": 0,
-            "pass": 12,
+            "pass": 8,
             "fail": 0,
             "cancelled": 0,
-            "skipped": 0,
+            "skipped": 4,
             "todo": 0
           },
           "verdict": "pass",
           "reason": "ok",
-          "missingModules": [],
+          "missingModules": [
+            "dsh-kimicode-swarm"
+          ],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-dsh/cn-capabilities/plan-run.fake.test.mjs.txt",
           "errorExcerpt": null
         },
@@ -5032,7 +5692,7 @@
             "test/plan-run.fake.test.mjs"
           ],
           "exitCode": 1,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.14,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -5052,9 +5712,9 @@
             "  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);",
             "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@deepseek-ai/schemastery' imported from <REPO_ROOT>/plugins/cn-capabilities/lib/index.js",
             "  code: 'ERR_MODULE_NOT_FOUND'",
-            "✖ test/plan-run.fake.test.mjs (31.338416ms)",
+            "✖ test/plan-run.fake.test.mjs (51.376625ms)",
             "✖ failing tests:",
-            "✖ test/plan-run.fake.test.mjs (31.338416ms)"
+            "✖ test/plan-run.fake.test.mjs (51.376625ms)"
           ]
         },
         "permissive": {
@@ -5068,19 +5728,21 @@
             "test/plan-run.fake.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.16,
+          "durationSeconds": 0.21,
           "counts": {
             "tests": 12,
             "suites": 0,
-            "pass": 12,
+            "pass": 8,
             "fail": 0,
             "cancelled": 0,
-            "skipped": 0,
+            "skipped": 4,
             "todo": 0
           },
           "verdict": "pass",
           "reason": "ok",
-          "missingModules": [],
+          "missingModules": [
+            "dsh-kimicode-swarm"
+          ],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/permissive/cn-capabilities/plan-run.fake.test.mjs.txt",
           "errorExcerpt": null
         }
@@ -5104,7 +5766,7 @@
             "test/usage.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.14,
           "counts": {
             "tests": 3,
             "suites": 0,
@@ -5131,7 +5793,7 @@
             "test/usage.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.14,
           "counts": {
             "tests": 3,
             "suites": 0,
@@ -5158,7 +5820,7 @@
             "test/usage.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.17,
           "counts": {
             "tests": 3,
             "suites": 0,
@@ -5195,11 +5857,11 @@
             "test/artifact-path.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 1.54,
+          "durationSeconds": 3.87,
           "counts": {
-            "tests": 17,
+            "tests": 19,
             "suites": 0,
-            "pass": 17,
+            "pass": 19,
             "fail": 0,
             "cancelled": 0,
             "skipped": 0,
@@ -5222,11 +5884,11 @@
             "test/artifact-path.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 1.53,
+          "durationSeconds": 3.94,
           "counts": {
-            "tests": 17,
+            "tests": 19,
             "suites": 0,
-            "pass": 17,
+            "pass": 19,
             "fail": 0,
             "cancelled": 0,
             "skipped": 0,
@@ -5249,11 +5911,11 @@
             "test/artifact-path.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 1.53,
+          "durationSeconds": 3.97,
           "counts": {
-            "tests": 17,
+            "tests": 19,
             "suites": 0,
-            "pass": 17,
+            "pass": 19,
             "fail": 0,
             "cancelled": 0,
             "skipped": 0,
@@ -5286,7 +5948,7 @@
             "test/artifact-race.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.16,
+          "durationSeconds": 0.31,
           "counts": {
             "tests": 11,
             "suites": 0,
@@ -5313,7 +5975,7 @@
             "test/artifact-race.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.17,
+          "durationSeconds": 0.33,
           "counts": {
             "tests": 11,
             "suites": 0,
@@ -5340,7 +6002,7 @@
             "test/artifact-race.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.17,
+          "durationSeconds": 0.34,
           "counts": {
             "tests": 11,
             "suites": 0,
@@ -5379,7 +6041,7 @@
             "test/codex-host.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.34,
+          "durationSeconds": 0.54,
           "counts": {
             "tests": 3,
             "suites": 0,
@@ -5406,7 +6068,7 @@
             "test/codex-host.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.33,
+          "durationSeconds": 0.54,
           "counts": {
             "tests": 3,
             "suites": 0,
@@ -5433,7 +6095,7 @@
             "test/codex-host.test.mjs"
           ],
           "exitCode": 1,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -5453,9 +6115,9 @@
             "  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);",
             "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@deepseek-ai/schemastery' imported from <REPO_ROOT>/plugins/dsh-fleet/lib/index.js",
             "  code: 'ERR_MODULE_NOT_FOUND'",
-            "✖ test/codex-host.test.mjs (40.791959ms)",
+            "✖ test/codex-host.test.mjs (69.145334ms)",
             "✖ failing tests:",
-            "✖ test/codex-host.test.mjs (40.791959ms)"
+            "✖ test/codex-host.test.mjs (69.145334ms)"
           ]
         },
         "permissive": {
@@ -5469,7 +6131,7 @@
             "test/codex-host.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.34,
+          "durationSeconds": 0.53,
           "counts": {
             "tests": 3,
             "suites": 0,
@@ -5505,7 +6167,7 @@
             "test/dispatch-route.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.17,
           "counts": {
             "tests": 28,
             "suites": 0,
@@ -5532,7 +6194,7 @@
             "test/dispatch-route.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.17,
           "counts": {
             "tests": 28,
             "suites": 0,
@@ -5559,7 +6221,7 @@
             "test/dispatch-route.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.17,
           "counts": {
             "tests": 28,
             "suites": 0,
@@ -5586,7 +6248,8 @@
       "cwd": "plugins/dsh-fleet",
       "classification": "host-modules",
       "requiredExternals": [
-        "@deepseek-ai/schemastery"
+        "@deepseek-ai/schemastery",
+        "dsh-kimicode-swarm"
       ],
       "hostPathDependency": false,
       "modes": {
@@ -5598,7 +6261,7 @@
             "test/fake-jobs.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.52,
+          "durationSeconds": 0.67,
           "counts": {
             "tests": 6,
             "suites": 0,
@@ -5610,7 +6273,9 @@
           },
           "verdict": "pass",
           "reason": "ok",
-          "missingModules": [],
+          "missingModules": [
+            "dsh-kimicode-swarm"
+          ],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/natural/dsh-fleet/fake-jobs.test.mjs.txt",
           "errorExcerpt": null
         },
@@ -5625,7 +6290,7 @@
             "test/fake-jobs.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.52,
+          "durationSeconds": 0.66,
           "counts": {
             "tests": 6,
             "suites": 0,
@@ -5637,7 +6302,9 @@
           },
           "verdict": "pass",
           "reason": "ok",
-          "missingModules": [],
+          "missingModules": [
+            "dsh-kimicode-swarm"
+          ],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-dsh/dsh-fleet/fake-jobs.test.mjs.txt",
           "errorExcerpt": null
         },
@@ -5652,7 +6319,7 @@
             "test/fake-jobs.test.mjs"
           ],
           "exitCode": 1,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.14,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -5672,9 +6339,9 @@
             "  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);",
             "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@deepseek-ai/schemastery' imported from <REPO_ROOT>/plugins/dsh-fleet/lib/index.js",
             "  code: 'ERR_MODULE_NOT_FOUND'",
-            "✖ test/fake-jobs.test.mjs (31.399917ms)",
+            "✖ test/fake-jobs.test.mjs (55.891291ms)",
             "✖ failing tests:",
-            "✖ test/fake-jobs.test.mjs (31.399917ms)"
+            "✖ test/fake-jobs.test.mjs (55.891291ms)"
           ]
         },
         "permissive": {
@@ -5688,7 +6355,7 @@
             "test/fake-jobs.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.52,
+          "durationSeconds": 0.7,
           "counts": {
             "tests": 6,
             "suites": 0,
@@ -5700,7 +6367,9 @@
           },
           "verdict": "pass",
           "reason": "ok",
-          "missingModules": [],
+          "missingModules": [
+            "dsh-kimicode-swarm"
+          ],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/permissive/dsh-fleet/fake-jobs.test.mjs.txt",
           "errorExcerpt": null
         }
@@ -5714,7 +6383,8 @@
       "cwd": "plugins/dsh-fleet",
       "classification": "host-modules",
       "requiredExternals": [
-        "@deepseek-ai/schemastery"
+        "@deepseek-ai/schemastery",
+        "dsh-kimicode-swarm"
       ],
       "hostPathDependency": false,
       "modes": {
@@ -5726,7 +6396,7 @@
             "test/farm-integration.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 4.33,
+          "durationSeconds": 5.51,
           "counts": {
             "tests": 5,
             "suites": 0,
@@ -5738,7 +6408,9 @@
           },
           "verdict": "pass",
           "reason": "ok",
-          "missingModules": [],
+          "missingModules": [
+            "dsh-kimicode-swarm"
+          ],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/natural/dsh-fleet/farm-integration.test.mjs.txt",
           "errorExcerpt": null
         },
@@ -5753,7 +6425,7 @@
             "test/farm-integration.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 3.96,
+          "durationSeconds": 4.45,
           "counts": {
             "tests": 5,
             "suites": 0,
@@ -5765,7 +6437,9 @@
           },
           "verdict": "pass",
           "reason": "ok",
-          "missingModules": [],
+          "missingModules": [
+            "dsh-kimicode-swarm"
+          ],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-dsh/dsh-fleet/farm-integration.test.mjs.txt",
           "errorExcerpt": null
         },
@@ -5780,7 +6454,7 @@
             "test/farm-integration.test.mjs"
           ],
           "exitCode": 1,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.14,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -5800,9 +6474,9 @@
             "  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);",
             "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@deepseek-ai/schemastery' imported from <REPO_ROOT>/plugins/dsh-fleet/lib/index.js",
             "  code: 'ERR_MODULE_NOT_FOUND'",
-            "✖ test/farm-integration.test.mjs (35.762167ms)",
+            "✖ test/farm-integration.test.mjs (55.801208ms)",
             "✖ failing tests:",
-            "✖ test/farm-integration.test.mjs (35.762167ms)"
+            "✖ test/farm-integration.test.mjs (55.801208ms)"
           ]
         },
         "permissive": {
@@ -5816,7 +6490,7 @@
             "test/farm-integration.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 3.83,
+          "durationSeconds": 4.47,
           "counts": {
             "tests": 5,
             "suites": 0,
@@ -5828,7 +6502,9 @@
           },
           "verdict": "pass",
           "reason": "ok",
-          "missingModules": [],
+          "missingModules": [
+            "dsh-kimicode-swarm"
+          ],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/permissive/dsh-fleet/farm-integration.test.mjs.txt",
           "errorExcerpt": null
         }
@@ -5854,7 +6530,7 @@
             "test/fleet-hosts-route.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.42,
+          "durationSeconds": 0.76,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -5881,7 +6557,7 @@
             "test/fleet-hosts-route.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.41,
+          "durationSeconds": 0.66,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -5908,7 +6584,7 @@
             "test/fleet-hosts-route.test.mjs"
           ],
           "exitCode": 1,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.14,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -5928,9 +6604,9 @@
             "  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);",
             "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@deepseek-ai/schemastery' imported from <REPO_ROOT>/plugins/dsh-fleet/lib/index.js",
             "  code: 'ERR_MODULE_NOT_FOUND'",
-            "✖ test/fleet-hosts-route.test.mjs (31.684834ms)",
+            "✖ test/fleet-hosts-route.test.mjs (56.932375ms)",
             "✖ failing tests:",
-            "✖ test/fleet-hosts-route.test.mjs (31.684834ms)"
+            "✖ test/fleet-hosts-route.test.mjs (56.932375ms)"
           ]
         },
         "permissive": {
@@ -5944,7 +6620,7 @@
             "test/fleet-hosts-route.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.41,
+          "durationSeconds": 0.73,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -5970,7 +6646,8 @@
       "cwd": "plugins/dsh-fleet",
       "classification": "host-modules",
       "requiredExternals": [
-        "@deepseek-ai/schemastery"
+        "@deepseek-ai/schemastery",
+        "dsh-kimicode-swarm"
       ],
       "hostPathDependency": false,
       "modes": {
@@ -5982,7 +6659,7 @@
             "test/fleet.fake.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.81,
+          "durationSeconds": 1.26,
           "counts": {
             "tests": 5,
             "suites": 0,
@@ -5994,7 +6671,9 @@
           },
           "verdict": "pass",
           "reason": "ok",
-          "missingModules": [],
+          "missingModules": [
+            "dsh-kimicode-swarm"
+          ],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/natural/dsh-fleet/fleet.fake.test.mjs.txt",
           "errorExcerpt": null
         },
@@ -6009,7 +6688,7 @@
             "test/fleet.fake.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.81,
+          "durationSeconds": 1.19,
           "counts": {
             "tests": 5,
             "suites": 0,
@@ -6021,7 +6700,9 @@
           },
           "verdict": "pass",
           "reason": "ok",
-          "missingModules": [],
+          "missingModules": [
+            "dsh-kimicode-swarm"
+          ],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-dsh/dsh-fleet/fleet.fake.test.mjs.txt",
           "errorExcerpt": null
         },
@@ -6036,7 +6717,7 @@
             "test/fleet.fake.test.mjs"
           ],
           "exitCode": 1,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.14,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -6056,9 +6737,9 @@
             "  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);",
             "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@deepseek-ai/schemastery' imported from <REPO_ROOT>/plugins/dsh-fleet/lib/index.js",
             "  code: 'ERR_MODULE_NOT_FOUND'",
-            "✖ test/fleet.fake.test.mjs (36.571125ms)",
+            "✖ test/fleet.fake.test.mjs (56.734709ms)",
             "✖ failing tests:",
-            "✖ test/fleet.fake.test.mjs (36.571125ms)"
+            "✖ test/fleet.fake.test.mjs (56.734709ms)"
           ]
         },
         "permissive": {
@@ -6072,7 +6753,7 @@
             "test/fleet.fake.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.81,
+          "durationSeconds": 1.23,
           "counts": {
             "tests": 5,
             "suites": 0,
@@ -6084,7 +6765,9 @@
           },
           "verdict": "pass",
           "reason": "ok",
-          "missingModules": [],
+          "missingModules": [
+            "dsh-kimicode-swarm"
+          ],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/permissive/dsh-fleet/fleet.fake.test.mjs.txt",
           "errorExcerpt": null
         }
@@ -6108,7 +6791,7 @@
             "test/ledger-multiprocess.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 2.09,
+          "durationSeconds": 2.51,
           "counts": {
             "tests": 5,
             "suites": 0,
@@ -6135,7 +6818,7 @@
             "test/ledger-multiprocess.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 2.06,
+          "durationSeconds": 2.55,
           "counts": {
             "tests": 5,
             "suites": 0,
@@ -6162,7 +6845,7 @@
             "test/ledger-multiprocess.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 2.3,
+          "durationSeconds": 2.65,
           "counts": {
             "tests": 5,
             "suites": 0,
@@ -6199,7 +6882,7 @@
             "test/ledger.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 1,
+          "durationSeconds": 1.03,
           "counts": {
             "tests": 10,
             "suites": 0,
@@ -6226,7 +6909,7 @@
             "test/ledger.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.85,
+          "durationSeconds": 1.02,
           "counts": {
             "tests": 10,
             "suites": 0,
@@ -6253,7 +6936,7 @@
             "test/ledger.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.85,
+          "durationSeconds": 1,
           "counts": {
             "tests": 10,
             "suites": 0,
@@ -6280,7 +6963,8 @@
       "cwd": "plugins/dsh-fleet",
       "classification": "host-modules",
       "requiredExternals": [
-        "@deepseek-ai/schemastery"
+        "@deepseek-ai/schemastery",
+        "dsh-kimicode-swarm"
       ],
       "hostPathDependency": false,
       "modes": {
@@ -6292,7 +6976,7 @@
             "test/local-cleanup-integration.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.37,
+          "durationSeconds": 0.49,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -6304,7 +6988,9 @@
           },
           "verdict": "pass",
           "reason": "ok",
-          "missingModules": [],
+          "missingModules": [
+            "dsh-kimicode-swarm"
+          ],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/natural/dsh-fleet/local-cleanup-integration.test.mjs.txt",
           "errorExcerpt": null
         },
@@ -6319,7 +7005,7 @@
             "test/local-cleanup-integration.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.38,
+          "durationSeconds": 0.51,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -6331,7 +7017,9 @@
           },
           "verdict": "pass",
           "reason": "ok",
-          "missingModules": [],
+          "missingModules": [
+            "dsh-kimicode-swarm"
+          ],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-dsh/dsh-fleet/local-cleanup-integration.test.mjs.txt",
           "errorExcerpt": null
         },
@@ -6346,7 +7034,7 @@
             "test/local-cleanup-integration.test.mjs"
           ],
           "exitCode": 1,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.14,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -6366,9 +7054,9 @@
             "  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);",
             "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@deepseek-ai/schemastery' imported from <REPO_ROOT>/plugins/dsh-fleet/lib/index.js",
             "  code: 'ERR_MODULE_NOT_FOUND'",
-            "✖ test/local-cleanup-integration.test.mjs (34.130625ms)",
+            "✖ test/local-cleanup-integration.test.mjs (51.010459ms)",
             "✖ failing tests:",
-            "✖ test/local-cleanup-integration.test.mjs (34.130625ms)"
+            "✖ test/local-cleanup-integration.test.mjs (51.010459ms)"
           ]
         },
         "permissive": {
@@ -6382,7 +7070,7 @@
             "test/local-cleanup-integration.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.38,
+          "durationSeconds": 0.5,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -6394,7 +7082,9 @@
           },
           "verdict": "pass",
           "reason": "ok",
-          "missingModules": [],
+          "missingModules": [
+            "dsh-kimicode-swarm"
+          ],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/permissive/dsh-fleet/local-cleanup-integration.test.mjs.txt",
           "errorExcerpt": null
         }
@@ -6418,7 +7108,7 @@
             "test/local-lifecycle.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.16,
           "counts": {
             "tests": 9,
             "suites": 0,
@@ -6445,7 +7135,7 @@
             "test/local-lifecycle.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.16,
           "counts": {
             "tests": 9,
             "suites": 0,
@@ -6472,7 +7162,7 @@
             "test/local-lifecycle.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 9,
             "suites": 0,
@@ -6509,7 +7199,7 @@
             "test/reattach.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 15,
             "suites": 0,
@@ -6536,7 +7226,7 @@
             "test/reattach.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.17,
           "counts": {
             "tests": 15,
             "suites": 0,
@@ -6563,7 +7253,7 @@
             "test/reattach.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.16,
           "counts": {
             "tests": 15,
             "suites": 0,
@@ -6584,13 +7274,105 @@
       "methodCaveat": null
     },
     {
+      "id": "dsh-fleet/remote-artifact-race.test.mjs",
+      "plugin": "dsh-fleet",
+      "file": "test/remote-artifact-race.test.mjs",
+      "cwd": "plugins/dsh-fleet",
+      "classification": "hermetic",
+      "requiredExternals": [],
+      "hostPathDependency": false,
+      "modes": {
+        "natural": {
+          "mode": "natural",
+          "argv": [
+            "node",
+            "--test",
+            "test/remote-artifact-race.test.mjs"
+          ],
+          "exitCode": 0,
+          "durationSeconds": 19.63,
+          "counts": {
+            "tests": 16,
+            "suites": 0,
+            "pass": 16,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "verdict": "pass",
+          "reason": "ok",
+          "missingModules": [],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/natural/dsh-fleet/remote-artifact-race.test.mjs.txt",
+          "errorExcerpt": null
+        },
+        "no-dsh": {
+          "mode": "no-dsh",
+          "argv": [
+            "/usr/bin/sandbox-exec",
+            "-f",
+            "/var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-sb-no-dsh.sb",
+            "node",
+            "--test",
+            "test/remote-artifact-race.test.mjs"
+          ],
+          "exitCode": 0,
+          "durationSeconds": 19.76,
+          "counts": {
+            "tests": 16,
+            "suites": 0,
+            "pass": 16,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "verdict": "pass",
+          "reason": "ok",
+          "missingModules": [],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-dsh/dsh-fleet/remote-artifact-race.test.mjs.txt",
+          "errorExcerpt": null
+        },
+        "no-host-modules": {
+          "mode": "no-host-modules",
+          "argv": [
+            "/usr/bin/sandbox-exec",
+            "-f",
+            "/var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-sb-no-host-modules.sb",
+            "node",
+            "--test",
+            "test/remote-artifact-race.test.mjs"
+          ],
+          "exitCode": 0,
+          "durationSeconds": 20.08,
+          "counts": {
+            "tests": 16,
+            "suites": 0,
+            "pass": 16,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "verdict": "pass",
+          "reason": "ok",
+          "missingModules": [],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-host-modules/dsh-fleet/remote-artifact-race.test.mjs.txt",
+          "errorExcerpt": null
+        },
+        "permissive": null
+      },
+      "methodCaveat": null
+    },
+    {
       "id": "dsh-fleet/remote-cmd.test.mjs",
       "plugin": "dsh-fleet",
       "file": "test/remote-cmd.test.mjs",
       "cwd": "plugins/dsh-fleet",
       "classification": "host-modules",
       "requiredExternals": [
-        "@deepseek-ai/schemastery"
+        "@deepseek-ai/schemastery",
+        "dsh-kimicode-swarm"
       ],
       "hostPathDependency": false,
       "modes": {
@@ -6602,7 +7384,7 @@
             "test/remote-cmd.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.77,
+          "durationSeconds": 1.33,
           "counts": {
             "tests": 3,
             "suites": 0,
@@ -6614,7 +7396,9 @@
           },
           "verdict": "pass",
           "reason": "ok",
-          "missingModules": [],
+          "missingModules": [
+            "dsh-kimicode-swarm"
+          ],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/natural/dsh-fleet/remote-cmd.test.mjs.txt",
           "errorExcerpt": null
         },
@@ -6629,7 +7413,7 @@
             "test/remote-cmd.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.79,
+          "durationSeconds": 1.16,
           "counts": {
             "tests": 3,
             "suites": 0,
@@ -6641,7 +7425,9 @@
           },
           "verdict": "pass",
           "reason": "ok",
-          "missingModules": [],
+          "missingModules": [
+            "dsh-kimicode-swarm"
+          ],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-dsh/dsh-fleet/remote-cmd.test.mjs.txt",
           "errorExcerpt": null
         },
@@ -6656,7 +7442,7 @@
             "test/remote-cmd.test.mjs"
           ],
           "exitCode": 1,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.14,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -6676,9 +7462,9 @@
             "  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);",
             "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@deepseek-ai/schemastery' imported from <REPO_ROOT>/plugins/dsh-fleet/lib/index.js",
             "  code: 'ERR_MODULE_NOT_FOUND'",
-            "✖ test/remote-cmd.test.mjs (33.99475ms)",
+            "✖ test/remote-cmd.test.mjs (51.495791ms)",
             "✖ failing tests:",
-            "✖ test/remote-cmd.test.mjs (33.99475ms)"
+            "✖ test/remote-cmd.test.mjs (51.495791ms)"
           ]
         },
         "permissive": {
@@ -6692,7 +7478,7 @@
             "test/remote-cmd.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.77,
+          "durationSeconds": 1.12,
           "counts": {
             "tests": 3,
             "suites": 0,
@@ -6704,7 +7490,9 @@
           },
           "verdict": "pass",
           "reason": "ok",
-          "missingModules": [],
+          "missingModules": [
+            "dsh-kimicode-swarm"
+          ],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/permissive/dsh-fleet/remote-cmd.test.mjs.txt",
           "errorExcerpt": null
         }
@@ -6728,7 +7516,7 @@
             "test/safe-rel-path.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.13,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -6755,7 +7543,7 @@
             "test/safe-rel-path.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.13,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -6782,7 +7570,7 @@
             "test/safe-rel-path.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.07,
+          "durationSeconds": 0.13,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -6796,6 +7584,103 @@
           "reason": "ok",
           "missingModules": [],
           "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-host-modules/dsh-fleet/safe-rel-path.test.mjs.txt",
+          "errorExcerpt": null
+        },
+        "permissive": null
+      },
+      "methodCaveat": null
+    },
+    {
+      "id": "dsh-fleet/swarm-compat.test.mjs",
+      "plugin": "dsh-fleet",
+      "file": "test/swarm-compat.test.mjs",
+      "cwd": "plugins/dsh-fleet",
+      "classification": "hermetic",
+      "requiredExternals": [],
+      "hostPathDependency": false,
+      "modes": {
+        "natural": {
+          "mode": "natural",
+          "argv": [
+            "node",
+            "--test",
+            "test/swarm-compat.test.mjs"
+          ],
+          "exitCode": 0,
+          "durationSeconds": 0.14,
+          "counts": {
+            "tests": 11,
+            "suites": 0,
+            "pass": 10,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 1,
+            "todo": 0
+          },
+          "verdict": "pass",
+          "reason": "ok",
+          "missingModules": [
+            "dsh-kimicode-swarm"
+          ],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/natural/dsh-fleet/swarm-compat.test.mjs.txt",
+          "errorExcerpt": null
+        },
+        "no-dsh": {
+          "mode": "no-dsh",
+          "argv": [
+            "/usr/bin/sandbox-exec",
+            "-f",
+            "/var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-sb-no-dsh.sb",
+            "node",
+            "--test",
+            "test/swarm-compat.test.mjs"
+          ],
+          "exitCode": 0,
+          "durationSeconds": 0.14,
+          "counts": {
+            "tests": 11,
+            "suites": 0,
+            "pass": 10,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 1,
+            "todo": 0
+          },
+          "verdict": "pass",
+          "reason": "ok",
+          "missingModules": [
+            "dsh-kimicode-swarm"
+          ],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-dsh/dsh-fleet/swarm-compat.test.mjs.txt",
+          "errorExcerpt": null
+        },
+        "no-host-modules": {
+          "mode": "no-host-modules",
+          "argv": [
+            "/usr/bin/sandbox-exec",
+            "-f",
+            "/var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-sb-no-host-modules.sb",
+            "node",
+            "--test",
+            "test/swarm-compat.test.mjs"
+          ],
+          "exitCode": 0,
+          "durationSeconds": 0.15,
+          "counts": {
+            "tests": 11,
+            "suites": 0,
+            "pass": 10,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 1,
+            "todo": 0
+          },
+          "verdict": "pass",
+          "reason": "ok",
+          "missingModules": [
+            "dsh-kimicode-swarm"
+          ],
+          "log": "../../../../var/folders/40/q3rypsbx6rq34177xts5jk5c0000gn/T/agos-acceptance-surface-logs/no-host-modules/dsh-fleet/swarm-compat.test.mjs.txt",
           "errorExcerpt": null
         },
         "permissive": null
@@ -6821,7 +7706,7 @@
             "test/trace-paging.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.48,
+          "durationSeconds": 1.01,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -6848,7 +7733,7 @@
             "test/trace-paging.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.48,
+          "durationSeconds": 0.87,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -6875,7 +7760,7 @@
             "test/trace-paging.test.mjs"
           ],
           "exitCode": 1,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.13,
           "counts": {
             "tests": 1,
             "suites": 0,
@@ -6895,9 +7780,9 @@
             "  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);",
             "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@deepseek-ai/schemastery' imported from <REPO_ROOT>/plugins/dsh-fleet/lib/index.js",
             "  code: 'ERR_MODULE_NOT_FOUND'",
-            "✖ test/trace-paging.test.mjs (34.819291ms)",
+            "✖ test/trace-paging.test.mjs (49.709917ms)",
             "✖ failing tests:",
-            "✖ test/trace-paging.test.mjs (34.819291ms)"
+            "✖ test/trace-paging.test.mjs (49.709917ms)"
           ]
         },
         "permissive": {
@@ -6911,7 +7796,7 @@
             "test/trace-paging.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.48,
+          "durationSeconds": 0.96,
           "counts": {
             "tests": 4,
             "suites": 0,
@@ -6947,7 +7832,7 @@
             "test/wake.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 21,
             "suites": 0,
@@ -6974,7 +7859,7 @@
             "test/wake.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.09,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 21,
             "suites": 0,
@@ -7001,7 +7886,7 @@
             "test/wake.test.mjs"
           ],
           "exitCode": 0,
-          "durationSeconds": 0.08,
+          "durationSeconds": 0.15,
           "counts": {
             "tests": 21,
             "suites": 0,

@@ -36,6 +36,14 @@ const SELFTEST_SENTINEL = 'AGOS_ACCEPTANCE_SELFTEST'
  * 2. **置防递归哨兵**。正式门的默认计划里含本自检;本自检的每条负控又都 spawn 验收器。
  *    子验收器要是再把自检放进默认计划,就是无限递归。哨兵让它不放。NC16 双向验证。
  */
+import { surfaceInputsDigest } from './lib/surface-inputs.mjs'
+
+/** 当前 HEAD —— 合成依赖面要能声称"我量的就是这棵树",否则永远被判陈旧。 */
+function currentRepoHead() {
+	const res = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' })
+	return res.status === 0 ? String(res.stdout).trim() : 'unknown'
+}
+
 function runnerEnv(extra = {}) {
 	const env = { ...process.env }
 	for (const k of ['NODE_TEST_CONTEXT', 'NODE_OPTIONS']) delete env[k]
@@ -85,6 +93,7 @@ function runRunner({
 	plan = null, surface = null,
 	floors = null, floorsRaw = null, floorsMissing = false, floorsDisabled = false,
 	requiredPlugins = null, pluginsRoot = null, selftestFile = null,
+	hostIntegrations = undefined,
 	extraArgs = [], env = {},
 }) {
 	const work = mkdtempSync(join(tmpdir(), 'agos-selftest-'))
@@ -99,6 +108,17 @@ function runRunner({
 	}
 	if (surface) { const sp = join(work, 'surface.json'); writeFileSync(sp, JSON.stringify(surface, null, 2)); argv.push(`--surface=${sp}`) }
 	else argv.push(`--surface=${join(work, 'no-such-surface.json')}`)   // 默认不让负控依赖真实实测文件
+	// 宿主集成清单同理:默认注入一份**空**清单,让负控在"没有任何豁免"的基准上判定。
+	// 不指向仓里那份真清单 —— 否则负控的结论会随真清单增删而漂。
+	if (hostIntegrations !== undefined) {
+		const hp = join(work, 'host-integrations.json')
+		writeFileSync(hp, typeof hostIntegrations === 'string' ? hostIntegrations : JSON.stringify(hostIntegrations, null, 2))
+		argv.push(`--host-integrations=${hp}`)
+	} else {
+		const hp = join(work, 'host-integrations-empty.json')
+		writeFileSync(hp, JSON.stringify({ schema: 'agos-acceptance/host-integrations@1', integrations: [] }, null, 2))
+		argv.push(`--host-integrations=${hp}`)
+	}
 	if (floorsDisabled) argv.push('--floors=none')
 	else if (floorsMissing) argv.push(`--floors=${join(work, 'no-such-floors.json')}`)
 	else {
@@ -235,6 +255,9 @@ test('NC4: 缺必需宿主包 → verdict fail + missing-host-modules 诊断,不
 	const fakeSurface = {
 		schema: 'agos-acceptance/dependency-surface@1',
 		generatedAt: new Date().toISOString(),
+		// 指纹必须是当前的:本条测的是「缺包 → 失败」,不是「陈旧 → 降级」。
+		// 少了它,产物会被判陈旧、预检不再拦人,这条就测不到自己要测的东西了(NC20g 专管那条路)。
+		inputsDigest: surfaceInputsDigest(REPO_ROOT),
 		summary: {
 			externalToSuites: { '@agos-selftest/definitely-not-a-real-package': ['dsh-agos/agent-kernel.test.mjs'] },
 			suitesRequiringHostPaths: [],
@@ -716,4 +739,106 @@ test('NC17c: 污染真的会让 node --test 一个测试都不跑 —— 而验�
 	assert.equal(s.verdict, 'fail')
 	assert.match(s.reason, /no-test-summary/)
 	assert.notEqual(r.exitCode, 0, '没有摘要绝不能算过')
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 控制 20:依赖面预检的两个口子。两个都是本轮实测踩出来的,不是设想的。
+//
+//   a. 预检不认宿主集成清单 → 把「按设计优雅降级、实跑 exit 0」的套件判成缺依赖失败(假红);
+//   b. 预检不看产物新旧 → 一份 2026-09-08 测的快照(比 swarm 解耦还早、通篇没有 swarm)
+//      让预检报了「无缺失」,描述的是一棵已经不存在的树(假绿)。
+//
+// 两条的方向相反,所以要分别钉:豁免不能宽到"什么都放行",陈旧不能松到"什么都不管"。
+// ─────────────────────────────────────────────────────────────────────────────
+const SURFACE_NEEDING = (pkg) => ({
+	schema: 'agos-acceptance/dependency-surface@1',
+	generatedAt: new Date().toISOString(),
+	gitHead: currentRepoHead(),
+	// 新鲜 = 输入指纹与当前一致。**不是**「gitHead 与当前 HEAD 一致」——
+	// 那种判法在产物被提交后必然永远陈旧,等于把这层预检永久关掉(NC20f 钉这一点)。
+	inputsDigest: surfaceInputsDigest(REPO_ROOT),
+	summary: { externalToSuites: { [pkg]: ['dsh-agos/agent-kernel.test.mjs'] }, suitesRequiringHostPaths: [] },
+})
+const ONE_GATE = {
+	codeGates: [{ id: 'dsh-agos', cwd: 'plugins/dsh-agos', argv: ['node', '--test', 'test/agent-kernel.test.mjs'], kind: 'node-test', required: true }],
+	advisory: [],
+}
+const MANIFEST_WITH = (specifier) => ({
+	schema: 'agos-acceptance/host-integrations@1',
+	integrations: [{
+		specifier,
+		why: '自检合成条目',
+		degradation: { file: 'plugins/dsh-agos/lib/swarm-host-integration.mjs', export: 'resolveSwarmModule' },
+		consumers: ['plugins/dsh-agos/lib/index.js'],
+		degradedBehaviour: '自检合成条目',
+	}],
+})
+
+test('NC20a: 说明符**不在**清单里 → 解析不到照旧判 missing-host-modules 失败(豁免不是"什么都放行")', () => {
+	const pkg = '@agos-selftest/not-a-real-package-nc18'
+	const r = runRunner({ plan: ONE_GATE, surface: SURFACE_NEEDING(pkg) })   // 默认注入空清单
+	const s = suiteOf(r.json, 'dsh-agos')
+	assert.equal(s.verdict, 'fail', '没声明的说明符缺了就必须失败')
+	assert.match(s.reason, /missing-host-modules/)
+	assert.ok(s.missingModules.includes(pkg), '必须点名具体包')
+	assert.notEqual(r.exitCode, 0)
+})
+
+test('NC20b: 说明符在清单里声明为宿主集成 → 不判失败,但必须**按名字**出现在输出里(豁免不许是静默的)', () => {
+	const pkg = '@agos-selftest/not-a-real-package-nc18'
+	const r = runRunner({ plan: ONE_GATE, surface: SURFACE_NEEDING(pkg), hostIntegrations: MANIFEST_WITH(pkg) })
+	const s = suiteOf(r.json, 'dsh-agos')
+	assert.notEqual(s.verdict, 'fail', '已声明的宿主集成不该把套件判失败')
+	assert.ok(!/missing-host-modules/.test(s.reason ?? ''), '不该报缺依赖')
+	assert.match(r.stdout, /宿主环境集成/, '豁免这件事必须出现在输出里')
+	assert.ok(r.stdout.includes(pkg), `被豁免的说明符必须按名字打出来,实际输出未见 ${pkg}`)
+})
+
+test('NC20c: 清单本身坏掉 → 不豁免任何东西(坏清单不得变成万能放行证)', () => {
+	const pkg = '@agos-selftest/not-a-real-package-nc18'
+	const r = runRunner({ plan: ONE_GATE, surface: SURFACE_NEEDING(pkg), hostIntegrations: '{ 这不是 JSON' })
+	const s = suiteOf(r.json, 'dsh-agos')
+	assert.equal(s.verdict, 'fail', '清单坏了要更严,不是更松')
+	assert.match(s.reason, /missing-host-modules/)
+	assert.match(r.stdout, /宿主集成清单不可用/, '清单坏掉这件事必须说出来,不能静默')
+})
+
+test('NC20d: 输入指纹对不上(产物测的是另一棵树)→ 降级为参考,不据此判失败,且"未据此判定"必须醒目', () => {
+	const pkg = '@agos-selftest/not-a-real-package-nc18'
+	const stale = { ...SURFACE_NEEDING(pkg), inputsDigest: 'f'.repeat(64) }
+	const r = runRunner({ plan: ONE_GATE, surface: stale })   // 空清单:没有任何豁免
+	const s = suiteOf(r.json, 'dsh-agos')
+	assert.notEqual(s.verdict, 'fail', '陈旧快照描述的可能是另一棵树,不能据它判失败')
+	assert.match(r.stdout, /依赖面产物已陈旧/, '陈旧这件事必须说出来')
+	assert.match(r.stdout, /输入指纹 ffffffffffff/, '必须点出是哪个指纹对不上')
+	assert.match(r.stdout, /不据此判任何套件失败/, '"这次没据它判定"必须醒目')
+	assert.ok(r.stdout.includes(pkg) || /会被判缺依赖的是/.test(r.stdout),
+		'陈旧快照下"本来会被判缺依赖的是谁"要留痕,不能一句不提就放过')
+	assert.match(r.stdout, /host-modules-check/, '必须指明权威判定在哪一闸,否则等于取消了这层检查')
+})
+
+test('NC20e: 输入指纹一致时不降级 —— 上一条的负控,证明降级不是"永远降级"', () => {
+	const pkg = '@agos-selftest/not-a-real-package-nc18'
+	const r = runRunner({ plan: ONE_GATE, surface: SURFACE_NEEDING(pkg) })
+	assert.ok(!/依赖面产物已陈旧/.test(r.stdout), '内容没变就不该被判陈旧')
+	assert.equal(suiteOf(r.json, 'dsh-agos').verdict, 'fail', '不降级时缺包照旧是失败')
+})
+
+test('NC20f: 判新旧只看内容,不看 gitHead —— 否则产物一被提交就永远陈旧,这层预检等于被永久关掉', () => {
+	const pkg = '@agos-selftest/not-a-real-package-nc18'
+	// gitHead 指向一个绝不等于当前 HEAD 的值,但内容指纹是对的:必须仍判"新鲜"。
+	const committed = { ...SURFACE_NEEDING(pkg), gitHead: '0'.repeat(40) }
+	const r = runRunner({ plan: ONE_GATE, surface: committed })
+	assert.ok(!/依赖面产物已陈旧/.test(r.stdout),
+		'内容一致就该算数;按 gitHead 判会让每次提交后的产物都失效')
+	assert.equal(suiteOf(r.json, 'dsh-agos').verdict, 'fail', '仍然新鲜,所以缺包照旧判失败')
+})
+
+test('NC20g: 旧格式产物(没有输入指纹)→ 一律按陈旧处理,不许靠"缺字段"绕过判断', () => {
+	const pkg = '@agos-selftest/not-a-real-package-nc18'
+	const legacy = { ...SURFACE_NEEDING(pkg) }
+	delete legacy.inputsDigest
+	const r = runRunner({ plan: ONE_GATE, surface: legacy })
+	assert.match(r.stdout, /依赖面产物已陈旧/, '没有指纹就无法自证新鲜,必须按陈旧处理')
+	assert.notEqual(suiteOf(r.json, 'dsh-agos').verdict, 'fail', '既然判了陈旧,就不能据它判失败')
 })

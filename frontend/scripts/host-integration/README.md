@@ -109,7 +109,19 @@ if (!loaded.includes('dsh-agos')) {
 - **`cleanup.mjs` 不再按前缀杀。** 它读每个运行根的 `owner.json`:创建者进程还活着的运行
   一律跳过并打印;要杀某个 pid,必须 pid + 内核启动时刻 + argv 三者都还对得上。
   `--dry-run` 只分类不动手,`--root <dir>` 指定扫描目录。
+- **宿主和浏览器都进清单。** Playwright 不把它启动的浏览器 pid 交出来,所以 harness 用
+  「启动前后自己直接子进程的差集 + argv 确认是浏览器」把它找出来再记账;否则一次被遗弃的
+  运行会留下一个谁都认不出的 headless 浏览器。清单里每条进程记 `pgid` 与 `runIdInCommand`:
+  - `pgid === pid`(自己是进程组长)时按**进程组**发信号,因为浏览器是一棵树,只杀父进程会
+    留下 renderer / GPU 助手;进程组不等于本进程组才会动手。
+  - 宿主的 argv 含 runId(`--patch` 路径在运行根里),所以杀它要求 argv 仍含 runId;浏览器的
+    argv 只含 Playwright 自己的随机 profile 路径,永远不含 runId,对它的规则是
+    pid + 内核启动时刻 + argv 逐字节相等。这个区别在**记账时**判定并写进清单。
 - **浏览器只被允许访问本次的两个 origin**,其余请求一律 abort 并记进 `ctx.blockedRequests`。
+- **关浏览器有时间上限。** 对着已安装的 Google Chrome,`browser.close()` 实测要 30 秒
+  (Playwright 等整棵进程树)。dispose 与「拉起失败逐级回收」都会付这 30 秒,所以宽限
+  2.5 秒后直接对进程组发 SIGKILL 并停止等待 —— profile 是一次性的,没有需要优雅退出保存的
+  东西。实测 30.1s → 2.7s。
 - **Playwright 不再默认借 `~/.dsh`。** 顺序是:`AGOS_PLAYWRIGHT_MODULE` → 本仓依赖树
   (`frontend/`、`plugins/`、仓库根)→ 抛 `IntegrationBlocked`(`error.blocked === true`)。
   确实要借 live profile 必须同时设 `AGOS_ALLOW_LIVE_PROFILE=1`。
@@ -120,7 +132,17 @@ if (!loaded.includes('dsh-agos')) {
 # 基础设施自己的回归(不需要完整依赖树)
 node --test "tests/host-integration/unit/*.test.mjs"
 
-# 其中一条真浏览器用例需要 playwright;没有时会带原因 skip
+# 真浏览器那条用例:装了 frontend/node_modules 就自动跑;没装时可以显式指路
 AGOS_PLAYWRIGHT_MODULE=/abs/path/to/playwright-core/index.mjs \
   node --test tests/host-integration/unit/browser-isolation.test.mjs
 ```
+
+## 清理
+
+```sh
+node scripts/host-integration/cleanup.mjs --dry-run   # 只分类,不动手
+node scripts/host-integration/cleanup.mjs             # 只回收没人认领的运行
+```
+
+并行跑联测是安全的:别人还活着的运行会被打成 `active` 并原样跳过,输出里点名说明跳过了谁、
+为什么跳过。
