@@ -1,4 +1,4 @@
-# 正式验收门(node scripts/acceptance/run-acceptance.mjs --with-frontend),退出码 0
+# 正式验收门(node scripts/acceptance/run-acceptance.mjs --with-frontend),exit 0
 # 处理口径(全部日志一致,共两步,此外未作任何删改):
 #   1) 路径前缀替换一次:用户主目录 → <HOME>、本 worktree 根 → <REPO>、系统临时目录 → <TMP>;
 #   2) 正文末尾空白规范化为恰好一个换行(捕获噪音);行内空白一字未动。
@@ -11,25 +11,29 @@
    供应商密钥: 已从子进程环境剔除(Z_AI_API_KEY/GLM_API_KEY/OPENAI_API_KEY/ANTHROPIC_API_KEY)
    Fleet 历史: DSH_FLEET_RUNS_FILE=<TMP> → 不读操作者真实批次历史)
    依赖面预检: 5 个 (插件,包) 对可解析;无缺失
+   ⚠️  依赖面产物已陈旧(测量时的输入指纹 02046c1ef77d ≠ 当前 dc1f43bfa982)—— 它描述的可能是另一棵树,
+      故本次**不据此判任何套件失败**;权威判定见 host-modules-check(完整静态导入图)那一闸。
+      重新测量: node scripts/acceptance/measure-dependency-surface.mjs
    宿主环境集成(清单已声明,干净树里解析不到属预期,不判失败): dsh-kimicode-swarm
    ⚠️  依赖 ~/.dsh 绝对路径的套件(装包解决不了): dsh-agos-router/http-routes.test.mjs, dsh-agos-router/index-async-wiring.test.mjs
    计数下限基线: 7 个闸有下限(抓删测试;缺基线文件/空基线/坏 JSON 都 fail-closed 退 78)
    自检闸: 在计划里(node --test scripts/acceptance/selftest.mjs)
 
-▸ dsh-agos: ✅ PASS exit 0 pass 194 / fail 0 / skip 2 (tests 196)  0.81s
-▸ dsh-agos-router: ✅ PASS exit 0 pass 156 / fail 0 / skip 0 (tests 156)  7.99s
+▸ dsh-agos: ✅ PASS exit 0 pass 196 / fail 0 / skip 2 (tests 198)  0.87s
+▸ dsh-agos-router: ✅ PASS exit 0 pass 156 / fail 0 / skip 0 (tests 156)  8.01s
 ▸ dsh-mcp-bridge: ✅ PASS exit 0 pass 4 / fail 0 / skip 0 (tests 4)  0.21s
-▸ cn-capabilities: ✅ PASS exit 0 pass 115 / fail 0 / skip 4 (tests 119)  43.2s
-▸ dsh-fleet: ✅ PASS exit 0 pass 176 / fail 0 / skip 1 (tests 177)  24.26s
-▸ frontend-verify: ✅ PASS exit 0 pass 365 / fail 0 / skip 1 (tests 366)  12.42s
-▸ selftest: ✅ PASS exit 0 pass 44 / fail 0 / skip 0 (tests 44)  12.86s
-▸ host-modules-check: ✅ PASS exit 0  0.22s
-▸ host-tree: ✅ PASS exit 0  0.24s
-▸ deploy-drift: ℹ️  ADVISORY exit 1  0.6s
+▸ cn-capabilities: ✅ PASS exit 0 pass 115 / fail 0 / skip 4 (tests 119)  41.15s
+▸ dsh-fleet: ✅ PASS exit 0 pass 182 / fail 0 / skip 1 (tests 183)  25.32s
+▸ frontend-verify: ✅ PASS exit 0 pass 365 / fail 0 / skip 1 (tests 366)  13.2s
+▸ selftest: ✅ PASS exit 0 pass 45 / fail 0 / skip 0 (tests 45)  13.75s
+▸ host-modules-check: ✅ PASS exit 0  0.24s
+▸ host-tree: ✅ PASS exit 0  0.26s
+▸ deploy-drift: ℹ️  ADVISORY exit 1  0.69s
      部署漂移是环境事实,不是代码缺陷:未部署的分支必然非零。只报,不参与退出码。  ← 不参与退出码,也不被吞
 
 == 汇总 ==
    代码闸: ✅ 绿
-   测试计数: pass 1054 / fail 0 / skip 8  (tests 1062)   ← skip 单列,不并入 pass
+   测试计数: pass 1063 / fail 0 / skip 8  (tests 1071)   ← skip 单列,不并入 pass
    ADVISORY deploy-drift: exit 1 —— 已记录,不影响代码闸
    进程退出码 = 代码闸 = 0
+   计数下限基线已写入: scripts/acceptance/expected-counts.json

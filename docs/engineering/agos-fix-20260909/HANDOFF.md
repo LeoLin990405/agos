@@ -6,14 +6,15 @@
 |---|---|
 | worktree | `/Users/leo/Projects/agos-cursor-fix-20260909` |
 | 分支 | `fix/cursor-integration-20260909` |
-| 交付 | 该分支**尖端**；代码最后一跳 **`d60ae14`**，其后各跳只动 `docs/` |
+| 交付 | 该分支**尖端**；代码最后一跳 **`3454a97`**，其后各跳只动 `docs/` |
 | 基线 | `9434064f87b1a936c13c58b94c2473c6d89f3a61`（第二轮，未上传） |
 | 状态 | **未 push、未合并 main、未部署、未重启用户 DSH** |
 
-**测试数字全部量在 `d60ae14`**，它之后的提交只动 `docs/`（核对：`git diff --stat d60ae14 HEAD`
-应当只见 `docs/` 下的文件）。代码提交四跳，新→旧：
+**测试数字全部量在 `3454a97`**，它之后的提交只动 `docs/`（核对：`git diff --stat 3454a97 HEAD`
+应当只见 `docs/` 下的文件）。代码提交五跳，新→旧：
 
 ```
+3454a97  session/list 信封形状、Fleet 预览判决透出、裸 --write-floors 静默失效
 d60ae14  依赖面预检认清单与内容指纹、Router 锁活性去负载耦合、Fleet 拒绝上报去顺序耦合、写路径剥 taskRef
 b067830  验收器自测/正式门完整性、依赖可复现与安装路径安全、宿主联测判定与资源、会话删除判据、Fleet 远端产物
 c38bd47  ← Kimi 3c61727（cherry-pick，零冲突）
@@ -29,10 +30,10 @@ cd /Users/leo/Projects/agos-cursor-fix-20260909
 
 # 正式门（权威口径，约 100 秒）
 node scripts/acceptance/run-acceptance.mjs --with-frontend
-#   期望：代码闸绿，pass 1054 / fail 0 / skip 8（tests 1062），exit 0
+#   期望：代码闸绿，pass 1063 / fail 0 / skip 8（tests 1071），exit 0
 
 # 验收器自测（Luna 的 P1，约 13 秒）
-node scripts/acceptance/selftest.mjs            # 期望 44/44 exit 0
+node scripts/acceptance/selftest.mjs            # 期望 45/45 exit 0
 
 # 负控的元证明：把验收器改坏，看负控抓不抓得到（约 30 秒）
 node scripts/acceptance/test/mutation-counter-evidence.mjs   # 期望 23/23
@@ -129,7 +130,8 @@ AGOS_SWARM_MODULE=/path/to/usable/swarm  npm test
 ## 硬规矩（沿用，别破）
 
 - 计数下限**只能从全绿运行生成**（`--write-floors` 会拒绝红状态），**只上调不下调**。
-  本轮从 172/124/148/37 上调到 194/156/176/44，无一下降。
+  本轮从 172/124/148/37 上调到 196/156/182/45，无一下降。
+  ⚠️ 重算必须写成 `--write-floors=<path>`：裸标志曾被静默忽略（现已退 78，负控 NC19c）。
 - 合成运行（用了 `--required-plugins`/`--plugins-root`/`--selftest-file`/`--surface`/
   `--host-integrations`）自报 `authoritative=false` 且**拒绝写基线**——防假套件树洗掉真基线。
 - 私有语料**不为过门去读**。3 项 skip 如实留着。
@@ -143,14 +145,14 @@ AGOS_SWARM_MODULE=/path/to/usable/swarm  npm test
 
 ```
 docs/engineering/agos-fix-20260909/
-├── TASKS.md          八项 + 新暴露三项的台账，每条带判据与否证
+├── TASKS.md          八项 + 新暴露六项的台账，每条带判据与否证
 ├── REVIEW.md         判断依据、反对意见、我认为最该被质疑的地方
 ├── VERIFICATION.md   全部实测数字；文末单列已作废的历史结论
 ├── HANDOFF.md        本文件
 └── logs/
     ├── SHA256.txt              摘要针对脱敏后的文件本身
-    ├── acceptance-gate.txt     正式门，exit 0
-    ├── selftest.txt            44/44（Luna 核查时 1 pass / 13 fail）
+    ├── acceptance-gate.txt     正式门，exit 0(1063/0/8)
+    ├── selftest.txt            45/45（Luna 核查时 1 pass / 13 fail）
     ├── acceptance-unit.txt     64/64
     ├── mutation-meta.txt       23/23 突变全被抓
     ├── clean-npm-ci.txt        npm ci exit 0，31 包
