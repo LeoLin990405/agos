@@ -36,6 +36,46 @@ const listEnvelope = (items) => ({
   json: async () => ({ type: 'server-response', result: { ok: true, value: { items } } }),
 })
 
+/**
+ * 会**校验信封形状**的假 gateway —— 上面那个 listEnvelope 不看请求,给什么都回成功。
+ *
+ * 为什么必须有这个:契约研究员复核时发现生产代码发的是 `payload: {}`,缺整个 args 层,
+ * 在固定宿主上会被 gateway 拒掉 → 运行态永久 unavailable → 删除永久 503。而我原有的
+ * 13 项测试全绿 —— 因为它们的假 fetch 只被断言了 url 和 method,请求体的其余部分
+ * 根本没人看。测试对准了「方法名」一个维度,真实失败面还有「信封形状」这一维。
+ *
+ * 这里逐字实现固定宿主的两条谓词:
+ *   · gateway/src/index.ts:950-953 —— payload 必须含**恰好一个** plain-object args 字段;
+ *   · gateway/src/index.ts:1112-1137 assertExactArguments —— args 的键必须与 descriptor
+ *     逐一对上,多了报 unexpected,少了报 missing。
+ * 拒绝时的返回照抄宿主行为:HTTP **200** + `{ok:false, error:{code}}`(不是 4xx —— 
+ * gateway 捕获异常后仍走正常信封,这一点本身也值得钉住)。
+ */
+const gatewayFetch = (items, seen) => async (url, init) => {
+  const body = JSON.parse(init.body)
+  if (seen !== undefined) seen.push({ url: String(url), body })
+  const bad = (code, message) => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ type: 'server-response', result: { ok: false, error: { code, message } } }),
+  })
+  const { payload } = body
+  const isPlain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
+  if (!isPlain(payload) || !Object.hasOwn(payload, 'args') || !isPlain(payload.args)
+    || Reflect.ownKeys(payload).length !== 1) {
+    return bad('gateway/invocation-unavailable',
+      'Remote payload must contain exactly one plain-object args field')
+  }
+  const expected = new Set(['_request'])
+  const actual = Reflect.ownKeys(payload.args)
+  const extra = actual.filter((k) => typeof k !== 'string' || !expected.has(k))
+  if (extra.length > 0) {
+    return bad('gateway/arguments-invalid',
+      `args fields do not match the descriptor: unexpected ${extra.map(String).join(', ')}`)
+  }
+  return listEnvelope(items)
+}
+
 // ── 挂载态:三态 + 权威谓词 ────────────────────────────────────────────────
 
 test('挂载态用宿主同款谓词 ctx.sessions.get(id)!==undefined:在场即 attached', async () => {
@@ -99,6 +139,46 @@ test('取不到 ctx.agents 时落到 session/list 内调,并用固定协议的�
   assert.equal(calls[0].body.method, 'session/list')
   assert.equal(calls[0].body.type, 'client-request')
   assert.ok(typeof calls[0].body.rpcId === 'string' && calls[0].body.rpcId.length > 0)
+})
+
+test('内调的信封形状按固定宿主 gateway 谓词校验:payload 必须是 {args:{_request:{}}}', async () => {
+  // 这条走**会校验形状**的假 gateway。名字对、形状错的话它会像真宿主那样
+  // 回 200 + ok:false,于是判定落到 unavailable —— 删除又变成永久 503。
+  const seen = []
+  const status = await runningFromRpc('run-1', {
+    selfOrigin: 'http://127.0.0.1:7000',
+    fetch: gatewayFetch([{ sessionId: 'run-1', running: true }], seen),
+  })
+  assert.deepEqual(status, { available: true, running: true, reason: null },
+    `信封被固定宿主的谓词拒了:${status.reason ?? ''}`)
+  // 直接钉形状,而不只是钉「结果对」——否则将来假 gateway 放松了就没人守。
+  assert.deepEqual(seen[0].body.payload, { args: { _request: {} } })
+  assert.equal(Reflect.ownKeys(seen[0].body.payload).length, 1, 'payload 只能有 args 一个字段')
+})
+
+test('负控:假 gateway 真的会拒错形状 —— 证明上一条不是摆设', async () => {
+  // 不改生产代码,直接把三种错形状喂给同一个假 gateway,断言它们都被判 unavailable。
+  // 这条是上一条的元证明:如果假 gateway 其实什么都放行,上一条永远绿,等于没测。
+  for (const [label, payload] of [
+    ['缺 args 层(生产代码原先就是这个)', {}],
+    ['args 不是对象', { args: 'nope' }],
+    ['args 键名错(request 而非 _request)', { args: { request: {} } }],
+    ['payload 多带字段', { args: { _request: {} }, extra: 1 }],
+  ]) {
+    const status = await runningFromRpc('run-1', {
+      selfOrigin: 'http://127.0.0.1:7000',
+      fetch: async (url, init) => {
+        const body = JSON.parse(init.body)
+        body.payload = payload            // 覆盖成错形状,其余照原样
+        return gatewayFetch([{ sessionId: 'run-1', running: true }])(
+          url, { ...init, body: JSON.stringify(body) },
+        )
+      },
+    })
+    assert.equal(status.available, false, `${label}:应被拒,实际却判可用`)
+    assert.equal(status.running, false, `${label}:拒绝时不得报 running:true`)
+    assert.match(status.reason, /session\/list 返回错误/, `${label}:理由要点明是 RPC 报错`)
+  }
 })
 
 test('内调拿到权威列表但目标不在其中 → available 且 running:false,不退回 503', async () => {

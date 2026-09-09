@@ -25,9 +25,8 @@ import { createFleetRuntime, TERMINAL_RUN_STATUSES } from './fleet-runtime.mjs'
 import { registerFleetDispatchRoutes } from './fleet-dispatch.mjs'
 import {
   buildArtifactFileCommand,
-  buildArtifactFileProbeCommand,
   createArtifactHandlers,
-  parseArtifactFileProbe,
+  parseArtifactStreamStatus,
   safeRelPath as safeArtifactRelPath,
   validateRunId,
 } from './fleet-artifacts.mjs'
@@ -1329,15 +1328,26 @@ function apply(ctx, config, dependencies = {}) {
             const path = safeArtifactRelPath(rawPath)
             if (!validateRunId(runId)) { send(res, 400, { error: 'run is required and must be a valid run id' }); return }
             if (!path) { send(res, 400, { error: 'path must be a safe artifact-relative path' }); return }
+            // 单次远端执行:判决行先到,字节从同一个已校验的描述符出。
+            //
+            // 原先这里是两趟 SSH(probe 拿元数据、再读字节),而且第二趟被管进
+            // `head -c 40000` —— 管道的退出码是 **head 的**,于是远端的拒绝
+            // (exit 9)被吞掉,预览路径把「我拒绝给你」变成「成功读到一个空文件」的 200。
+            // 实测(E 的 verify-index-patch.mjs,guard→open 之间做 hardlink 替换):
+            // 旧写法 200 + 空体,新写法 409 artifact refused: hard-links。
+            // 不泄漏 sentinel(字节那趟本来就绑描述符),但它**不诚实** —— 操作者
+            // 分不清「产物是空的」和「产物被拒了」。limitBytes 在已持有的 fd 上截断
+            // (`head -c N <&3`),是同一个对象的更小一次读,不是第二次解析名字。
             const target = { workspace: wsdir, runId, path }
-            let probeCommand
-            try { probeCommand = buildArtifactFileProbeCommand(target) }
+            let command
+            try { command = buildArtifactFileCommand({ ...target, protocol: true, limitBytes: 40000 }) }
             catch { send(res, 400, { error: 'invalid artifact path' }); return }
-            const probe = await sshRead(h, probeCommand, 15000)
-            const metadata = probe.ok ? parseArtifactFileProbe(probe.out) : { ok: false, status: 502, error: probe.err || ('ssh exit ' + probe.code) }
-            if (!metadata.ok) { send(res, metadata.status, { error: metadata.error }); return }
-            const r = await sshRead(h, '(' + buildArtifactFileCommand(target) + ') | head -c 40000', 20000)
-            send(res, r.ok ? 200 : 502, r.ok ? { host: h.name, runId, path, content: r.out } : { error: r.err || ('ssh exit ' + r.code) })
+            const r = await sshRead(h, command, 20000)
+            if (!r.ok) { send(res, 502, { error: r.err || ('ssh exit ' + r.code) }); return }
+            const nl = r.out.indexOf('\n')
+            const verdict = parseArtifactStreamStatus(nl === -1 ? '' : r.out.slice(0, nl))
+            if (!verdict.ok) { send(res, verdict.status, { error: verdict.error }); return }
+            send(res, 200, { host: h.name, runId, path, content: r.out.slice(nl + 1) })
           } else {
             // POSIX 列表(GNU/BSD stat 双试),排除 .trace 内部;深度 4 覆盖 tasks/<runId>/产物
             const r = await sshRead(h, posixList({ cwd: wsdir, maxDepth: 4, limit: 300 }), 20000)

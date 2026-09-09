@@ -392,6 +392,25 @@ const SESSION_LIST_ROUTE = '/api/session/list'
 const SESSION_LIST_METHOD = 'session/list'
 
 /**
+ * `session/list` 的形参名 —— 信封里的 args 必须按它 keyed。
+ *
+ * ⚠️ 2026-09-09 二次校正:上面那次只改对了**名字**(点号→斜杠),payload 还是 `{}`,
+ * 于是照样永久失败,只是换了个失败理由。固定宿主的 gateway 在
+ * `packages/api/gateway/src/index.ts:950-953` 要求 payload 含**恰好一个 plain-object
+ * `args` 字段**,否则抛 'Remote payload must contain exactly one plain-object args field';
+ * 随后 `assertExactArguments`(:1112-1137)要求 args 的键与 descriptor 逐一对上。
+ * `session/list` 的形参是 `_request`(本仓 api-client 的权威映射
+ * `frontend/src/api-client/index.ts:71`,信封构造见同文件 :131 `payload: { args }`;
+ * 宿主 e2e `apps/web/tests/smoke-real.e2e.ts` 也是 `'session/list', { _request: {} }`)。
+ *
+ * 这条是**契约研究员独立复核时抓出来的**,不是我自己发现的:我的 13 项测试注入的假 fetch
+ * 不校验 payload 形状,所以名字改对了就全绿 —— 测试对准了「方法名」这一个维度,
+ * 而真实失败面还有「信封形状」。现在假 fetch 实现宿主那两条谓词(见
+ * test/session-delete-host-verdict.test.mjs 的 gatewayFetch),形状退回 `{}` 会变红。
+ */
+const SESSION_LIST_ARG_KEY = '_request'
+
+/**
  * 运行态的 RPC 兜底。web profile 里 ctx 不公开 agents 服务(desktop 才有),
  * 而 `running` 的权威定义就是「attached agent 的状态」,由 session/list 暴露:
  * SessionSummary 行里恰有 `running: boolean`(见上面 schema 位置)。
@@ -412,7 +431,7 @@ export async function runningFromRpc(sessionId, deps = {}) {
         type: 'client-request',
         rpcId: `agos-running-${Date.now().toString(36)}`,
         method: SESSION_LIST_METHOD,
-        payload: {},
+        payload: { args: { [SESSION_LIST_ARG_KEY]: {} } },
       }),
     })
     if (!response.ok) {

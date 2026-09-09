@@ -693,6 +693,22 @@ test('NC19b: --write-floors 拒绝从合成运行写基线(否则假套件树能
 	assert.match(r.stderr, /拒绝执行/)
 })
 
+test('NC19c: 裸 --write-floors(无 =路径)必须立刻退 78,不许被静默忽略', () => {
+	// 起因是实操事故,不是想象:opt() 只认 `--name=value`,裸标志落回 null,
+	// 写基线那段直接不执行且**输出与没加时逐字相同**。2026-09-09 主控据此
+	// 以为下限已随新增测试上调,实际文件一字未动 —— 过期下限不会让门变红,
+	// 只会让它不再拦人,这正是本轮在追的假绿。
+	const r = spawnSync(process.execPath, [RUNNER, '--write-floors'], {
+		cwd: REPO_ROOT, encoding: 'utf8', env: runnerEnv(), timeout: 60_000,
+	})
+	assert.equal(r.status, 78, `裸标志必须退 78,实际 ${r.status}`)
+	assert.match(r.stderr, /需要显式路径/, '必须说清正确写法')
+	// 必须在跑任何套件**之前**就拒:否则会先打完"退出码 = 0"再补一句报错,
+	// 读者容易只看见前一句 —— 那和静默忽略的危害是同一种。
+	assert.ok(!/PASS|FAIL|代码闸/.test(r.stdout),
+		`应在执行任何闸之前退出,实际 stdout 里已有闸结果:${r.stdout.slice(0, 200)}`)
+})
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 控制 18:超时必须**看得出来是超时**,不能长得像一次普通断言失败。
 // (实测起因:dsh-fleet 跑满 900s 被 SIGTERM 砍掉,node --test 接住信号自己退 1,

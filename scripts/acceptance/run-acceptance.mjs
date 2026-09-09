@@ -53,6 +53,22 @@ const surfaceOverride = opt('surface', null)   // A4 自检注入合成依赖面
 const hostIntegrationsOverride = opt('host-integrations', null)
 const floorsPath = opt('floors', join(HERE, 'expected-counts.json'))
 
+// 裸 `--write-floors`(不带 =路径)必须**在跑任何东西之前**报错,不能静默忽略。
+//
+// `opt()` 只认 `--name=value`,所以裸标志会落回默认值 null,写基线那一段直接不执行 ——
+// 而且**一声不响**:输出与不加这个标志的一次运行逐字相同。2026-09-09 我自己踩了这一脚:
+// 跑完 `--write-floors` 看到全绿,以为下限已随新增测试上调,实际文件一字未动,
+// 差点带着过期下限交付。下限过期不会让门变红,只会让它**不再拦人** ——
+// 正是本轮在追的那类假绿,所以必须吵。
+//
+// 位置在参数解析处而不是写盘处:放在后面会先把整套门跑完、打完"退出码 = 0",
+// 再补一句报错,读者容易只看见前一句。
+if (args.includes('--write-floors')) {
+	console.error('❌ --write-floors 需要显式路径:--write-floors=scripts/acceptance/expected-counts.json')
+	console.error('   裸标志会被静默忽略(输出与没加时一模一样),于是「我已重算下限」变成一个没人验证的错觉。')
+	process.exit(78)
+}
+
 // ---- 可测性接缝 ----
 // 自检要验证 defaultPlan 的结构性判定(整包缺失/空目录/缺基线条目),就必须能把默认计划
 // 指向合成的套件树 —— 否则那些负控只能靠"静态读源码"证明,而那不算证明运行行为。
