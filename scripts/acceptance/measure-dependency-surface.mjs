@@ -58,6 +58,41 @@ const opt = (name, dflt) => {
 	const hit = args.find((a) => a.startsWith(`--${name}=`))
 	return hit ? hit.slice(name.length + 3) : dflt
 }
+
+// 未知参数必须**在测量之前**报错。
+//
+// `opt()` 只认 `--name=value`,`--no-shield` 走 includes,其余一概落不到任何分支 ——
+// 于是拼错的标志被**一声不响**吞掉,而这个脚本的默认输出路径就是 tracked 的
+// scripts/acceptance/dependency-surface.json:后果是"跑了六分半钟然后覆写版本控制里的基线"。
+//
+// 2026-09-09 本轮主控自己踩了这一脚:想看当前指纹,敲了 `--print`(该脚本从来没有这个标志),
+// 意图是只读打印,实际是全量测量 + 覆写基线(471 增 / 338 删)。更糟的是当时有四个实施代理
+// 正在改源码,那次测量观测的是移动靶,数据本身也不可信。已 git checkout 还原,
+// 误测量产物留证在本轮日志目录。
+//
+// 这与 run-acceptance.mjs 里裸 `--write-floors` 是同一类缺陷:对无法识别的输入保持沉默,
+// 然后做一件与操作者意图不同的、破坏性的事。位置放在参数解析处而不是写盘前,
+// 是因为放在后面就要先烧掉六分半钟。
+{
+	const LEGAL_VALUE_FLAGS = ['out', 'plugin', 'logdir']
+	const LEGAL_BARE_FLAGS = ['--no-shield']
+	const unknown = args.filter((a) => {
+		if (LEGAL_BARE_FLAGS.includes(a)) return false
+		const m = /^--([a-z-]+)=/.exec(a)
+		if (m) return !LEGAL_VALUE_FLAGS.includes(m[1])
+		return true
+	})
+	if (unknown.length > 0) {
+		console.error(`❌ 无法识别的参数:${unknown.join(' ')}`)
+		console.error(`   合法参数:${LEGAL_VALUE_FLAGS.map((f) => `--${f}=<值>`).join('  ')}  ${LEGAL_BARE_FLAGS.join(' ')}`)
+		console.error('   本脚本默认写入 tracked 的 scripts/acceptance/dependency-surface.json,')
+		console.error('   静默忽略未知参数 = 花数分钟测量后覆写版本控制里的基线,且操作者以为自己在做别的事。')
+		console.error('   只想看当前基线的内容:node -e "console.log(require(\'fs\').readFileSync(\'scripts/acceptance/dependency-surface.json\',\'utf8\'))"')
+		console.error('   想测量但不动基线:--out=<临时路径>')
+		process.exit(78)
+	}
+}
+
 const outPath = opt('out', join(REPO_ROOT, 'scripts/acceptance/dependency-surface.json'))
 const onlyPlugin = opt('plugin', null)
 const useShield = !args.includes('--no-shield')

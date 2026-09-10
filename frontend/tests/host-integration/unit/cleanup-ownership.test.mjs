@@ -317,6 +317,34 @@ setTimeout(() => process.exit(0), 300_000)
     assert.ok(await waitForExit(child.pid), 'matching identity must still be reclaimed')
   })
 
+  it('…including on the GROUP path, which is the browser\'s path', async () => {
+    // The case above shares this process's group, so it exercises the
+    // single-pid branch, where a second identity check happens to sit just
+    // before `process.kill`. The group branch has no such second check: it
+    // signals `-pgid` directly. Deleting the refresh at the top of
+    // killRecorded therefore left every test green while leaving a drifted
+    // GROUP leader killable — and a group leader is exactly what a launched
+    // browser is, so that is the dangerous half of the protection.
+    //
+    // `detached` reproduces it: the child becomes its own group leader, the
+    // same shape Playwright's browser launch produces.
+    const leader = spawn('/bin/sleep', ['300'], { stdio: 'ignore', detached: true })
+    spawned.add(leader)
+    const captured = await processIdentity(leader.pid)
+    assert.ok(captured)
+    assert.equal(captured.pgid, leader.pid, 'the stand-in must lead its own group')
+
+    const drifted = { ...captured, startedAt: 'Wed Jan 1 00:00:00 2020' }
+    const refused = await killRecorded(drifted, 'SIGKILL')
+    assert.equal(refused.sent, false, JSON.stringify(refused))
+    assert.equal(isAlive(leader.pid), true, 'a drifted group leader must NOT be signalled')
+
+    const accepted = await killRecorded(captured, 'SIGKILL')
+    assert.equal(accepted.sent, true)
+    assert.equal(accepted.scope, 'group', 'a matching group leader is still reclaimed as a group')
+    assert.ok(await waitForExit(leader.pid))
+  })
+
   it('lets a run dispose itself, killing only its own recorded process', async () => {
     const mine = await createRunRoot({ root: sandbox })
     const host = await startStandInHost(mine.runDir)

@@ -499,13 +499,41 @@ export const scenarios = [
       const trail = await ctx.waitFor(async () => {
         const seen = await ctx.connectionTrail()
         if (!seen.documentAlive) throw new Error('the page reloaded: a reload is not a reconnect')
-        return seen.notified.some(down) || seen.sampled.some(down) ? seen : false
+        // Wait on the SUBSCRIPTION trail, which is what the checks below read.
+        // Returning as soon as the 5ms poller saw a down phase could hand back
+        // a trail whose notified side had not been appended to yet, and then
+        // the "transition from online" check would fail on a timing artefact
+        // rather than on anything the store did. The poller cannot see a down
+        // phase first in any case: the snapshot changes, the emit runs the
+        // listener synchronously, and only a later tick can observe it.
+        return seen.notified.some(down) ? seen : false
       }, { timeoutMs: 30_000, intervalMs: 50, label: 'the store to observe the drop' })
       ctx.record(trail.documentAlive, 'the document survived the drop (this is a transport reconnect, not a page reload)')
+      // Both trails are reads of `liveConnectionStore.getSnapshot()`; they
+      // differ only in WHEN they read. `notified` reads it from inside the
+      // subscription, which is exactly what a `useSyncExternalStore` consumer
+      // does, so a down phase appearing there proves two things at once: a
+      // listener fired, and the store's own snapshot had already moved. A store
+      // that notified without updating its snapshot would leave this trail
+      // reading `["online"]`, because an entry is only appended on a change.
       ctx.record(trail.notified.some(down),
-        `the drop is DELIVERED to store subscribers: ${JSON.stringify(trail.notified.map((entry) => entry.phase))}`)
-      ctx.record(trail.sampled.some(down),
-        `the drop is visible in the store's own snapshot: ${JSON.stringify(trail.sampled.map((entry) => entry.phase))}`)
+        `the drop is in the store's own snapshot at notification time: ${JSON.stringify(trail.notified.map((entry) => entry.phase))}`)
+      // It must be a TRANSITION, not the state we happened to start in.
+      ctx.record(trail.notified.length >= 2 && !down(trail.notified[0]),
+        `and it is a transition from online, not an initial condition: ${JSON.stringify(trail.notified.map((entry) => entry.phase))}`)
+      // The 5ms poller is corroboration only. It used to be asserted on, and
+      // that made this scenario flaky: measured on this machine it reaches only
+      // a few ticks per second because Chrome throttles timers in a page it
+      // treats as background, so whether it lands inside a sub-second offline
+      // window is luck. The harness contract already says so — "keeping both
+      // apart tells us whether a phase was merely fast or genuinely never
+      // published" — and a phase that IS published (proven above) must not be
+      // reported as a failure because a throttled timer stepped over it. What
+      // is still asserted is that the channel was alive at all, so a silently
+      // dead poller cannot masquerade as agreement.
+      ctx.record(trail.ticks >= 1,
+        `the corroborating poller ran: ${trail.ticks} tick(s) in ${trail.watchedMs}ms`
+        + `, saw down = ${trail.sampled.some(down)} ${JSON.stringify(trail.sampled.map((entry) => entry.phase))}`)
       const closedMux = trail.sockets.filter((entry) => entry.url.includes('/api/remote.mux') && entry.readyState >= 2)
       ctx.record(closedMux.length >= dropped, `${closedMux.length} mux socket(s) really reached CLOSING/CLOSED`)
       const shot = await ctx.screenshot('5-connection-drop-and-reconnect')

@@ -28,7 +28,7 @@ import { copyFile, mkdir, writeFile } from 'node:fs/promises';
 import { existsSync, createWriteStream } from 'node:fs';
 import path from 'node:path';
 import {
-  DSH_BIN, HARNESS_DIR, hostEnv, isolatedEnvNames, redact, registerSecret, scrubbedEnvNames, waitFor,
+  HARNESS_DIR, hostEnv, isolatedEnvNames, redact, registerSecret, resolveDshBin, scrubbedEnvNames, waitFor,
 } from './host-env.mjs';
 import { createRedactingWriter } from './redact-stream.mjs';
 import { recordProcess } from './run-registry.mjs';
@@ -198,6 +198,11 @@ export async function startHost(options) {
     launchTimeoutMs = 90_000, cookieTimeoutMs = 60_000, readyTimeoutMs = 90_000,
   } = options
 
+  // Resolved BEFORE anything is created: an absent CLI is a `blocked` verdict
+  // naming the binary, not an ENOENT thrown after a profile overlay, a log
+  // stream and a port claim are already in hand.
+  const dsh = resolveDshBin()
+
   const { overlayPath, pluginPath, mounts } = await writeProfileOverlay({ dshHome, plugins })
   await mkdir(path.dirname(logPath), { recursive: true })
   const logStream = createWriteStream(logPath, { flags: 'a' })
@@ -220,10 +225,11 @@ export async function startHost(options) {
     DSH_PERMISSION_MODE: 'workspace-write',
   })
 
-  const command = `${DSH_BIN} ${args.join(' ')}`
+  const command = `${dsh.path} ${args.join(' ')}`
   logStream.write([
     `# AgOS host-integration — real pinned dsh host`,
     `# command: ${command}`,
+    `# dsh CLI resolved from: ${dsh.source}`,
     `# cwd: ${workspace}`,
     `# DSH_HOME: ${dshHome}`,
     `# credential env vars stripped from child: ${scrubbedEnvNames().join(', ') || '(none present)'}`,
@@ -233,7 +239,7 @@ export async function startHost(options) {
     '',
   ].join('\n'))
 
-  const child = spawn(DSH_BIN, args, {
+  const child = spawn(dsh.path, args, {
     cwd: workspace,
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -242,8 +248,23 @@ export async function startHost(options) {
   // The pid is recorded while we still hold the un-reaped child handle, so the
   // identity captured cannot belong to a recycled pid. Cleanup later refuses to
   // signal anything whose identity has drifted from this record.
+  //
+  // A failure here is not fatal — the run still works — but it must not be
+  // SILENT: an unrecorded host is a host that a later cleanup cannot identify
+  // and therefore never stops, so `reapRun` would delete the run tree out from
+  // under a still-running host. The one way this happens is a machine whose
+  // process table this registry cannot read (see run-registry's identity
+  // backends), and that is exactly the case an operator has to be told about.
   if (runDir !== undefined) {
-    await recordProcess(runDir, { pid: child.pid, role: 'host', ownerToken }).catch(() => undefined)
+    const recorded = await recordProcess(runDir, { pid: child.pid, role: 'host', ownerToken })
+      .catch((error) => ({ error }))
+    if (recorded === undefined || recorded?.error !== undefined) {
+      logStream.write(
+        `# WARNING: host pid ${child.pid} could NOT be recorded in the run manifest`
+        + `${recorded?.error === undefined ? '' : ` (${String(recorded.error.message ?? recorded.error)})`}`
+        + ' — an abandoned run will leave this host for the OS to reap.\n',
+      )
+    }
   }
 
   // The host prints its root URL carrying a one-process launch token. That
@@ -373,6 +394,8 @@ export async function startHost(options) {
     child,
     base,
     authority,
+    /** Which dsh CLI this host is, and how it was located. */
+    dsh,
     /** Signed browser-session cookie every /api request must present. */
     cookieHeader,
     command,

@@ -32,7 +32,7 @@ import {
   createOriginFence, resolveBrowserExecutable, resolvePlaywrightModule,
 } from '../../scripts/host-integration/browser-source.mjs';
 import { bringUpSignal, createResourceStack } from '../../scripts/host-integration/resource-stack.mjs';
-import { childPids, createRunRoot, disposeRunRoot, killRecorded, processIdentity, recordProcess } from '../../scripts/host-integration/run-registry.mjs';
+import { childPids, createRunRoot, disposeRunRoot, identityBackend, killRecorded, processIdentity, recordProcess } from '../../scripts/host-integration/run-registry.mjs';
 import { startHost } from '../../scripts/host-integration/start-host.mjs';
 
 /**
@@ -111,9 +111,13 @@ async function defaultLoadPlaywright() {
  * @param options.chromium - the chromium namespace from the loaded module.
  * @returns the launched browser.
  */
-async function defaultLaunchBrowser({ chromium }) {
-  const { executablePath } = resolveBrowserExecutable()
-  return chromium.launch({ headless: true, executablePath })
+async function defaultLaunchBrowser({ chromium, onResolved }) {
+  const resolved = resolveBrowserExecutable()
+  // Reported, not just used: which browser answered and HOW it was found is
+  // the portability fact a reader of the result document needs (an override, a
+  // well-known install path, or a PATH lookup).
+  onResolved?.(resolved)
+  return chromium.launch({ headless: true, executablePath: resolved.executablePath })
 }
 
 /** How long a browser gets to close politely before its group is signalled. */
@@ -217,6 +221,15 @@ export async function createHarness(options = {}) {
     console.log(line)
   }
 
+  /**
+   * Where the real components actually came from, for the layer result.
+   *
+   * Filled in as each is resolved, so a bring-up that fails half way still
+   * reports what it managed to find — which is the interesting part when the
+   * failure IS a missing component on an unfamiliar machine.
+   */
+  const provenance = {}
+
   const deadline = bringUpSignal({ signal: callerSignal, timeoutMs: bringUpTimeoutMs })
   const stack = createResourceStack({
     signal: deadline.signal,
@@ -266,6 +279,14 @@ export async function createHarness(options = {}) {
     })
     log(`real pinned host up: ${host.command}`)
     log(`run root ${run.runDir} (runId ${run.runId})`)
+    provenance.dsh = host.dsh
+    // Which process-table backend this machine has. Reported at bring-up
+    // because "none" means nothing this run spawns can ever be reclaimed by a
+    // later cleanup, and that has to be visible rather than inferred from a
+    // leaked process days later.
+    provenance.identity = await identityBackend()
+    log(`process identity backend: ${provenance.identity.backend}`
+      + `${provenance.identity.ok ? '' : ' — WARNING: spawned processes cannot be recorded or reaped'}`)
 
     // 3. The SPA origin.
     const ui = await stack.use('ui-server', async (register) => {
@@ -278,6 +299,7 @@ export async function createHarness(options = {}) {
     //    the host and the SPA above are reclaimed on the way out.
     const playwright = await stack.use('playwright-module', async () => ({ value: await loadPlaywright() }))
     log(`playwright: ${playwright.modulePath} (${playwright.source})`)
+    provenance.playwright = { modulePath: playwright.modulePath, source: playwright.source }
     for (const warning of playwright.warnings ?? []) log(`playwright warning: ${warning}`)
 
     // 5. The browser process. Playwright does not hand back the pid of the
@@ -290,7 +312,11 @@ export async function createHarness(options = {}) {
       const before = new Set(await childPids())
       let launched
       try {
-        launched = await launchBrowser({ chromium: playwright.chromium, register })
+        launched = await launchBrowser({
+          chromium: playwright.chromium,
+          register,
+          onResolved: (resolved) => { provenance.browser = resolved },
+        })
       } catch (error) {
         // A launcher can create Chrome and then fail before returning its
         // Browser handle. Reclaim that partial resource before stage unwind.
@@ -364,7 +390,8 @@ export async function createHarness(options = {}) {
       const first = await attachPage()
       return { value: first, dispose: () => first.close() }
     })
-    log(`real browser up: ${browser.version()}`)
+    provenance.browserVersion = browser.version()
+    log(`real browser up: ${provenance.browserVersion}`)
 
     /** One real unary call against the real host (test setup / assertions). */
     const unary = async (method, args) => {
@@ -397,6 +424,8 @@ export async function createHarness(options = {}) {
       /** External requests the origin fence aborted, for hermeticity assertions. */
       blockedRequests,
       allowedOrigins,
+      /** Where the dsh CLI, playwright build and browser were found. */
+      provenance,
       log,
       unary,
       waitFor,
@@ -573,10 +602,20 @@ export async function createHarness(options = {}) {
           }
           window.__agosConn?.stop()
           const unsubscribe = live.liveConnectionStore.subscribe(() => push(notified))
-          const timer = setInterval(() => push(sampled), 5)
+          // Tick accounting for the poller. Without it, "the poller never saw
+          // the drop" is indistinguishable between two very different facts:
+          // the phase was published for less than one interval, or the timer
+          // was throttled and barely ran at all. Chrome throttles timers in
+          // pages it considers background, so the second is a real possibility
+          // and it must not be reported as the first.
+          let ticks = 0
+          const startedAt = Date.now()
+          const timer = setInterval(() => { ticks += 1; push(sampled) }, 5)
           window.__agosConn = {
             notified,
             sampled,
+            startedAt,
+            ticksOf: () => ticks,
             stop() { unsubscribe(); clearInterval(timer) },
           }
           push(notified)
@@ -595,6 +634,9 @@ export async function createHarness(options = {}) {
           documentAlive: window.__agosConn !== undefined,
           notified: window.__agosConn?.notified ?? [],
           sampled: window.__agosConn?.sampled ?? [],
+          /** Poller ticks and elapsed ms, so a missed transient can be explained. */
+          ticks: window.__agosConn?.ticksOf?.() ?? 0,
+          watchedMs: window.__agosConn === undefined ? 0 : Date.now() - window.__agosConn.startedAt,
           sockets: window.__agosHarness.socketUrls(),
         }))
       },

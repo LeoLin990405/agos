@@ -20,11 +20,14 @@
  *    that wants to reap a specific run must present the matching token, so a
  *    mis-computed path cannot delete a stranger's tree.
  * 3. process identity — pid PLUS the kernel's start timestamp for that pid
- *    (`ps -o lstart=`) PLUS the requirement that the argv still names the
+ *    (`ps -o lstart=`, or `/proc/<pid>/stat` where there is no usable `ps`)
+ *    PLUS the requirement that the argv still names the
  *    runId. pids are recycled; a recycled pid gets a different start time and a
  *    different command line, so all three matching is what makes a signal safe.
  *    Identity is re-verified immediately before EVERY signal, not once up
  *    front, because the process can exit between the check and the kill.
+ *    Which backend answered is recorded with the identity, because the two
+ *    clocks are not comparable and a backend change has to fail closed.
  *
  * Reaping decisions follow from the owner process, not from a timeout: while
  * the process that created a run is still alive with a matching identity, that
@@ -39,6 +42,9 @@ import { promisify } from 'node:util';
 import { HARNESS_ID } from './host-env.mjs';
 
 const run = promisify(execFile)
+
+/** The Linux process table. Injectable so the parser is testable off-Linux. */
+export const PROC_ROOT = '/proc'
 
 /** Every run directory this harness creates starts with this. */
 export const RUN_PREFIX = `${HARNESS_ID}-run-`
@@ -59,17 +65,28 @@ export const UNREADABLE_GRACE_MS = 10 * 60 * 1000
 const TERM_GRACE_MS = 3000
 
 /**
- * Ask the OS who a pid currently is.
+ * Ask `ps` who a pid currently is.
  *
  * `ps -o lstart=` prints the process start time to the second. Two different
  * processes sharing a pid must then also share a start second AND a command
  * line for this to be fooled; combined with the runId check in
  * {@link processMatches} that is not reachable in practice.
+ *
+ * Portability, measured rather than assumed: `lstart` is not a macOS-only
+ * field — procps-ng documents it too, and both print the same ctime shape this
+ * regex expects, so the field itself carries over. What does NOT carry over is
+ * `ps` implementations that never had `-o lstart` at all (BusyBox, i.e. a
+ * stock Alpine image). There this returns undefined and {@link procIdentity}
+ * takes over.
+ *
+ * On macOS the full argv is returned even when stdout is a pipe (verified: a
+ * 383-character host command line came back byte-complete, and `-w`/`-ww`/
+ * `COLUMNS` changed nothing), so no width flag is needed for the argv equality
+ * check to be meaningful.
  * @param pid - the pid to identify.
  * @returns identity, or undefined when the pid does not exist (or ps failed).
  */
-export async function processIdentity(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return undefined
+export async function psIdentity(pid) {
   const result = await run('ps', ['-o', 'pid=,pgid=,lstart=,command=', '-p', String(pid)]).catch(() => undefined)
   if (result === undefined) return undefined
   const line = result.stdout.split('\n').find((entry) => entry.trim() !== '')
@@ -78,7 +95,80 @@ export async function processIdentity(pid) {
   if (match === null) return undefined
   // pgid is carried so a process that leads its own group (a browser and its
   // renderer/GPU helpers) can be reclaimed as a whole; see killRecorded.
-  return { pid: Number(match[1]), pgid: Number(match[2]), startedAt: match[3].replace(/\s+/g, ' '), command: match[4] }
+  return {
+    pid: Number(match[1]),
+    pgid: Number(match[2]),
+    startedAt: match[3].replace(/\s+/g, ' '),
+    command: match[4],
+    backend: 'ps',
+  }
+}
+
+/**
+ * Ask the Linux process table directly who a pid currently is.
+ *
+ * The fallback for a machine with no usable `ps`. `/proc/<pid>/stat` carries
+ * the same two facts the identity rule needs — the process group and the
+ * kernel's start time — and carries them more precisely: `starttime` is in
+ * clock ticks since boot, where `ps -o lstart=` is rounded to the second.
+ *
+ * `startedAt` is deliberately prefixed `proc:`, so a value produced by this
+ * backend can never compare equal to one produced by `ps`. If the backend
+ * changes between recording a process and verifying it, the comparison must
+ * fail closed (refuse to signal) rather than accidentally agree.
+ * @param pid - the pid to identify.
+ * @param options.procRoot - process table root (tests point this at a fixture).
+ * @returns identity, or undefined when there is no such pid (or no /proc).
+ */
+export async function procIdentity(pid, { procRoot = PROC_ROOT } = {}) {
+  const dir = path.join(procRoot, String(pid))
+  const stat_ = await readFile(path.join(dir, 'stat'), 'utf8').catch(() => undefined)
+  if (stat_ === undefined) return undefined
+  // Field 2 is the executable name in parentheses and may itself contain
+  // spaces and parentheses, so the tail is taken from the LAST ')'.
+  const close = stat_.lastIndexOf(')')
+  if (close === -1) return undefined
+  // Fields from 3 (state) onward. proc(5): 5 = pgrp, 22 = starttime.
+  const fields = stat_.slice(close + 1).trim().split(/\s+/)
+  const pgid = Number(fields[2])
+  const startedAt = fields[19]
+  if (!Number.isInteger(pgid) || startedAt === undefined || !/^\d+$/.test(startedAt)) return undefined
+  // NUL-separated argv. Rendered space-separated to match the `ps` shape, so
+  // the runId substring check reads the same whichever backend answered.
+  const raw = await readFile(path.join(dir, 'cmdline'), 'utf8').catch(() => undefined)
+  if (raw === undefined) return undefined
+  const command = raw.replace(/\0+$/, '').split('\0').join(' ')
+  return { pid, pgid, startedAt: `proc:${startedAt}`, command, backend: 'proc' }
+}
+
+/**
+ * Ask the OS who a pid currently is, whichever backend this machine has.
+ *
+ * `ps` first because it is the one proven on the platform this suite runs on;
+ * `/proc` only when `ps` could not answer, so a working machine's behaviour is
+ * unchanged and an Alpine-style image stops silently losing every process.
+ * @param pid - the pid to identify.
+ * @param options.procRoot - process table root (tests).
+ * @returns identity, or undefined when no backend could identify the pid.
+ */
+export async function processIdentity(pid, { procRoot = PROC_ROOT } = {}) {
+  if (!Number.isInteger(pid) || pid <= 0) return undefined
+  return (await psIdentity(pid)) ?? (await procIdentity(pid, { procRoot }))
+}
+
+/**
+ * Which identity backend can answer on this machine, for the evidence log.
+ *
+ * Exists because "no backend" degrades quietly and dangerously: nothing is
+ * recorded, so nothing is ever reaped, and `reapRun` deletes a run tree while
+ * its host is still running. A run that cannot identify its own pid has to say
+ * so out loud.
+ * @param options.procRoot - process table root (tests).
+ * @returns `{ backend, ok }` where backend is `ps`, `proc`, or `none`.
+ */
+export async function identityBackend({ procRoot = PROC_ROOT } = {}) {
+  const identity = await processIdentity(process.pid, { procRoot })
+  return { backend: identity?.backend ?? 'none', ok: identity !== undefined }
 }
 
 /**
@@ -89,13 +179,41 @@ export async function processIdentity(pid) {
  * not expose its pid on the object it returns, so an orphaned run would leak a
  * headless browser that no manifest names. Diffing the child list around the
  * launch is what makes that pid recordable.
+ *
+ * `pgrep` first, `/proc` when it is absent — same reasoning as
+ * {@link processIdentity}, and the same platforms are affected.
  * @param parentPid - the parent to inspect (defaults to this process).
- * @returns the child pids, or an empty array when pgrep finds none.
+ * @param options.procRoot - process table root (tests).
+ * @returns the child pids, or an empty array when neither backend found any.
  */
-export async function childPids(parentPid = process.pid) {
+export async function childPids(parentPid = process.pid, { procRoot = PROC_ROOT } = {}) {
   const result = await run('pgrep', ['-P', String(parentPid)]).catch(() => undefined)
-  if (result === undefined) return []
-  return result.stdout.split('\n').map((line) => Number(line.trim())).filter((pid) => Number.isInteger(pid) && pid > 0)
+  if (result !== undefined) {
+    return result.stdout.split('\n').map((line) => Number(line.trim())).filter((pid) => Number.isInteger(pid) && pid > 0)
+  }
+  return procChildPids(parentPid, { procRoot })
+}
+
+/**
+ * Direct children read straight out of the Linux process table.
+ * @param parentPid - the parent to inspect.
+ * @param options.procRoot - process table root (tests).
+ * @returns the child pids found, or an empty array.
+ */
+export async function procChildPids(parentPid, { procRoot = PROC_ROOT } = {}) {
+  const entries = await readdir(procRoot).catch(() => undefined)
+  if (entries === undefined) return []
+  const children = []
+  for (const entry of entries) {
+    if (!/^\d+$/.test(entry)) continue
+    const stat_ = await readFile(path.join(procRoot, entry, 'stat'), 'utf8').catch(() => undefined)
+    if (stat_ === undefined) continue
+    const close = stat_.lastIndexOf(')')
+    if (close === -1) continue
+    // proc(5) field 4 is ppid, i.e. the second entry after the comm field.
+    if (Number(stat_.slice(close + 1).trim().split(/\s+/)[1]) === parentPid) children.push(Number(entry))
+  }
+  return children.sort((a, b) => a - b)
 }
 
 /**
@@ -164,6 +282,14 @@ export async function processMatches(recorded, { runId, requireRunIdInCommand = 
   if (recorded === undefined || recorded === null) return { ok: false, reason: 'no recorded identity' }
   const live = await processIdentity(recorded.pid)
   if (live === undefined) return { ok: false, reason: 'pid is gone', live: undefined }
+  // A start time from one backend says nothing about a start time from the
+  // other (`ps` gives a wall-clock second, `/proc` gives ticks since boot), so
+  // a backend that changed under us means the identity is UNVERIFIABLE. Report
+  // that, rather than "pid reused" — the direction of the decision is the same
+  // (refuse to signal) but the reason has to be true for the evidence log.
+  if (recorded.backend !== undefined && live.backend !== recorded.backend) {
+    return { ok: false, reason: `identity backend changed (recorded via ${recorded.backend}, now ${live.backend})`, live }
+  }
   if (live.startedAt !== recorded.startedAt) {
     return { ok: false, reason: `pid reused (started ${live.startedAt}, recorded ${recorded.startedAt})`, live }
   }

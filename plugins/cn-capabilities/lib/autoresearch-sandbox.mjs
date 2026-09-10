@@ -21,9 +21,9 @@
  */
 import { spawn } from 'node:child_process'
 import { constants } from 'node:fs'
-import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
-import { tmpdir } from 'node:os'
+import { release, tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 
 export const UNAVAILABLE = 'verification-unavailable'
@@ -55,28 +55,54 @@ export const SMOKE_EXIT = Object.freeze({
   readonlyRootWritable: 92,
   outsideRootReadable: 93,
   networkEgress: 94,
+  boundBindUnreadable: 95,
+  boundBindWritable: 96,
+  boundBindMutated: 97,
 })
+
+/**
+ * Exact bytes of the in-scope sentinel. The probe compares content rather than
+ * merely opening the path, so an empty placeholder that bubblewrap happened to
+ * create while building intermediate directories cannot satisfy the control.
+ */
+export const BOUND_SENTINEL_LINE = 'agos-bound-sentinel'
 
 /**
  * In-sandbox smoke script (bash). Verifies, from inside the real sandbox:
  *   91 — scratch is writable
  *   92 — the bound read-only roots stay read-only
- *   93 — a synthetic host file OUTSIDE every bind is unreadable. REGRESSION-GUARD
- *        semantics, not positive bwrap evidence: under bubblewrap's bind whitelist
- *        the file simply does not exist in the namespace (ENOENT), so a pass is
- *        vacuous by construction. This probe's real discriminating power is against
- *        "bind the host / read-only" shaped backends (the removed linux-unshare):
- *        there the file EXISTS and is readable, and exit 93 fires.
+ *   95 — POSITIVE CONTROL: a synthetic sentinel INSIDE a declared read-only bind is
+ *        readable, with the expected bytes. Runs BEFORE the 93 probe on purpose.
+ *   96 — that same in-scope sentinel rejects a write, so the read-only bind is
+ *        proven read-only on a path this test owns (not only on /usr).
+ *   93 — a synthetic host file OUTSIDE every bind is unreadable.
  *   94 — a live host loopback listener is unreachable (network namespace holds)
  *
- * AGOS_VERIFY_OUTSIDE_SENTINEL / AGOS_VERIFY_NET_PROBE_PORT are smoke-channel-only
- * keys: they enter the sandbox argv/env whitelist ONLY for the smoke launcher
- * (see runLinuxSmoke's extendLauncher), never for a candidate run.
+ * Why 95 exists. On its own, 93 is vacuous under a bind whitelist: the file does
+ * not exist in the namespace (ENOENT), and it also does not exist on a host that
+ * has no sandbox at all yet never bound the path either. 95 and 93 are therefore a
+ * PAIR, and only the pair discriminates. runLinuxSmoke builds both sentinels as
+ * sibling files under one mkdtemp root and binds only the `bound/` subdirectory,
+ * so the sole difference between them is bind membership:
+ *   - real bind whitelist  -> 95 passes (in-scope readable), 93 passes (out-of-scope absent)
+ *   - no sandbox at all    -> 95 passes, 93 FIRES (both siblings readable)
+ *   - binds did not apply  -> 95 FIRES (in-scope unreadable), so a 93 pass is never
+ *                             mistaken for isolation
+ *   - host-root-bind shape -> 93 FIRES (the removed linux-unshare regression guard)
+ *
+ * AGOS_VERIFY_BOUND_SENTINEL / AGOS_VERIFY_OUTSIDE_SENTINEL / AGOS_VERIFY_NET_PROBE_PORT
+ * are smoke-channel-only keys: they enter the sandbox argv/env whitelist ONLY for the
+ * smoke launcher (see runLinuxSmoke's extendLauncher), never for a candidate run.
  */
 const SMOKE_SCRIPT = [
   'set -u',
   'printf ok > "$AGOS_VERIFY_SCRATCH/.agos-smoke" 2>/dev/null || exit 91',
   'if printf x > /usr/.agos-smoke-should-fail 2>/dev/null; then rm -f /usr/.agos-smoke-should-fail; exit 92; fi',
+  // `read` is a bash builtin: a missing coreutils binary cannot fake this control.
+  'agos_bound=""',
+  'read -r agos_bound < "$AGOS_VERIFY_BOUND_SENTINEL" 2>/dev/null || exit 95',
+  `[ "$agos_bound" = "${BOUND_SENTINEL_LINE}" ] || exit 95`,
+  'if printf x >> "$AGOS_VERIFY_BOUND_SENTINEL" 2>/dev/null; then exit 96; fi',
   'if cat "$AGOS_VERIFY_OUTSIDE_SENTINEL" >/dev/null 2>&1; then exit 93; fi',
   'if [ -n "${AGOS_VERIFY_NET_PROBE_PORT:-}" ]; then',
   '  if (exec 3<>"/dev/tcp/127.0.0.1/$AGOS_VERIFY_NET_PROBE_PORT") 2>/dev/null; then exit 94; fi',
@@ -183,6 +209,66 @@ export async function probeLinuxIsolation(probe = systemProbe(), { platform = pr
   return report
 }
 
+/** `bubblewrap 0.8.0` / `0.8.0` -> `0.8.0`. Unrecognised output stays verbatim. */
+const parseBwrapVersion = (stdout) => {
+  const line = String(stdout || '').trim().split('\n')[0] || ''
+  const match = line.match(/(\d+\.\d+(?:\.\d+)?)/)
+  return match ? match[1] : (line || null)
+}
+
+/** `6.1.0-31-amd64` -> { major: 6, minor: 1 }. Unparsable releases give nulls. */
+const parseKernelRelease = (text) => {
+  const match = String(text || '').match(/^(\d+)\.(\d+)/)
+  return match ? { major: Number(match[1]), minor: Number(match[2]) } : { major: null, minor: null }
+}
+
+/**
+ * Extra Linux facts for a human-readable capability report: kernel identity, the
+ * bubblewrap version actually on PATH, and the mount primitives bubblewrap needs
+ * for `--proc` / `--dev` / tmpfs. OBSERVATIONAL ONLY — this augments a report from
+ * {@link probeLinuxIsolation} and NO decision path consumes it: planLinuxIsolation
+ * never reads these fields, so a distribution that reports them oddly cannot widen
+ * or narrow the boundary. Safe on any platform: off Linux every read returns null
+ * and no subprocess is spawned, because `report.binaries.bwrap` is null.
+ * @param {object} probe injectable probe surface, see {@link systemProbe}
+ * @param {object} report output of {@link probeLinuxIsolation}
+ */
+export async function probeLinuxRuntimeDetails(probe = systemProbe(), report = {}, { osRelease = release() } = {}) {
+  const binaries = report.binaries || {}
+  const filesystemsText = await probe.readText('/proc/filesystems')
+  const hasFilesystem = (name) => (filesystemsText === null
+    ? null
+    : new RegExp(`(^|\\s)${name}\\s*$`, 'm').test(String(filesystemsText)))
+  let bwrapVersion = null
+  if (binaries.bwrap) {
+    const probed = await probe.run(binaries.bwrap, ['--version'], { timeoutMs: 5000 })
+    bwrapVersion = probed?.exitCode === 0 ? parseBwrapVersion(probed.stdout) : null
+  }
+  return {
+    kernelRelease: osRelease || null,
+    kernelVersion: (await probe.readText('/proc/version'))?.trim() || null,
+    kernel: parseKernelRelease(osRelease),
+    bwrapPath: binaries.bwrap || null,
+    bwrapVersion,
+    unsharePath: binaries.unshare || null,
+    userns: {
+      nsUserPresent: report.ns?.user === true,
+      // A readable uid_map is the observable sign that the userns machinery exists;
+      // bubblewrap writes this file when it maps the invoking uid into the sandbox.
+      uidMapReadable: await probe.exists('/proc/self/uid_map'),
+      maxUserNamespaces: report.sysctl?.maxUserNamespaces ?? null,
+      unprivilegedUsernsClone: report.sysctl?.unprivilegedUsernsClone ?? null,
+      apparmorRestrictUserns: report.sysctl?.apparmorRestrictUserns ?? null,
+    },
+    mount: {
+      mntNamespace: report.ns?.mnt === true,
+      mountinfoReadable: await probe.exists('/proc/self/mountinfo'),
+      // What `--proc /proc`, `--dev /dev` and bubblewrap's tmpfs root need to exist.
+      filesystems: { tmpfs: hasFilesystem('tmpfs'), proc: hasFilesystem('proc'), devtmpfs: hasFilesystem('devtmpfs') },
+    },
+  }
+}
+
 /**
  * Decide whether a Linux OS boundary can be built. PURE: no I/O, no platform reads.
  * Every rejection names the specific missing capability.
@@ -244,13 +330,32 @@ export function planLinuxIsolation(report, { requireSmoke = true } = {}) {
     if (smoke.exitCode === SMOKE_EXIT.readonlyRootWritable) {
       return unavailable(`linux isolation smoke test failed for ${backend}: /usr was writable inside the sandbox`)
     }
-    if (smoke.exitCode === SMOKE_EXIT.outsideRootReadable) {
-      // Regression guard against "bind the host / read-only" backends (the removed
-      // linux-unshare shape): under bubblewrap this is vacuous-by-construction
-      // (unbound paths do not exist in the namespace), so it is NOT positive bwrap
-      // isolation evidence — see the manifest check note.
+    // The in-scope positive control. Its failure means the bind whitelist never took
+    // effect, which also means the out-of-scope probe below could only have passed
+    // vacuously — so this must reject even though "outside was unreadable" held.
+    if (smoke.exitCode === SMOKE_EXIT.boundBindUnreadable) {
       return unavailable(
-        `linux isolation smoke test failed for ${backend}: a synthetic file outside every bind was readable inside the sandbox (host-root-bind regression guard; under bubblewrap this indicates an unexpected host-root bind)`,
+        `linux isolation smoke test failed for ${backend}: the in-scope positive control failed — a synthetic sentinel inside a declared read-only bind was not readable with its expected bytes inside the sandbox, so the bind whitelist did not take effect and the out-of-scope read probe would only have passed vacuously`,
+      )
+    }
+    if (smoke.exitCode === SMOKE_EXIT.boundBindWritable) {
+      return unavailable(
+        `linux isolation smoke test failed for ${backend}: a declared read-only bind accepted a write inside the sandbox (the in-scope sentinel was appendable)`,
+      )
+    }
+    if (smoke.exitCode === SMOKE_EXIT.boundBindMutated) {
+      return unavailable(
+        `linux isolation smoke test failed for ${backend}: the in-scope sentinel changed on the host even though the sandbox reported success, so a write crossed the boundary`,
+      )
+    }
+    if (smoke.exitCode === SMOKE_EXIT.outsideRootReadable) {
+      // Discriminating only as the pair (95, 93): exit 95 above proves the in-scope
+      // twin WAS readable, so an unreadable out-of-scope sibling is a real bind
+      // whitelist rather than a path that was simply never bound. Also the
+      // regression guard against "bind the host / read-only" backends (the removed
+      // linux-unshare shape), where the file exists and is readable.
+      return unavailable(
+        `linux isolation smoke test failed for ${backend}: a synthetic file outside every bind was readable inside the sandbox while its in-scope sibling was also readable (host-root-bind regression guard; under bubblewrap this indicates an unexpected host-root bind, or no sandbox at all)`,
       )
     }
     if (smoke.exitCode === SMOKE_EXIT.networkEgress) {
@@ -339,21 +444,37 @@ export function buildLinuxLauncher({ plan, evaluator, scratch, roots, env, binar
 
 /**
  * Run the smoke test through the real launcher. Linux-only; never reached off-Linux.
- * Synthetic materials only: an outside sentinel file in a fresh temp dir (must be
- * unreadable inside) and a live host loopback listener (must be unreachable inside).
+ * Synthetic materials only, all created here under one fresh mkdtemp root:
+ *   <materials>/bound/bound-sentinel.txt     — ro-bound; MUST be readable, MUST reject writes
+ *   <materials>/outside/outside-sentinel.txt — never bound; MUST be unreadable
+ * plus a live host loopback listener that must be unreachable inside.
  *
- * The two smoke keys (AGOS_VERIFY_OUTSIDE_SENTINEL / AGOS_VERIFY_NET_PROBE_PORT)
- * must exist INSIDE the sandbox for the probe script to read. A candidate-run
- * launcher whitelists only the plain env (buildBubblewrapArgs --setenv list), so
- * `extendLauncher(smokeVars)` rebuilds a smoke-only launcher whose argv whitelist
- * additionally carries these two verification-channel keys. Candidate runs never
- * receive them: the launcher handed back from linuxVerificationSandbox is built
- * from the plain env alone.
+ * The two sentinels are deliberately siblings on the same filesystem so that bind
+ * membership is the ONLY difference between them. That is what makes the pair
+ * discriminating rather than vacuous — see the SMOKE_SCRIPT header.
+ *
+ * The three smoke keys (AGOS_VERIFY_BOUND_SENTINEL / AGOS_VERIFY_OUTSIDE_SENTINEL /
+ * AGOS_VERIFY_NET_PROBE_PORT) must exist INSIDE the sandbox for the probe script to
+ * read, and `bound/` must be in the bind list. A candidate-run launcher whitelists
+ * only the plain env and the production roots, so `extendLauncher({ env, roots })`
+ * rebuilds a smoke-only launcher carrying both additions. Candidate runs never
+ * receive either: the launcher handed back from linuxVerificationSandbox is built
+ * from the plain env and the production roots alone.
  */
 export async function runLinuxSmoke({ probe, launcher, env, backend, timeoutMs = 15000, extendLauncher = null }) {
   const materials = await mkdtemp(join(tmpdir(), 'agos-linux-smoke-'))
-  const sentinel = join(materials, 'outside-sentinel.txt')
-  await writeFile(sentinel, 'synthetic-outside-secret\n', { mode: 0o600 })
+  const boundDir = join(materials, 'bound')
+  const outsideDir = join(materials, 'outside')
+  await mkdir(boundDir, { recursive: true })
+  await mkdir(outsideDir, { recursive: true })
+  const boundSentinel = join(boundDir, 'bound-sentinel.txt')
+  const boundContent = `${BOUND_SENTINEL_LINE}\n`
+  const outsideSentinel = join(outsideDir, 'outside-sentinel.txt')
+  // Mode 0600 owned by this uid: inside the sandbox bubblewrap maps the invoking uid
+  // to itself, so file permissions permit the write and only the read-only MOUNT can
+  // refuse it. A 96 pass therefore tests the bind, not the mode bits.
+  await writeFile(boundSentinel, boundContent, { mode: 0o600 })
+  await writeFile(outsideSentinel, 'synthetic-outside-secret\n', { mode: 0o600 })
   const server = createServer((socket) => socket.end())
   try {
     await new Promise((resolve, reject) => {
@@ -361,13 +482,22 @@ export async function runLinuxSmoke({ probe, launcher, env, backend, timeoutMs =
       server.listen(0, '127.0.0.1', resolve)
     })
     const smokeVars = {
-      AGOS_VERIFY_OUTSIDE_SENTINEL: sentinel,
+      AGOS_VERIFY_BOUND_SENTINEL: boundSentinel,
+      AGOS_VERIFY_OUTSIDE_SENTINEL: outsideSentinel,
       AGOS_VERIFY_NET_PROBE_PORT: String(server.address().port),
     }
-    const effectiveLauncher = extendLauncher ? extendLauncher(smokeVars) : launcher
+    const effectiveLauncher = extendLauncher
+      ? extendLauncher({ env: smokeVars, roots: [boundDir] })
+      : launcher
     const childEnv = { ...env, ...smokeVars }
     const result = await probe.run(effectiveLauncher.file, [...effectiveLauncher.before, SMOKE_SCRIPT], { timeoutMs, env: childEnv })
-    return { backend, exitCode: result.exitCode, stderr: result.stderr }
+    // Host-side check: a sandbox that reports success while the host bytes moved is
+    // the most dangerous shape, so it is caught here rather than trusted.
+    const boundSentinelMutated = await readFile(boundSentinel, 'utf8').catch(() => null) !== boundContent
+    const exitCode = result.exitCode === 0 && boundSentinelMutated
+      ? SMOKE_EXIT.boundBindMutated
+      : result.exitCode
+    return { backend, exitCode, stderr: result.stderr, boundSentinelMutated }
   } finally {
     server.close()
     await rm(materials, { recursive: true, force: true })
@@ -518,19 +648,20 @@ export async function linuxVerificationSandbox({
   })
   // Second pass re-decides with the live smoke result, so a sandbox that cannot
   // actually hold its own boundary is rejected instead of used. The smoke launcher
-  // is rebuilt with the two smoke-channel keys added to the argv whitelist; the
-  // candidate `launcher` above never carries them.
+  // is rebuilt with the smoke-channel keys added to the env whitelist and the
+  // in-scope sentinel directory added to the ro bind list; the candidate `launcher`
+  // above never carries either.
   report.smoke = await runLinuxSmoke({
     probe,
     launcher,
     env,
     backend: selection.backend,
-    extendLauncher: (smokeVars) => buildLinuxLauncher({
+    extendLauncher: ({ env: smokeEnv, roots: smokeRoots }) => buildLinuxLauncher({
       plan: selection,
       evaluator,
       scratch,
-      roots,
-      env: { ...env, ...smokeVars },
+      roots: [...roots, ...(smokeRoots || [])],
+      env: { ...env, ...smokeEnv },
       binaries: report.binaries,
     }),
   })
@@ -578,8 +709,12 @@ export async function linuxVerificationSandbox({
           `smoke exit 0 (a scratch failure would exit ${SMOKE_EXIT.scratchNotWritable})`),
         manifestCheck('bound-roots-read-only', CHECK_STATUS.verified,
           `smoke exit 0 (a writable /usr would exit ${SMOKE_EXIT.readonlyRootWritable})`),
+        manifestCheck('bound-bind-readable', CHECK_STATUS.verified,
+          `POSITIVE CONTROL: smoke exit 0 (an unreadable in-scope sentinel would exit ${SMOKE_EXIT.boundBindUnreadable}); a synthetic sentinel inside a declared read-only bind was read with its expected bytes from inside the sandbox, which is what gives outside-rootfs-unreadable its discriminating power`),
+        manifestCheck('bound-bind-read-only', CHECK_STATUS.verified,
+          `smoke exit 0 (an appendable in-scope sentinel would exit ${SMOKE_EXIT.boundBindWritable}, and host bytes moving would exit ${SMOKE_EXIT.boundBindMutated}); the write was refused by the read-only mount, not by permissions: the file is mode 0600 owned by the invoking uid, which bubblewrap maps to itself`),
         manifestCheck('outside-rootfs-unreadable', CHECK_STATUS.verified,
-          `smoke exit 0 (a readable outside sentinel would exit ${SMOKE_EXIT.outsideRootReadable}); REGRESSION GUARD, not positive bubblewrap evidence: under the bind whitelist the sentinel does not exist in the namespace (ENOENT), so this only proves no unexpected host-root bind (the removed linux-unshare shape) was introduced`),
+          `smoke exit 0 (a readable outside sentinel would exit ${SMOKE_EXIT.outsideRootReadable}). Discriminating ONLY as a pair with bound-bind-readable: the two sentinels are siblings under one mkdtemp root and only bound/ is in the bind list, so an unreadable out-of-scope twin next to a readable in-scope twin is a real bind whitelist and not merely a path that was never bound. Also the regression guard against host-root-bind backends (the removed linux-unshare shape)`),
         manifestCheck('network-egress-denied', CHECK_STATUS.verified,
           `smoke exit 0 (a reachable host listener would exit ${SMOKE_EXIT.networkEgress})`),
         manifestCheck('environment-allowlist', CHECK_STATUS.verified,

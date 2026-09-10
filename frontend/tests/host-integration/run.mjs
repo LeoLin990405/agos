@@ -8,19 +8,40 @@
  *
  * Run:  node tests/host-integration/run.mjs [--only <id>[,<id>…]]
  */
-import { writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { ARTIFACT_DIR, redact } from '../../scripts/host-integration/host-env.mjs';
 import { createHarness } from './harness.mjs';
 import { scenarios } from './scenarios.mjs';
+import { buildLayerResult, sha256File, writeLayerResult } from './layer-result.mjs';
+import { recoveryArgvForScenario } from './recovery-argv.mjs';
 
 const onlyArg = process.argv.indexOf('--only')
 const only = onlyArg === -1 ? undefined : new Set(process.argv[onlyArg + 1].split(','))
 const selected = scenarios.filter((scenario) => only === undefined || only.has(scenario.id))
 
+// Where the `agos-acceptance/integration-layer@1` document goes. Defaults to
+// the artifact directory so a plain run still produces one; the unified matrix
+// passes its own per-round log directory.
+function parseLogdir(argv) {
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]
+    if (arg === '--logdir' || arg.startsWith('--logdir=')) {
+      const value = arg.includes('=') ? arg.slice(arg.indexOf('=') + 1) : argv[++i]
+      if (value === undefined || value === '') throw new Error('--logdir requires a path')
+      return path.resolve(value)
+    }
+  }
+  return ARTIFACT_DIR
+}
+const logDir = parseLogdir(process.argv)
+const startedAt = new Date().toISOString()
+
 const results = []
 let harness
 let failed = 0
+/** Set when bring-up failed for a reason this machine cannot fix by retrying. */
+let bringUpBlocked
 
 // A hard interrupt used to orphan the host process and its temp roots (it did,
 // during development). Dispose on the way out; `scripts/host-integration/
@@ -51,6 +72,41 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
  * profile): the loader turns an absolute path into a file:// URL.
  */
 const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..', '..')
+
+/**
+ * A copyable command that would unblock this machine.
+ *
+ * The contract asks for one whenever the verdict is `blocked`, and the useful
+ * answer depends on WHICH component was missing — `resolveDshBin`,
+ * `resolvePlaywrightModule` and `resolveBrowserExecutable` all tag their
+ * refusals with a `reason`.
+ */
+function recoveryFor(error) {
+  switch (error?.reason) {
+    case 'dsh-missing':
+    case 'dsh-unavailable':
+      return ['env', 'AGOS_DSH_BIN=/abs/path/to/dsh', 'node', 'tests/host-integration/run.mjs']
+    case 'browser-missing':
+    case 'browser-unavailable':
+      return ['env', 'AGOS_BROWSER_EXECUTABLE=/abs/path/to/chrome', 'node', 'tests/host-integration/run.mjs']
+    case 'playwright-missing':
+    case 'playwright-unavailable':
+    case 'playwright-live-profile':
+      return ['env', 'AGOS_PLAYWRIGHT_MODULE=/abs/path/to/playwright-core/index.js', 'node', 'tests/host-integration/run.mjs']
+    default:
+      return ['node', 'tests/host-integration/run.mjs']
+  }
+}
+
+/**
+ * A scenario-level block means bring-up succeeded but one named layer could
+ * not be observed. Preserve that distinction in the layer document and give
+ * an operator an argv that can be copied to retry exactly the uncovered case.
+ */
+export function recoveryForScenario(blocks, argv = process.argv) {
+  const id = blocks.find((entry) => typeof entry.scenarioId === 'string')?.scenarioId
+  return recoveryArgvForScenario(argv, id)
+}
 const PLUGINS = [
   {
     id: 'dsh-agos',
@@ -111,22 +167,33 @@ try {
       status,
       ms: Date.now() - started,
       checks,
-      ...(blocks.length > 0 ? { blocked: blocks } : {}),
+      ...(blocks.length > 0 ? { blocked: blocks.map(({ layer, reason }) => ({ layer, reason })) } : {}),
       ...(error !== undefined ? { error } : {}),
       ...(screenshot !== undefined ? { screenshot } : {}),
     })
     harness.log(`   → ${status.toUpperCase()} in ${Date.now() - started}ms`)
   }
 } catch (caught) {
-  failed += 1
+  // A bring-up that failed because this MACHINE cannot host the suite — no
+  // Chrome, no playwright-core in the repo's own tree, no dsh CLI — is
+  // `blocked`, not `fail`. `IntegrationBlocked` carries `blocked === true`
+  // precisely so the two can be told apart here, and conflating them would
+  // report an absent optional component as a product defect (and would have
+  // been the outcome on every machine laid out differently from this one).
+  const isBlocked = caught?.blocked === true
+  if (!isBlocked) failed += 1
   results.push({
     id: 'harness',
     title: 'harness bring-up',
     exercises: { host: 'real', browser: 'real', transport: 'real', store: 'real' },
-    status: 'fail',
+    status: isBlocked ? 'blocked' : 'fail',
+    ...(isBlocked
+      ? { blocked: [{ layer: `host-browser bring-up (${caught.reason ?? 'unavailable'})`, reason: redact(String(caught.message)) }] }
+      : {}),
     error: redact(String(caught?.stack ?? caught?.message ?? caught)),
     checks: [],
   })
+  bringUpBlocked = isBlocked ? caught : undefined
   console.error(redact(String(caught?.stack ?? caught)))
 } finally {
   const stopped = await harness?.dispose()
@@ -162,10 +229,107 @@ try {
     hostExit: stopped ?? null,
     results,
   }
-  await writeFile(
-    path.join(ARTIFACT_DIR, 'results.json'),
-    JSON.stringify(summary, undefined, 2) + '\n',
-  )
+  const resultsPath = path.join(ARTIFACT_DIR, 'results.json')
+  await writeFile(resultsPath, JSON.stringify(summary, undefined, 2) + '\n')
+
+  // The `agos-acceptance/integration-layer@1` document for this layer. Written
+  // whatever the outcome, because a `blocked` or `fail` verdict is exactly the
+  // case the unified matrix must be able to read rather than infer.
+  const provenance = harness?.provenance ?? {}
+  const moduleProvenance = []
+  if (provenance.playwright !== undefined) {
+    const pkg = path.join(provenance.playwright.modulePath.split('playwright-core')[0], 'playwright-core', 'package.json')
+    const version = await readFile(pkg, 'utf8').then((text) => JSON.parse(text).version).catch(() => null)
+    moduleProvenance.push({
+      specifier: 'playwright-core',
+      resolvedPath: provenance.playwright.modulePath,
+      version,
+      sha256: (await sha256File(provenance.playwright.modulePath)) ?? null,
+      origin: provenance.playwright.source === 'explicit' ? 'explicit' : 'repo-tree',
+      originNote: `resolved via ${provenance.playwright.source}; the harness never borrows ~/.dsh`,
+    })
+  }
+  if (provenance.browser !== undefined) {
+    moduleProvenance.push({
+      specifier: 'chrome/chromium executable',
+      resolvedPath: provenance.browser.executablePath,
+      version: provenance.browserVersion ?? null,
+      // Deliberately not hashed: this is a multi-hundred-megabyte OS-installed
+      // application bundle, not a repository module. A guessed hash is worse
+      // than an absent one, so it is absent and says why.
+      sha256: null,
+      origin: 'os-installed',
+      originNote: `found by ${provenance.browser.source}; nothing is ever downloaded`,
+    })
+  }
+  if (provenance.dsh !== undefined) {
+    moduleProvenance.push({
+      specifier: 'dsh CLI',
+      resolvedPath: provenance.dsh.path,
+      version: null,
+      sha256: (await sha256File(provenance.dsh.path)) ?? null,
+      origin: 'os-installed',
+      originNote: `found by ${provenance.dsh.source}`,
+    })
+  }
+  if (provenance.identity !== undefined) {
+    moduleProvenance.push({
+      specifier: 'process-identity backend',
+      resolvedPath: provenance.identity.backend,
+      version: null,
+      sha256: null,
+      origin: 'os',
+      originNote: provenance.identity.ok
+        ? 'spawned processes can be recorded and reaped'
+        : 'NO backend: spawned processes cannot be recorded or reaped on this machine',
+    })
+  }
+
+  const counts = {
+    pass: summary.passed, fail: summary.failed, skip: summary.skipped, blocked: summary.blocked,
+  }
+  const scenarioBlocks = results.flatMap((result) => (result.blocked ?? [])
+    .map((entry) => ({ ...entry, scenarioId: result.id })))
+  const exitCode = failed === 0 ? 0 : 1
+  await mkdir(logDir, { recursive: true })
+  const layer = await buildLayerResult({
+    counts,
+    command: [process.execPath, ...process.argv.slice(1)],
+    startedAt,
+    endedAt: new Date().toISOString(),
+    exitCode,
+    repoRoot: REPO_ROOT,
+    moduleProvenance,
+    logFiles: await (async () => {
+      // Evidence must live in --logdir. Hashing ARTIFACT_DIR (a shared, next-run-
+      // overwritten folder) makes an old host-browser.json's logs[] unverifiable.
+      const names = ['results.json', 'run.log', 'host.log']
+      const copied = []
+      for (const name of names) {
+        const src = path.join(ARTIFACT_DIR, name)
+        const dest = path.join(logDir, name)
+        const bytes = await readFile(src).catch(() => undefined)
+        if (bytes === undefined) continue
+        if (dest !== src) await writeFile(dest, bytes)
+        copied.push(dest)
+      }
+      return copied
+    })(),
+    blockedReason: bringUpBlocked === undefined
+      ? (summary.blocked > 0
+        ? scenarioBlocks.map((entry) => `${entry.scenarioId}: ${entry.layer}: ${entry.reason}`).join('; ')
+        : null)
+      : redact(String(bringUpBlocked.message)),
+    recoveryCommand: bringUpBlocked === undefined
+      ? (summary.blocked > 0 ? recoveryForScenario(scenarioBlocks) : null)
+      : recoveryFor(bringUpBlocked),
+    uncoveredLayers: summary.uncoveredLayers,
+    scenarios: results.map((result) => ({ id: result.id, status: result.status, ms: result.ms ?? null })),
+  })
+  const written = await writeLayerResult(logDir, layer)
+  console.log(`\nlayer result: ${written.file} → verdict=${layer.verdict} `
+    + `(pass=${counts.pass} fail=${counts.fail} blocked=${counts.blocked} skip=${counts.skip})`)
+
   console.log(`\n${summary.passed} passed, ${summary.failed} failed, `
     + `${summary.blocked} blocked, ${summary.skipped} skipped (${results.length} scenarios)`)
   const LABEL = { pass: 'PASS   ', fail: 'FAIL   ', blocked: 'BLOCKED', skipped: 'SKIPPED' }

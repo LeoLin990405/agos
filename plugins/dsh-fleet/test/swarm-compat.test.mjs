@@ -32,8 +32,17 @@ import {
 	parseResultsXml,
 	resolveProgressPublisher,
 	resetProgressPublisherCache,
+	diffAgainstReference,
+	SCALAR_DIFF_CASES,
+	TEXT_OF_DIFF_CASES,
+	XML_DIFF_CASES,
 } from '../lib/fleet-swarm-compat.mjs'
-import { resolveSwarmModule, SWARM_OPT_IN_ENV, SWARM_SPECIFIER } from '../../dsh-agos/lib/swarm-host-integration.mjs'
+import {
+	resolveSwarmModule,
+	inspectSwarmExports,
+	SWARM_OPT_IN_ENV,
+	SWARM_SPECIFIER,
+} from '../../dsh-agos/lib/swarm-host-integration.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(HERE, '../../..')
@@ -44,62 +53,76 @@ const DIFF_BLOCKED = swarmProbe.available
 	? false
 	: `未覆盖(blocked):差分需要真实 swarm 在场做对照,当前不可用。${swarmProbe.reason}`
 
-/**
- * 差分输入集。刻意覆盖容易在"重写一遍"时走样的地方:
- * 五个实体的转义顺序、缺失属性(undefined vs null)、数值属性的 0 与非数、
- * body 的 completed/failed 分流、多条 subagent、以及 & 必须先转义。
- */
-const XML_CASES = [
-	'',
-	'<subagent item="a" outcome="completed">ok</subagent>',
-	'<subagent item="a" outcome="failed">boom &amp; bust</subagent>',
-	'<subagent item="&lt;x&gt;" model="m&amp;m" ms="12" tool_calls="3" tools="a,b" outcome="completed">r</subagent>',
-	'<subagent item="a" mode="resume" team="t" member="mm" agent_id="ag1" state="running" alive="1" stopped="0" outcome="completed">x</subagent>',
-	'<subagent item="a" depth="2" role="lead" forked="f1" images="4" at="99" outcome="completed">y</subagent>',
-	'<subagent item="one" outcome="completed">1</subagent><subagent item="two" outcome="failed">2</subagent>',
-	// 属性缺失:parseResultsXml 里 team/member 顶层带 ?? null、task 内不带,是生效语义
-	'<subagent outcome="completed">no attrs</subagent>',
-]
-
-const ESCAPE_CASES = ['', 'plain', '&', '<>', '"q"', "'a'", '&amp;', 'a&b<c>d"e\'f', '&lt;already&gt;', 0, 1, null, undefined]
-
 test('内联的 escapeXml / unescapeXml / textOf / parseResultsXml 与真实 swarm 逐行为一致', { skip: DIFF_BLOCKED }, () => {
 	const real = swarmProbe.module
-	for (const fn of ['escapeXml', 'unescapeXml', 'textOf', 'parseResultsXml']) {
-		assert.equal(typeof real[fn], 'function', `真实 swarm 未导出 ${fn},差分无对照 —— 这条检查已失去区分力`)
-	}
 
-	for (const value of ESCAPE_CASES) {
-		assert.equal(escapeXml(value), real.escapeXml(value), `escapeXml 在 ${JSON.stringify(value)} 上与原版不一致`)
-		assert.equal(unescapeXml(value), real.unescapeXml(value), `unescapeXml 在 ${JSON.stringify(value)} 上与原版不一致`)
-	}
+	// 对照必须是**真 swarm**,不能是一份只把内联实现再导出一遍的壳 ——
+	// 那样差分等于自己和自己比,永远 0 不一致而毫无区分力。真 swarm 一定同时带调度器;
+	// 只有 XML 四函数的东西是桩,不是对照。
+	const shape = inspectSwarmExports(real)
+	assert.deepEqual(shape.missing, [], `对照模块缺少导出 ${shape.missing.join(', ')} —— 它不是一份完整 swarm,差分无区分力`)
+	assert.notEqual(real.escapeXml, escapeXml, '对照模块的 escapeXml 与内联版是同一个函数对象:这是自证,不是差分')
+	assert.notEqual(real.parseResultsXml, parseResultsXml, '对照模块的 parseResultsXml 与内联版是同一个函数对象:这是自证,不是差分')
 
-	// textOf 吃的是 LLM 结果结构:只有 type==='text' 的 block 参与拼接
-	const textCases = [
-		{ output: [] },
-		{ output: [{ type: 'text', text: ' hi ' }] },
-		{ output: [{ type: 'text', text: 'a' }, { type: 'tool_use', id: 'x' }, { type: 'text', text: 'b' }] },
-		{ output: [{ type: 'tool_use', id: 'only-tool' }] },
-	]
-	for (const value of textCases) {
-		assert.equal(textOf(value), real.textOf(value), `textOf 在 ${JSON.stringify(value)} 上与原版不一致`)
-	}
-
-	for (const xml of XML_CASES) {
-		assert.deepEqual(
-			parseResultsXml(xml),
-			real.parseResultsXml(xml),
-			`parseResultsXml 在以下输入上与原版不一致(前端消费的正是这个结构):\n${xml}`,
-		)
-	}
+	const { compared, mismatches, missing } = diffAgainstReference(real)
+	assert.deepEqual(missing, [], `真实 swarm 未导出 ${missing.join(', ')},差分无对照`)
+	assert.ok(compared >= 120, `只比了 ${compared} 项,语料退化了`)
+	assert.deepEqual(
+		mismatches,
+		[],
+		'内联版与真实 swarm 行为不一致(前端消费的正是这个结构):\n'
+			+ mismatches.map((m) => `  ${m.fn} @ ${m.input}\n    内联=${m.inline}\n    原版=${m.reference}`).join('\n'),
+	)
 })
 
-test('差分用例确实覆盖了 Fleet 自己生成的 XML 形状', () => {
-	// 差分只在有对照时跑;这条无条件跑,保证 XML_CASES 不会退化成一堆空串
+test('差分本身有区分力:参照实现被改坏时必须报出来(无对照也能跑)', () => {
+	// 这条无条件跑。没有它,"0 处不一致"可能只是因为差分根本不会失败 ——
+	// 而那种情况在有真 swarm 时也照样绿,从结果上分不出来。
+	const faithful = { escapeXml, unescapeXml, textOf, parseResultsXml }
+	assert.deepEqual(diffAgainstReference(faithful).mismatches, [], '同一份实现自比竟然报了不一致,差分逻辑本身有问题')
+
+	// & 挪到最后 → 二次转义。这是内联时最容易犯的错,必须被抓到。
+	const reordered = {
+		...faithful,
+		escapeXml: (v) => String(v).replaceAll('"', '&quot;').replaceAll("'", '&apos;')
+			.replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('&', '&amp;'),
+	}
+	assert.ok(diffAgainstReference(reordered).mismatches.length > 0, '转义顺序被改坏,差分却没报 —— 差分失去区分力')
+
+	// 顶层 team 去掉 ?? null → undefined vs null,前端会多出空 chip
+	const nullDropped = {
+		...faithful,
+		parseResultsXml: (xml) => parseResultsXml(xml).map((row) => ({ ...row, team: row.team ?? undefined })),
+	}
+	assert.ok(diffAgainstReference(nullDropped).mismatches.length > 0, 'undefined/null 漂移没被差分抓到')
+
+	// 缺导出要如实报 missing,而不是当成"比过了 0 处不一致"
+	assert.deepEqual(diffAgainstReference({}).missing, ['escapeXml', 'unescapeXml', 'textOf', 'parseResultsXml'])
+	assert.equal(diffAgainstReference({}).compared, 0, '缺导出时不该产生任何"已比对"计数')
+})
+
+test('差分语料确实覆盖了 Fleet 自己生成的 XML 形状与任务书点名的边界输入', () => {
+	// 差分只在有对照时跑;这条无条件跑,保证语料不会退化成一堆空串
 	// (那样差分会永绿而不再证明任何东西)。
-	const parsedCounts = XML_CASES.map((xml) => parseResultsXml(xml).length)
-	assert.ok(parsedCounts.some((n) => n >= 2), 'XML_CASES 里没有多条 subagent 的用例,多条解析路径未被差分覆盖')
-	assert.ok(parsedCounts.filter((n) => n === 1).length >= 5, 'XML_CASES 里单条用例太少,属性分支覆盖不足')
+	const parsedCounts = XML_DIFF_CASES.map((xml) => parseResultsXml(xml).length)
+	assert.ok(parsedCounts.some((n) => n >= 2), 'XML 语料里没有多条 subagent 的用例,多条解析路径未被差分覆盖')
+	assert.ok(parsedCounts.filter((n) => n === 1).length >= 5, 'XML 语料里单条用例太少,属性分支覆盖不足')
+
+	// 逐类点名边界输入。用"有没有一条用例满足这个性质"来判,而不是数数量 ——
+	// 数量可以靠加无关用例凑,性质不能。
+	const has = (cases, pred) => cases.some((c) => { try { return pred(c) } catch { return false } })
+	assert.ok(has(SCALAR_DIFF_CASES, (c) => c === ''), '缺空串')
+	assert.ok(has(SCALAR_DIFF_CASES, (c) => c === '&'), '缺"只有 &"')
+	assert.ok(has(SCALAR_DIFF_CASES, (c) => c === '&amp;amp;'), '缺嵌套实体')
+	assert.ok(has(SCALAR_DIFF_CASES, (c) => typeof c === 'string' && /[\u4e00-\u9fff]|\u{1F600}/u.test(c)), '缺多字节')
+	assert.ok(has(SCALAR_DIFF_CASES, (c) => typeof c === 'string' && /[\u0000-\u001f\u007f]/.test(c)), '缺控制字符')
+	assert.ok(has(SCALAR_DIFF_CASES, (c) => typeof c === 'string' && c.length >= 20_000), '缺超长输入')
+	assert.ok(has(SCALAR_DIFF_CASES, (c) => c === ']]>'), '缺 ]]>')
+	assert.ok(has(SCALAR_DIFF_CASES, (c) => typeof c !== 'string'), '缺非字符串输入(String() 转换也要对齐)')
+	assert.ok(has(XML_DIFF_CASES, (c) => c.includes('unclosed')), '缺未闭合标签')
+	assert.ok(has(XML_DIFF_CASES, (c) => c.includes(']]>')), 'XML 语料缺 ]]>')
+	assert.ok(has(XML_DIFF_CASES, (c) => c.length >= 20_000), 'XML 语料缺超长输入')
+	assert.ok(has(TEXT_OF_DIFF_CASES, (c) => c.output === null || c.output === undefined), 'textOf 语料缺"会抛"的输入')
 
 	// 钉住"顶层 team/member 带 ?? null、task 内不带"这条生效语义 —— 它是重写时最容易走样的一处
 	const [row] = parseResultsXml('<subagent outcome="completed">x</subagent>')

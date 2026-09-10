@@ -144,7 +144,7 @@ export function execCommand(command, { cwd, signal, timeoutMs = 120000, env, san
   const launcher = sandboxLauncher
     || (sandboxProfile ? { file: '/usr/bin/sandbox-exec', before: ['-p', sandboxProfile, '/bin/bash', '-c'] } : null)
   return new Promise((resolve) => {
-    const state = { done: false, timer: null, killTimer: null, signal, onAbort: null }
+    const state = { done: false, timer: null, killTimer: null, signal, onAbort: null, timedOut: false }
     let stdout = ''
     let stderr = ''
     const child = spawn(launcher ? launcher.file : '/bin/bash',
@@ -163,6 +163,7 @@ export function execCommand(command, { cwd, signal, timeoutMs = 120000, env, san
       text: (stdout + (stderr ? `\n${stderr}` : '')).trim(),
       elapsedMs: Date.now() - started,
       cancelled: extra.cancelled === true,
+      timedOut: state.timedOut === true,
       signal: extra.signal || null,
       pid: child.pid ?? null,
     })
@@ -176,6 +177,7 @@ export function execCommand(command, { cwd, signal, timeoutMs = 120000, env, san
       else signal.addEventListener('abort', state.onAbort, { once: true })
     }
     state.timer = setTimeout(() => {
+      state.timedOut = true
       killProcessGroup(child, 'SIGTERM')
       state.killTimer = setTimeout(() => killProcessGroup(child, 'SIGKILL'), 1500)
     }, timeoutMs)

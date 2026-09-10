@@ -23,7 +23,12 @@ const ORIGINAL_SWARM_MODULE = process.env.AGOS_SWARM_MODULE
 // fake subagent scenarios remain covered on a clean checkout without importing
 // the incompatible public registry package. A real scheduler differential remains
 // a host integration check; these tests make no claim to cover it.
+//
+// __AGOS_SYNTHETIC__ 是这份合成模块的自曝标记。真实模块没有它,于是 REAL_MODE 的
+// 前提检查可以**直接证伪**"合成模块冒充真实调度器"——否则一旦 AGOS_SWARM_MODULE 被
+// 指到某个桩上,真实模式会照样全绿,而它证明的东西和干净 checkout 一模一样。
 if (!REAL_MODE) process.env.AGOS_SWARM_MODULE = 'data:text/javascript,' + encodeURIComponent(`
+export const __AGOS_SYNTHETIC__ = 'plan-run.fake.test.mjs 内置合成调度器'
 const textOf = (v) => String(v ?? '')
 export const escapeXml = (v) => textOf(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 export const parseResultsXml = (xml) => [...textOf(xml).matchAll(/<subagent([^>]*)>([\\s\\S]*?)<\\/subagent>/g)].map((m, i) => {
@@ -60,7 +65,21 @@ export async function runNormalizedBatch(ctx, _exec, batch, options = {}) {
 
 // ⚠️ env 必须在 import 之前设好:PLAN_DIR 在 apply() 时读一次
 const { apply, ownSessionEvents, snapshotSessionEvents } = await import('../lib/index.js')
-const { resolveSwarmModule, SWARM_OPT_IN_ENV } = await import('../../dsh-agos/lib/swarm-host-integration.mjs')
+const { resolveSwarmModule, inspectSwarmExports, SWARM_OPT_IN_ENV } = await import('../../dsh-agos/lib/swarm-host-integration.mjs')
+
+// 真实模式下先把**前提**钉死再跑业务场景。没有这一条,"真实模式全绿"可能只是
+// 又跑了一遍合成模块 —— 那和干净 checkout 证明的东西完全一样,却顶着"真实集成"的名头。
+if (REAL_MODE) test('real-mode premise: 本进程加载的确实是真实 swarm 调度器,不是合成模块', async () => {
+  const resolved = await resolveSwarmModule()
+  assert.equal(resolved.available, true, '真实模式下模块必须可用:' + resolved.reason)
+  assert.equal(resolved.module.__AGOS_SYNTHETIC__, undefined,
+    '加载到的是本文件内置的合成调度器,不是真实模块 —— 这一轮不构成真实集成证据')
+  const shape = inspectSwarmExports(resolved.module)
+  assert.deepEqual(shape.missing, [], '真实模块缺导出:' + shape.missing.join(', '))
+  assert.deepEqual(shape.wrongType, [], '真实模块导出类型不对:' + JSON.stringify(shape.wrongType))
+  // 调度器的形参约定变了,下面所有业务断言的含义都要重新核对
+  assert.equal(resolved.module.runNormalizedBatch.length, 3)
+})
 
 if (!REAL_MODE) test('real swarm scheduler integration runs the existing fake business scenarios when available', async (t) => {
   const env = { ...process.env }
@@ -71,12 +90,39 @@ if (!REAL_MODE) test('real swarm scheduler integration runs the existing fake bu
     t.skip('host scheduler unavailable: ' + resolved.reason)
     return
   }
-  const child = spawnSync(process.execPath, ['--test', fileURLToPath(import.meta.url)], {
+  // 解析到了不等于能用:registry 版就是"能加载、一个需要的符号都不导出"。
+  // 那种情况下重跑一遍子进程只会得到一堆同源 TypeError,不如在这里如实标 blocked。
+  const shape = inspectSwarmExports(resolved.module)
+  if (!shape.ok) {
+    t.skip('未覆盖(blocked):解析到的 swarm 与 AgOS 不兼容,缺少导出 ' + shape.missing.join(', ')
+      + ';registry 的 0.1.0/0.1.1/0.1.2 都是这样。设 ' + SWARM_OPT_IN_ENV + ' 指向一份可用的对齐构建版即可恢复覆盖。')
+    return
+  }
+
+  // 显式钉住 reporter:默认 reporter 随 Node 版本变(v26 非 TTY 下给的是 spec 的
+  // `ℹ pass N`,不是 TAP 的 `# pass N`),不钉的话下面的计数解析会随环境时灵时不灵。
+  const child = spawnSync(process.execPath, ['--test', '--test-reporter=tap', fileURLToPath(import.meta.url)], {
     env: { ...env, AGOS_PLAN_RUN_REAL_SWARM: '1', NODE_TEST_CONTEXT: undefined, NODE_OPTIONS: undefined },
     encoding: 'utf8',
     timeout: 60_000,
   })
-  assert.equal(child.status, 0, child.stdout + child.stderr)
+  const output = child.stdout + child.stderr
+  assert.equal(child.status, 0, output)
+
+  // 只看退出码不够:一个**一条测试都没注册**的子进程同样退 0。逐项核对子进程的自述,
+  // 确认前提检查与 A4 业务场景真的在真实调度器上跑过了。
+  const countOf = (label) => Number((new RegExp('^(?:# |ℹ )' + label + ' (\\d+)$', 'm').exec(output) || [])[1] ?? NaN)
+  const pass = countOf('pass')
+  assert.ok(Number.isFinite(pass), '读不出子进程的 TAP 计数,无法确认它真的跑了测试:\n' + output)
+  assert.equal(countOf('fail'), 0, output)
+  assert.ok(pass >= 12, `子进程只通过了 ${pass} 项,少于真实模式应有的场景数:\n` + output)
+  assert.match(output, /real-mode premise: 本进程加载的确实是真实 swarm 调度器/, '子进程没有跑前提检查,无法排除它用的是合成模块')
+  for (const scenario of [
+    'A4: plan_run approve=true',                      // 分波 / 上游注入 / 写回 / presentationMeta
+    'A4: 裸 JSON 即使 approve 也只落盘',              // 字符串步骤 id / 依赖校验
+  ]) {
+    assert.ok(output.includes(scenario), `子进程没有跑「${scenario}」,真实调度器下的该场景未被覆盖:\n` + output)
+  }
 })
 
 // ── 假子代理:swarm 调度器的 spawnOneShot 与本插件的 runPanelist 都走 subagents.start('spawn', {...}) ──

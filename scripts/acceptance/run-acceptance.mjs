@@ -258,6 +258,34 @@ function defaultPlan() {
 		}
 	}
 
+	// ---- 验收器与集成矩阵自己的单元/负控测试接进正式门 ----
+	// 第四轮 D 实测:这两个套件原先都不在计划里 —— 整目录删掉,门照样绿。
+	// 与第三轮「自检没接进门」同源。下限只对进了 defaultPlan 的闸生效,
+	// 所以必须改这里,不能在矩阵层再造一套平行下限。
+	// 合成运行跳过:自检会把验收器当子进程反复 spawn,带进去会让每层都多跑几十秒。
+	// 无递归风险:integration 负控只 spawn run-matrix,用的是假验收器桩。
+	// linux-layer-unit 是 B 的入口自检,在 macOS 上就能证明 blocked 不上卷成 pass,
+	// 不需要 Linux 运行时;swarm 真实集成不进门(干净树会 blocked,由矩阵层采集)。
+	if (!SYNTHETIC) {
+		for (const [id, glob] of [
+			['acceptance-unit', 'scripts/acceptance/test/*.test.mjs'],
+			['integration-unit', 'scripts/acceptance/integration/test/*.test.mjs'],
+			['linux-layer-unit', 'scripts/acceptance/integration/linux/test/linux-layer.test.mjs'],
+		]) {
+			const floor = floorFor(id)
+			if (floor.missing) {
+				codeGates.push(structuralFailure(id, `missing-floor-entry:${id}`,
+					`计数下限基线里没有 ${id} 的条目 —— 这个套件没有下限保护,删测试抓不到。`))
+				continue
+			}
+			codeGates.push({
+				id, cwd: '.', argv: ['node', '--test', glob],
+				kind: 'node-test', required: true,
+				minTests: floor.minTests ?? null, minPass: floor.minPass ?? null,
+			})
+		}
+	}
+
 	// ---- 隔离宿主依赖树的校验接进正式门 ----
 	// 这两个脚本是别人的文件,这里只**调用**它们的 CLI,不碰源码。
 	// 合成运行(--required-plugins/--plugins-root/--selftest-file)跳过:那种运行本来就不代表真实环境。

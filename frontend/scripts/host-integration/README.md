@@ -2,9 +2,14 @@
 
 这一层只做一件事:**把一个真的 dsh 宿主、一个真的 SPA 源、一个真的浏览器拉起来,并保证
 拉起失败时不留残骸、清理时不误伤别人、日志里不留可重组的凭据、浏览器出不去本次的两个
-origin。** 场景判定不在这里(见 `tests/host-integration/scenarios.mjs`)。
+origin。** 场景判定不在这里,在 `frontend/tests/host-integration/`(见下)。
+
+> 本文件里的相对路径都以 **`frontend/`** 为基准(`scripts/host-integration/…`、
+> `tests/host-integration/…`),命令也都在 `frontend/` 下执行。
 
 ## 文件
+
+### 基础设施(本目录)
 
 | 文件 | 职责 |
 |---|---|
@@ -15,10 +20,30 @@ origin。** 场景判定不在这里(见 `tests/host-integration/scenarios.mjs`)
 | `browser-source.mjs` | Playwright / 浏览器来源解析(不借 live profile)+ 外部 origin 拦截 |
 | `start-host.mjs` | 拉起真宿主、换取会话 cookie、挂载插件、验证插件加载 |
 | `ui-server.mjs` | Vite 起 SPA 源,`/api` 中继到真宿主 |
+| `fake-harness-plugin.mjs` | 挂进真宿主的**真** cordis 插件。它只假冒**模型**与**工具体**——宿主、agent 循环、审批接缝、会话日志、api-gateway、`/api/remote.mux` 传输全是真的。唯一注册的 provider 是 `agos-fake`,零付费 token、零网络 I/O |
 | `cleanup.mjs` | 只回收**没人认领**的运行,活跃运行一律跳过并报出 |
 | `probe-host.mjs` | 无浏览器的传输层探针 |
 
-## 给实施者 D 的接口:挂载插件 + 查询实际加载
+### 场景与结果(`frontend/tests/host-integration/`)
+
+| 文件 | 职责 |
+|---|---|
+| `run.mjs` | 联测入口。每个场景在 `exercises` 里声明它**真正驱动到**的层,标签随结果进报告 |
+| `scenarios.mjs` | 场景判定 |
+| `harness.mjs` | `createHarness`——把上面的基础设施组装成一次完整运行 |
+| `unit/` | 基础设施自己的回归(不需要完整依赖树) |
+| `artifacts/` | 最近一次运行的截图与日志。**`.gitignore` 挡掉,不入库** |
+
+⚠️ `artifacts/` 不入库的第二个理由是硬的:它**必然含个人绝对路径**——实测一次运行的产物里
+有 43 处 `/Users/<name>/…`,分布在 `host.log`(30)、`results.json`(9)、`probe-host.log`(2)、
+`run.log`(1)、`probe-host-findings.json`(1)。宿主与 Playwright 都会把绝对路径打进日志,
+截图也可能带上工作树路径。**这不是靠"记得脱敏"能解决的**,所以从入库层挡掉。
+需要交付证据时,把**脱敏后的副本**放进 `docs/engineering/<轮次>/logs/` 并在文件头声明脱敏范围。
+
+## 挂载插件 + 查询实际加载
+
+> 这一节原是第三轮为当时的实施者 D 写的接口说明。**接口本身仍然有效**,
+> 只是"D"在不同轮次指不同的人,所以这里按能力而不是按人来写。
 
 联测需要在临时宿主上挂真实插件(例如 `plugins/dsh-agos` 的 turn-evidence)时,用下面两个
 接口。**关键约定:`loaded` 不是"我请求了所以它在",而是对运行中的宿主实际探测出来的结果。**
@@ -90,7 +115,7 @@ await ctx.plugins.status()     // => HostPluginStatus[]
 await ctx.plugins.loaded()     // => string[]
 ```
 
-典型用法(D 的 pass / blocked 判定):
+典型用法(pass / blocked 判定):
 
 ```js
 const loaded = await ctx.plugins.loaded()
@@ -101,6 +126,8 @@ if (!loaded.includes('dsh-agos')) {
 ```
 
 ## 其他调用方需要知道的行为变化
+
+> 以下条目均为**第三轮**定型的行为,除非另有标注。
 
 - **`createHarness` 拉起失败会自己回收。** 不要再指望"拿到 harness 再 dispose":任一级失败
   时,该级之前已创建的宿主进程、端口、临时目录、浏览器都已在抛出前逆序回收。
@@ -121,25 +148,56 @@ if (!loaded.includes('dsh-agos')) {
 - **关浏览器有时间上限。** 对着已安装的 Google Chrome,`browser.close()` 实测要 30 秒
   (Playwright 等整棵进程树)。dispose 与「拉起失败逐级回收」都会付这 30 秒,所以宽限
   2.5 秒后直接对进程组发 SIGKILL 并停止等待 —— profile 是一次性的,没有需要优雅退出保存的
-  东西。实测 30.1s → 2.7s。
+  东西。**第三轮在本机实测 30.1s → 2.7s**(数量级参考,不同机器与 Chrome 版本会变)。
 - **Playwright 不再默认借 `~/.dsh`。** 顺序是:`AGOS_PLAYWRIGHT_MODULE` → 本仓依赖树
   (`frontend/`、`plugins/`、仓库根)→ 抛 `IntegrationBlocked`(`error.blocked === true`)。
   确实要借 live profile 必须同时设 `AGOS_ALLOW_LIVE_PROFILE=1`。
+  这是有意的:harness 的契约是「绝不读 `~/.dsh`」,而它原先的默认解析路径正是
+  `~/.dsh/profiles/web/node_modules/playwright-core`。
+- 浏览器可执行文件**从系统里找**(Chrome / Chromium),**从不下载**;找不到设
+  `AGOS_BROWSER_EXECUTABLE`。
+
+### 第四轮(2026-09-09)的可移植性改造（当前工作树记录，尚待冻结验收）
+
+C 改了定位与身份,使缺组件报 `blocked` 而不是把「本机观察不到」写成产品失败。
+Playwright 解析顺序**未改**,仍是上一节那条。
+
+**dsh CLI**(`resolveDshBin`):`AGOS_DSH_BIN`(可为命令名,走 PATH)→ `~/.npm-global/bin/dsh` → PATH 上的 `dsh` → `IntegrationBlocked`。不再在 overlay/端口都建好之后才 ENOENT。
+
+**浏览器**(`resolveBrowserExecutable`):显式覆盖(**现在接受命令名**,走 PATH)→ 按平台绝对路径 → PATH → `blocked`。
+Linux 候选补了 `/usr/bin/google-chrome-stable`、`/snap/bin/chromium`、`chromium-browser`。macOS 候选逐字未变。
+本机 Linux 候选**没有**对着真实 ELF 二进制跑过。
+
+**进程身份**:`ps -o lstart=` 优先,`/proc/<pid>/stat` 兜底;身份带 `backend` 字段;**跨后端一律 fail-closed**(理由写「backend 不一致」,不谎报 pid reused)。
+`/proc` 解析器只用文档格式 fixture 验过,活内核未验。
+
+**`run.mjs`**:新增 `--logdir`,写出 `<logdir>/host-browser.json`(`integration-layer@1`)。bring-up 因缺 Chrome / Playwright / dsh 抛 `IntegrationBlocked` 时判 **blocked**,不判 fail。
+
+**场景 5**:不再依赖页内 5ms `setInterval`(Chrome 后台节流约 14 倍;开工基线实测 8 pass / 1 fail)。改为断言订阅回调里的 `getSnapshot()` 必须出现 online→down 跃迁;5ms 轮询只要求还在跳。这是抗 flake 的判据替换,不是加严。
+
+**主控独立复跑**（非冻结记录）：host unit 111/111；9 场景 9/9 exit 0。Linux 宿主联测**未跑**；Linux 隔离层当前实测为 `blocked`。
 
 ## 跑测试
 
 ```sh
+cd frontend
+
 # 基础设施自己的回归(不需要完整依赖树)
 node --test "tests/host-integration/unit/*.test.mjs"
 
 # 真浏览器那条用例:装了 frontend/node_modules 就自动跑;没装时可以显式指路
 AGOS_PLAYWRIGHT_MODULE=/abs/path/to/playwright-core/index.mjs \
   node --test tests/host-integration/unit/browser-isolation.test.mjs
+
+# 整套真宿主联测(需要系统里已装 Chrome / Chromium)
+node tests/host-integration/run.mjs --logdir /tmp/host-layer
+node tests/host-integration/run.mjs --only <id>[,<id>…]     # 只跑指定场景
 ```
 
 ## 清理
 
 ```sh
+cd frontend
 node scripts/host-integration/cleanup.mjs --dry-run   # 只分类,不动手
 node scripts/host-integration/cleanup.mjs             # 只回收没人认领的运行
 ```

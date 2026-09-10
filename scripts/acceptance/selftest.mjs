@@ -630,12 +630,36 @@ test('NC16c: 正式默认计划确实接了自检 + 依赖树校验(--print-plan
 	assert.ok(ids.includes('selftest'), '正式门必须接自检(缺陷 3)')
 	assert.ok(ids.includes('host-tree'), '正式门必须接宿主依赖树内容校验')
 	assert.ok(ids.includes('host-modules-check'), '正式门必须接宿主依赖体检')
+	assert.ok(ids.includes('acceptance-unit'), '正式门必须接验收器单元(否则删 scripts/acceptance/test 门照样绿)')
+	assert.ok(ids.includes('integration-unit'), '正式门必须接集成矩阵负控(否则删 integration/test 门照样绿)')
+	assert.ok(ids.includes('linux-layer-unit'), '正式门必须接 Linux 入口自检(macOS 上证明 blocked 不上卷)')
 	const selftestGate = plan.codeGates.find((g) => g.id === 'selftest')
 	assert.equal(selftestGate.required, true, '自检必须是必需闸,不是可选')
 	// 自检闸也必须有计数下限:否则"删掉几条负控"不会被抓到
 	assert.ok(selftestGate.kind !== 'structural', `自检闸不该是结构性失败(现在是 ${selftestGate.reason ?? ''})`)
 	assert.ok(Number.isInteger(selftestGate.minTests) && selftestGate.minTests >= 1, '自检闸必须有 minTests 下限')
 	assert.ok(Number.isInteger(selftestGate.minPass) && selftestGate.minPass >= 1, '自检闸必须有 minPass 下限')
+	for (const id of ['acceptance-unit', 'integration-unit', 'linux-layer-unit']) {
+		const g = plan.codeGates.find((x) => x.id === id)
+		assert.ok(g && g.required === true && g.kind !== 'structural',
+			`${id} 必须是带下限的必需闸,不能是结构性失败(现在 ${g?.reason ?? '缺失'})`)
+		assert.ok(Number.isInteger(g.minTests) && g.minTests >= 1, `${id} 必须有 minTests`)
+	}
+})
+
+test('NC16d: 合成运行不得把验收器/矩阵单元闸放进计划(否则自检每层多跑几十秒,且可能假红)', () => {
+	const res = spawnSync(process.execPath, [
+		RUNNER, '--print-plan', '--no-advisory',
+		'--required-plugins=plug-ok',
+		`--plugins-root=${makePluginRoot({ 'plug-ok': 'passing' })}`,
+	], { cwd: REPO_ROOT, encoding: 'utf8', timeout: 120000, env: runnerEnv() })
+	assert.equal(res.status, 78)
+	const printed = JSON.parse(res.stdout)
+	assert.equal(printed.syntheticSeams, true, '带 --required-plugins 必须是合成运行')
+	const ids = printed.plan.codeGates.map((g) => g.id)
+	for (const id of ['acceptance-unit', 'integration-unit', 'linux-layer-unit', 'host-modules-check', 'host-tree']) {
+		assert.ok(!ids.includes(id), `合成运行不该含 ${id},实际: ${ids.join(',')}`)
+	}
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -716,6 +740,60 @@ test('NC19e: --write-floors= 空路径必须和裸标志一样早退 78', () => 
 	assert.equal(r.status, 78, `空路径必须退 78,实际 ${r.status}`)
 	assert.match(r.stderr, /需要显式路径/)
 	assert.ok(!/PASS|FAIL|代码闸/.test(r.stdout), '空路径应在执行任何闸之前拒绝')
+})
+
+// 控制 21:measure-dependency-surface.mjs 的未知参数不许被静默吞掉。
+//
+// 这条不是假想。2026-09-09 本轮主控想看一眼当前依赖面指纹,敲了 `--print`
+// —— 该脚本从来没有这个标志。旧代码的 opt() 只认 `--name=value`,未知参数一概落空,
+// 于是它按**默认输出路径**跑完了全量测量,而默认路径就是 tracked 的
+// scripts/acceptance/dependency-surface.json:六分半钟后覆写了版本控制里的基线(471 增/338 删)。
+// 当时还有四个实施代理正在改源码,那次测量观测的是移动靶,产出数据本身也不可信。
+//
+// 危害与裸 `--write-floors`(NC19c)同类:对无法识别的输入保持沉默,然后做一件
+// 与操作者意图不同的破坏性事。区别在于这次动的是 tracked 文件,后果更硬。
+const SURFACE_SCRIPT = join(HERE, 'measure-dependency-surface.mjs')
+const SURFACE_BASELINE = join(HERE, 'dependency-surface.json')
+
+test('NC21: measure-dependency-surface 的未知参数必须早退 78 且不碰 tracked 基线', () => {
+	const before = existsSync(SURFACE_BASELINE) ? readFileSync(SURFACE_BASELINE) : null
+	assert.ok(before, '前提:tracked 基线应存在,否则这条负控没有保护对象')
+	for (const bad of ['--print', '--outt=/tmp/x', '--noshield', 'bogus', '-o']) {
+		const r = spawnSync(process.execPath, [SURFACE_SCRIPT, bad], {
+			cwd: REPO_ROOT, encoding: 'utf8', env: runnerEnv(), timeout: 60_000,
+		})
+		assert.equal(r.status, 78, `未知参数 ${bad} 必须退 78,实际 ${r.status}`)
+		assert.match(r.stderr, /无法识别的参数/, `${bad} 必须点名说不认识`)
+		// 必须在测量**之前**退:测量要几分钟,放在后面等于先把破坏做完再报错。
+		assert.ok(!/dependency surface:/.test(r.stdout),
+			`${bad} 应在任何测量之前退出,实际 stdout 已有测量输出`)
+	}
+	assert.deepEqual(readFileSync(SURFACE_BASELINE), before, 'tracked 基线必须一个字节都没变')
+})
+
+test('NC21b: 裸 --out(无 =路径)必须退 78 —— 否则会静默回落到覆写 tracked 基线', () => {
+	// 这个形态最阴:操作者写 `--out /tmp/x` 以为把输出重定向走了,
+	// 旧代码里 `--out` 落空、`/tmp/x` 也落空,于是照默认路径覆写了仓库里的基线。
+	const before = readFileSync(SURFACE_BASELINE)
+	const r = spawnSync(process.execPath, [SURFACE_SCRIPT, '--out', '/tmp/agos-selftest-should-not-exist.json'], {
+		cwd: REPO_ROOT, encoding: 'utf8', env: runnerEnv(), timeout: 60_000,
+	})
+	assert.equal(r.status, 78, `裸 --out 必须退 78,实际 ${r.status}`)
+	assert.deepEqual(readFileSync(SURFACE_BASELINE), before, 'tracked 基线必须一个字节都没变')
+})
+
+test('NC21c: 否证 —— 合法参数绝不能被这道检查误伤', () => {
+	// 没有这一条,把检查写成"任何参数都退 78"也能让 NC21 全绿。
+	const work = mkdtempSync(join(tmpdir(), 'agos-selftest-surface-'))
+	const out = join(work, 'surface.json')
+	const before = readFileSync(SURFACE_BASELINE)
+	const r = spawnSync(process.execPath, [
+		SURFACE_SCRIPT, '--plugin=no-such-plugin', `--out=${out}`, `--logdir=${join(work, 'logs')}`, '--no-shield',
+	], { cwd: REPO_ROOT, encoding: 'utf8', env: runnerEnv(), timeout: 120_000 })
+	assert.notEqual(r.status, 78, `合法参数被误判成未知:${r.stderr.slice(0, 300)}`)
+	assert.equal(r.status, 0, `合法参数应正常完成,实际 ${r.status}`)
+	assert.equal(existsSync(out), true, '--out 指定的路径必须真的收到产物')
+	assert.deepEqual(readFileSync(SURFACE_BASELINE), before, '给了 --out 就绝不该动 tracked 基线')
 })
 
 test('NC19d: 自定义 --plan 也必须标成不权威且不能写正式基线', () => {

@@ -501,9 +501,30 @@ test('a sandboxed timeout reaps the whole process group and leaves no orphan', a
     return
   }
 
-  // `sleep` is a grandchild: it outlives the shell unless the group itself is signalled.
-  // It is also short-lived, so a regression here cannot strand a process for minutes.
-  const command = 'sleep 45 & echo $! > "$AGOS_VERIFY_SCRATCH/grandchild.pid"; wait'
+  // The grandchild is observed by its **work**, not by its pid.
+  //
+  // The pid is not usable here. `$!` is resolved inside the sandbox, and the Linux
+  // backend runs bubblewrap with `--unshare-all`, which includes a PID namespace ——
+  // so `$!` is a namespace-local number. Reading it on the host compares two different
+  // numbering spaces: a low namespace-local pid (2, 3, …) usually names an unrelated
+  // live root-owned host process, so `process.kill(pid, 0)` throws EPERM and
+  // `processAlive` reports true → the reaping assertion fails even on a correct reap.
+  // If that pid happens to be free instead, the assertion passes without observing
+  // anything. Either way it does not measure what it claims. Direction of failure is
+  // unpredictable; wrongness is not.
+  //
+  // Not reproduced locally: this host is macOS, whose Seatbelt backend has no PID
+  // namespace, so `$!` really was a host pid and the old assertion was meaningful here.
+  // The defect is latent and would first appear on the Linux backend —— which this
+  // round could not run (see COVERAGE.md). Reported by implementer B; the pid-identity
+  // mechanism is certain, so it is fixed rather than left as a note.
+  //
+  // A heartbeat needs no pid translation and behaves identically on both backends:
+  // the grandchild appends a line every second, and the host watches the file grow.
+  // "Stopped growing" is only evidence if it was seen growing first —— otherwise a
+  // grandchild that never started would satisfy it. That positive control is asserted
+  // below before the reap is checked.
+  const command = 'while : ; do echo tick >> "$AGOS_VERIFY_SCRATCH/heartbeat"; sleep 1; done & wait'
   const running = execCommand(command, {
     cwd: evaluator,
     env: sandbox.env,
@@ -516,14 +537,37 @@ test('a sandboxed timeout reaps the whole process group and leaves no orphan', a
   const result = await Promise.race([running, watchdog])
   assert.notEqual(result, 'watchdog', 'timeout did not reap the child: execCommand never settled')
   assert.notEqual(result.exitCode, 0, 'a timed-out command must never look successful')
+  assert.equal(result.timedOut, true, 'the result must identify the real timeout event')
   assert.ok(result.pid > 0, 'the spawned pid must be reported')
 
-  const grandchild = Number((await readFile(join(sandbox.scratch, 'grandchild.pid'), 'utf8')).trim())
-  assert.ok(Number.isInteger(grandchild) && grandchild > 0, 'the grandchild must really have started')
-  assert.notEqual(grandchild, result.pid, 'the grandchild is a separate process')
+  // Positive control: the grandchild really ran. Without this, every assertion below
+  // is satisfied by a grandchild that never started —— the vacuous-assertion trap.
+  const heartbeat = join(sandbox.scratch, 'heartbeat')
+  const ticks = async () => {
+    try {
+      return (await readFile(heartbeat, 'utf8')).split('\n').filter(Boolean).length
+    } catch {
+      return 0
+    }
+  }
+  const observedAlive = await ticks()
+  assert.ok(observedAlive > 0, 'positive control: the grandchild must have been observed doing work')
 
-  await assertReaped(grandchild, 'orphaned grandchild')
-  // The wrapper is spawned detached, so its pid is also the process-group id.
+  // The grandchild was still ticking when the group was signalled, so a survivor would
+  // keep appending. Sample twice a second apart: it appends once a second, so a live
+  // one is certain to add at least one line across a 1.2s window.
+  await new Promise((resolve) => setTimeout(resolve, 1200))
+  const afterKill = await ticks()
+  await new Promise((resolve) => setTimeout(resolve, 1200))
+  assert.equal(
+    await ticks(),
+    afterKill,
+    `orphaned grandchild survived the timeout kill: heartbeat still growing (${observedAlive} → ${afterKill} → more)`,
+  )
+
+  // The wrapper's pid comes from the host spawn, not from inside the sandbox, so it is
+  // a host pid in both backends and stays comparable. It is spawned detached, so its
+  // pid is also the process-group id.
   await assertReaped(-result.pid, 'sandbox process group')
 })
 

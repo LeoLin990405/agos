@@ -16,9 +16,9 @@
  * host-read-scope reason, and no exported builder may produce an unshare launcher.
  */
 import assert from 'node:assert/strict'
-import { mkdtemp, realpath, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import test from 'node:test'
 
 import * as sandboxModule from '../lib/autoresearch-sandbox.mjs'
@@ -32,6 +32,8 @@ import {
   linuxVerificationSandbox,
   planLinuxIsolation,
   probeLinuxIsolation,
+  probeLinuxRuntimeDetails,
+  runLinuxSmoke,
   systemProbe,
 } from '../lib/autoresearch-sandbox.mjs'
 import { verificationSandbox } from '../lib/autoresearch-workspace.mjs'
@@ -233,6 +235,25 @@ test('the smoke test is mandatory and each failure mode is reported distinctly',
   assert.equal(netLeak.ok, false)
   assert.match(netLeak.reason, /loopback listener was reachable/)
 
+  const controlFailed = planLinuxIsolation(capableReport({
+    smoke: { backend: 'linux-bubblewrap', exitCode: SMOKE_EXIT.boundBindUnreadable },
+  }))
+  assert.equal(controlFailed.ok, false)
+  assert.match(controlFailed.reason, /in-scope positive control failed/)
+  assert.match(controlFailed.reason, /would only have passed vacuously/)
+
+  const roBindWritable = planLinuxIsolation(capableReport({
+    smoke: { backend: 'linux-bubblewrap', exitCode: SMOKE_EXIT.boundBindWritable },
+  }))
+  assert.equal(roBindWritable.ok, false)
+  assert.match(roBindWritable.reason, /read-only bind accepted a write inside the sandbox/)
+
+  const mutated = planLinuxIsolation(capableReport({
+    smoke: { backend: 'linux-bubblewrap', exitCode: SMOKE_EXIT.boundBindMutated },
+  }))
+  assert.equal(mutated.ok, false)
+  assert.match(mutated.reason, /changed on the host even though the sandbox reported success/)
+
   const crashed = planLinuxIsolation(capableReport({
     smoke: { backend: 'linux-bubblewrap', exitCode: 1, stderr: 'bwrap: No permissions to creating new namespace' },
   }))
@@ -422,10 +443,18 @@ test('DECISION LOGIC: a fully capable fake linux host selects bubblewrap and smo
   const byName = Object.fromEntries(iso.checks.map((c) => [c.name, c.status]))
   assert.equal(byName['scratch-writable'], 'verified')
   assert.equal(byName['bound-roots-read-only'], 'verified')
+  assert.equal(byName['bound-bind-readable'], 'verified')
+  assert.equal(byName['bound-bind-read-only'], 'verified')
   assert.equal(byName['outside-rootfs-unreadable'], 'verified')
   assert.equal(byName['network-egress-denied'], 'verified')
   assert.equal(byName['process-group-cleanup'], 'unproven')
   assert.equal(byName['seccomp-filter'], 'unavailable')
+
+  // The outside-read claim must carry its own caveat: on its own it is vacuous, and
+  // the manifest is where a reader finds that out.
+  const outside = iso.checks.find((c) => c.name === 'outside-rootfs-unreadable')
+  assert.match(outside.evidence, /Discriminating ONLY as a pair with bound-bind-readable/)
+  assert.match(iso.checks.find((c) => c.name === 'bound-bind-readable').evidence, /POSITIVE CONTROL/)
 })
 
 test('DECISION LOGIC: a fake linux host whose smoke test leaks /usr is refused', async (t) => {
@@ -494,6 +523,206 @@ test('DECISION LOGIC: userns blocked by AppArmor is refused even though every bi
   const sandbox = await verificationSandbox(root, { platform: 'linux', probe })
   assert.equal(sandbox.ok, false)
   assert.match(sandbox.reason, /apparmor_restrict_unprivileged_userns=1/)
+})
+
+// ── the in-scope positive control that makes the outside probe discriminating ─
+//
+// "The sandbox could not read file X" is trivially true whenever X was never bound
+// into the sandbox — and equally true on a host with NO sandbox at all that simply
+// never had X in scope. The tests below pin the construction that fixes it: two
+// sentinels are created as siblings under ONE mkdtemp root, only `bound/` enters the
+// bind list, and the in-scope twin must be readable with its expected bytes. Bind
+// membership is then the only difference between the two files, so an unreadable
+// out-of-scope twin next to a readable in-scope twin is a real whitelist.
+
+/** Records env as well as argv, so the sentinel paths handed to the sandbox are visible. */
+function recordingProbe({ smokeExit = 0, onRun = null } = {}) {
+  const calls = []
+  const base = fakeProbe()
+  return {
+    ...base,
+    calls,
+    async run(file, args, options = {}) {
+      calls.push({ file, args, env: options.env || {} })
+      if (onRun) await onRun(options.env || {})
+      return { exitCode: smokeExit, stdout: '', stderr: '' }
+    },
+  }
+}
+
+test('the smoke probes the in-scope sentinel BEFORE the out-of-scope one', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agos-sbx-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const probe = recordingProbe()
+  const sandbox = await verificationSandbox(root, { platform: 'linux', probe })
+  assert.equal(sandbox.ok, true, sandbox.reason)
+
+  // The bash script is the last argv element handed to the launcher.
+  const script = probe.calls.at(-1).args.at(-1)
+  assert.match(script, /AGOS_VERIFY_BOUND_SENTINEL/)
+  assert.match(script, /AGOS_VERIFY_OUTSIDE_SENTINEL/)
+  assert.ok(script.includes(`exit ${SMOKE_EXIT.boundBindUnreadable}`), 'the positive control must exist in the script')
+  assert.ok(script.includes(`exit ${SMOKE_EXIT.outsideRootReadable}`))
+  // Ordering is load-bearing: if the binds never applied, the run must fail naming
+  // the positive control, not sail past it and "pass" the vacuous outside probe.
+  assert.ok(
+    script.indexOf(`exit ${SMOKE_EXIT.boundBindUnreadable}`) < script.indexOf(`exit ${SMOKE_EXIT.outsideRootReadable}`),
+    'the in-scope positive control must be probed before the out-of-scope read',
+  )
+  // The content comparison uses a bash builtin, so a missing coreutils binary cannot
+  // masquerade as a satisfied control.
+  assert.match(script, /read -r agos_bound < "\$AGOS_VERIFY_BOUND_SENTINEL"/)
+})
+
+test('the two sentinels are siblings and ONLY the in-scope one is bound', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agos-sbx-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const probe = recordingProbe()
+  const sandbox = await verificationSandbox(root, { platform: 'linux', probe })
+  assert.equal(sandbox.ok, true, sandbox.reason)
+
+  const { args, env } = probe.calls.at(-1)
+  const boundSentinel = env.AGOS_VERIFY_BOUND_SENTINEL
+  const outsideSentinel = env.AGOS_VERIFY_OUTSIDE_SENTINEL
+  assert.ok(boundSentinel && outsideSentinel)
+  // Siblings under one mkdtemp root: same filesystem, same shape, one difference.
+  assert.equal(dirname(dirname(boundSentinel)), dirname(dirname(outsideSentinel)),
+    'the sentinels must share a parent so that bind membership is the only variable')
+  assert.equal(basename(dirname(boundSentinel)), 'bound')
+  assert.equal(basename(dirname(outsideSentinel)), 'outside')
+
+  const bound = []
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--ro-bind' || args[i] === '--ro-bind-try' || args[i] === '--bind') bound.push(args[i + 1])
+  }
+  assert.ok(bound.includes(dirname(boundSentinel)), 'the in-scope sentinel directory must be bound read-only')
+  assert.ok(!bound.includes(dirname(outsideSentinel)), 'the out-of-scope sentinel directory must never be bound')
+  assert.ok(!bound.some((p) => dirname(outsideSentinel).startsWith(`${p}/`) || p === dirname(dirname(outsideSentinel))),
+    'no ancestor of the out-of-scope sentinel may be bound either, or it would be reachable')
+  // Read-only, not read-write: --bind is reserved for scratch.
+  const rw = args.reduce((acc, arg, i) => (arg === '--bind' ? [...acc, args[i + 1]] : acc), [])
+  assert.deepEqual(rw, [sandbox.scratch], 'scratch must remain the only writable bind, even in the smoke launcher')
+})
+
+test('a write that reaches the host sentinel is caught even when the sandbox exits 0', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agos-sbx-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  // Simulates the most dangerous shape: the in-sandbox script reports success while
+  // a write actually landed on the host. The exit code alone would say "fine".
+  const probe = recordingProbe({
+    smokeExit: 0,
+    onRun: async (env) => { await writeFile(env.AGOS_VERIFY_BOUND_SENTINEL, 'tampered\n') },
+  })
+  const sandbox = await verificationSandbox(root, { platform: 'linux', probe })
+  assert.equal(sandbox.ok, false, 'a boundary that let a write through must never be handed back')
+  assert.match(sandbox.reason, UNAVAILABLE)
+  assert.match(sandbox.reason, /changed on the host even though the sandbox reported success/)
+})
+
+test('runLinuxSmoke reports the host-side mutation flag alongside the exit code', async () => {
+  const seen = []
+  const probe = {
+    ...fakeProbe(),
+    async run(file, args, options = {}) {
+      seen.push(options.env.AGOS_VERIFY_BOUND_SENTINEL)
+      return { exitCode: 0, stdout: '', stderr: '' }
+    },
+  }
+  const clean = await runLinuxSmoke({
+    probe,
+    launcher: { file: '/usr/bin/bwrap', before: [] },
+    env: {},
+    backend: 'linux-bubblewrap',
+  })
+  assert.equal(clean.exitCode, 0)
+  assert.equal(clean.boundSentinelMutated, false)
+  assert.equal(clean.backend, 'linux-bubblewrap')
+  assert.equal(seen.length, 1)
+  // The materials directory is cleaned up, so the sentinel path must not survive.
+  assert.equal(await readFile(seen[0], 'utf8').then(() => 'still-there', () => 'gone'), 'gone')
+})
+
+test('the smoke-channel keys stay out of the candidate launcher, including the new one', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agos-sbx-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const probe = recordingProbe()
+  const sandbox = await verificationSandbox(root, { platform: 'linux', probe })
+  assert.equal(sandbox.ok, true, sandbox.reason)
+  const smokeArgv = probe.calls.at(-1).args
+  for (const key of ['AGOS_VERIFY_BOUND_SENTINEL', 'AGOS_VERIFY_OUTSIDE_SENTINEL', 'AGOS_VERIFY_NET_PROBE_PORT']) {
+    assert.ok(smokeArgv.includes(key), `the smoke launcher must whitelist ${key}`)
+    assert.ok(!sandbox.launcher.before.includes(key), `the candidate launcher must never carry ${key}`)
+    assert.equal(sandbox.env[key], undefined, `${key} must not appear in the candidate env`)
+  }
+  // The in-scope sentinel directory is a verification material, not a candidate read
+  // scope: a candidate run must not see it either.
+  const boundDir = dirname(probe.calls.at(-1).env.AGOS_VERIFY_BOUND_SENTINEL)
+  assert.ok(!sandbox.launcher.before.includes(boundDir), 'the smoke bind must not leak into the candidate launcher')
+  assert.ok(!sandbox.isolation.readScope.paths.includes(boundDir))
+})
+
+// ── observational runtime details (no decision path consumes them) ────────────
+
+test('probeLinuxRuntimeDetails reports kernel, bwrap version and mount primitives', async () => {
+  const probe = {
+    ...fakeProbe({
+      files: {
+        '/proc/self/status': 'Seccomp:\t2\n',
+        '/proc/self/ns/user': '', '/proc/self/ns/mnt': '', '/proc/self/ns/net': '', '/proc/self/ns/pid': '',
+        '/proc/self/uid_map': '', '/proc/self/mountinfo': '',
+        '/proc/version': 'Linux version 6.1.0-31-amd64 (debian-kernel@lists.debian.org)\n',
+        '/proc/filesystems': 'nodev\tproc\nnodev\ttmpfs\n\text4\n',
+        '/proc/sys/user/max_user_namespaces': '15000',
+        '/usr': '', '/bin': '',
+      },
+    }),
+    async run() { return { exitCode: 0, stdout: 'bubblewrap 0.8.0\n', stderr: '' } },
+  }
+  const report = await probeLinuxIsolation(probe, { platform: 'linux' })
+  const details = await probeLinuxRuntimeDetails(probe, report, { osRelease: '6.1.0-31-amd64' })
+  assert.equal(details.kernelRelease, '6.1.0-31-amd64')
+  assert.deepEqual(details.kernel, { major: 6, minor: 1 })
+  assert.match(details.kernelVersion, /^Linux version 6\.1\.0-31-amd64/)
+  assert.equal(details.bwrapVersion, '0.8.0')
+  assert.equal(details.bwrapPath, '/usr/bin/bwrap')
+  assert.equal(details.userns.nsUserPresent, true)
+  assert.equal(details.userns.uidMapReadable, true)
+  assert.equal(details.userns.maxUserNamespaces, 15000)
+  assert.deepEqual(details.mount.filesystems, { tmpfs: true, proc: true, devtmpfs: false })
+  assert.equal(details.mount.mntNamespace, true)
+
+  // Purely observational: the planner's verdict must not move when these change.
+  const before = planLinuxIsolation(capableReport())
+  const details2 = await probeLinuxRuntimeDetails(probe, report, { osRelease: '2.6.32' })
+  assert.equal(details2.kernel.major, 2)
+  assert.deepEqual(planLinuxIsolation(capableReport()), before, 'runtime details must not feed the decision')
+})
+
+test('probeLinuxRuntimeDetails never spawns anything when bwrap is absent', async () => {
+  let spawned = 0
+  const probe = { ...fakeProbe({ binaries: {} }), async run() { spawned += 1; return { exitCode: 0, stdout: '', stderr: '' } } }
+  const report = await probeLinuxIsolation(probe, { platform: 'linux' })
+  const details = await probeLinuxRuntimeDetails(probe, report, { osRelease: '6.1.0' })
+  assert.equal(spawned, 0, 'nothing may be executed to report an absent binary')
+  assert.equal(details.bwrapPath, null)
+  assert.equal(details.bwrapVersion, null)
+})
+
+test('probeLinuxRuntimeDetails degrades cleanly when bwrap --version fails or is odd', async () => {
+  const failing = { ...fakeProbe(), async run() { return { exitCode: 1, stdout: '', stderr: 'boom' } } }
+  const report = await probeLinuxIsolation(failing, { platform: 'linux' })
+  assert.equal((await probeLinuxRuntimeDetails(failing, report, { osRelease: '6.1.0' })).bwrapVersion, null)
+
+  const odd = { ...fakeProbe(), async run() { return { exitCode: 0, stdout: 'bubblewrap from a vendor fork\n', stderr: '' } } }
+  assert.equal((await probeLinuxRuntimeDetails(odd, report, { osRelease: '6.1.0' })).bwrapVersion,
+    'bubblewrap from a vendor fork', 'unparsable version output is reported verbatim, not dropped')
+
+  // An unreadable /proc/filesystems is "unknown", never "absent": reporting false
+  // would name a missing capability that was never actually observed missing.
+  const noFs = { ...fakeProbe({ files: { '/usr': '' } }), async run() { return { exitCode: 0, stdout: '', stderr: '' } } }
+  const noFsReport = await probeLinuxIsolation(noFs, { platform: 'linux' })
+  const noFsDetails = await probeLinuxRuntimeDetails(noFs, noFsReport, { osRelease: '6.1.0' })
+  assert.deepEqual(noFsDetails.mount.filesystems, { tmpfs: null, proc: null, devtmpfs: null })
 })
 
 // ── this host, stated honestly ───────────────────────────────────────────────

@@ -24,9 +24,30 @@
  */
 import { createServer } from 'node:net';
 import { rm } from 'node:fs/promises';
+import { accessSync, constants, existsSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+/**
+ * Thrown when the suite cannot run because the machine lacks something the
+ * harness refuses to install or download.
+ *
+ * Lives here rather than in `browser-source.mjs` because it is no longer only
+ * about browsers: locating the dsh CLI has the same three outcomes (explicit
+ * override / found on this machine / cannot run here) and the same requirement
+ * that "cannot run here" is reported as `blocked`, never as a product failure.
+ * `browser-source.mjs` re-exports it, so every existing importer is unaffected.
+ */
+export class IntegrationBlocked extends Error {
+  constructor(message, details = {}) {
+    super(message)
+    this.name = 'IntegrationBlocked'
+    /** Machine-readable so a runner can report `blocked` rather than `fail`. */
+    this.blocked = true
+    Object.assign(this, details)
+  }
+}
 
 export const HARNESS_ID = 'agos-host-integration'
 export const FRONTEND_ROOT = fileURLToPath(new URL('../..', import.meta.url))
@@ -49,8 +70,104 @@ export const LIVE_PROFILE_ROOT = path.join(HOME, '.dsh')
  * dsh CLI resolved from the pinned global install (UPSTREAM.pin: 0.1.2-rc.1).
  * This is the CLI binary, not the profile tree: `~/.npm-global/bin` holds the
  * installed executable, `~/.dsh` holds the state the harness stays out of.
+ *
+ * Kept as the FIRST candidate {@link resolveDshBin} tries, so this machine
+ * resolves exactly as before. It is no longer used directly as the spawn
+ * target: a machine whose npm prefix is anywhere else (`/usr/local` is npm's
+ * default, Homebrew uses `/opt/homebrew`, nvm puts it under the node version,
+ * and `npm config set prefix` moves it anywhere) has no such file, and spawning
+ * a path that does not exist produced an ENOENT from deep inside bring-up
+ * instead of a `blocked` verdict naming the missing binary.
  */
-export const DSH_BIN = process.env.AGOS_DSH_BIN ?? path.join(HOME, '.npm-global/bin/dsh')
+export const DSH_BIN_DEFAULT = path.join(HOME, '.npm-global/bin/dsh')
+
+/**
+ * The override-or-default path, kept for compatibility with anything that
+ * imported it. Prefer {@link resolveDshBin}, which also verifies the file is
+ * there and falls back to PATH.
+ */
+export const DSH_BIN = process.env.AGOS_DSH_BIN ?? DSH_BIN_DEFAULT
+
+/**
+ * Is this path a file we are allowed to execute?
+ *
+ * Symlinks are followed on purpose: the npm-global `dsh` is a symlink into
+ * `lib/node_modules`, and the target is what has to be executable.
+ * @param candidate - absolute path to test.
+ */
+export function isExecutableFile(candidate) {
+  try {
+    if (!statSync(candidate).isFile()) return false
+    accessSync(candidate, constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Resolve one executable the way a shell would: an explicit path is taken as
+ * given, a bare name is searched along PATH.
+ *
+ * Needed because both of this harness's external binaries used to be named by
+ * absolute path only. An absolute path is a statement about one machine's
+ * layout; a name plus PATH is the same statement about any machine, and it is
+ * what a CI image or a package manager actually gives you.
+ * @param name - an absolute/relative path, or a bare command name.
+ * @param env - environment to read PATH from.
+ * @returns the resolved absolute path, or undefined when nothing matched.
+ */
+export function locateExecutable(name, env = process.env) {
+  if (typeof name !== 'string' || name === '') return undefined
+  // Anything carrying a separator is a path, not a name to search for.
+  if (name.includes(path.sep) || name.startsWith('.')) {
+    const resolved = path.resolve(name)
+    return isExecutableFile(resolved) ? resolved : undefined
+  }
+  for (const dir of String(env.PATH ?? '').split(path.delimiter)) {
+    if (dir === '') continue
+    const candidate = path.join(dir, name)
+    if (isExecutableFile(candidate)) return candidate
+  }
+  return undefined
+}
+
+/**
+ * Decide which dsh CLI to boot the throwaway host with, or refuse to run.
+ *
+ * Order mirrors the browser and Playwright rules, so all three external
+ * dependencies behave the same way: explicit override → what is actually
+ * installed on this machine → a loud `blocked`. Nothing is ever installed.
+ * @param options.env - environment to read `AGOS_DSH_BIN` and PATH from.
+ * @param options.candidates - override the well-known paths (tests).
+ * @returns `{ path, source }`.
+ * @throws {IntegrationBlocked} when no dsh CLI exists here.
+ */
+export function resolveDshBin({ env = process.env, candidates } = {}) {
+  const explicit = env.AGOS_DSH_BIN
+  if (typeof explicit === 'string' && explicit !== '') {
+    const located = locateExecutable(explicit, env)
+    if (located === undefined) {
+      throw new IntegrationBlocked(
+        `host-integration blocked: AGOS_DSH_BIN points at ${explicit}, which is not an executable on this machine.`,
+        { reason: 'dsh-missing', requested: explicit },
+      )
+    }
+    return { path: located, source: 'explicit' }
+  }
+  const wellKnown = candidates ?? [DSH_BIN_DEFAULT]
+  for (const candidate of wellKnown) {
+    if (isExecutableFile(candidate)) return { path: candidate, source: 'installed' }
+  }
+  const onPath = locateExecutable('dsh', env)
+  if (onPath !== undefined) return { path: onPath, source: 'path' }
+  throw new IntegrationBlocked(
+    'host-integration blocked: no dsh CLI found and the harness never installs one. '
+    + 'Set AGOS_DSH_BIN to the pinned CLI, or put `dsh` on PATH.\n  tried:\n    '
+    + [...wellKnown, `PATH lookup for \`dsh\` (PATH=${env.PATH ?? '(unset)'})`].join('\n    '),
+    { reason: 'dsh-unavailable', tried: wellKnown },
+  )
+}
 
 /**
  * Environment variables that must never reach the host child. Credential names

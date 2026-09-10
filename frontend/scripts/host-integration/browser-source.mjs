@@ -23,18 +23,11 @@ import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { FRONTEND_ROOT } from './host-env.mjs';
+import { FRONTEND_ROOT, IntegrationBlocked, isExecutableFile, locateExecutable } from './host-env.mjs';
 
-/** Thrown when the suite cannot run because no browser automation is available. */
-export class IntegrationBlocked extends Error {
-  constructor(message, details = {}) {
-    super(message)
-    this.name = 'IntegrationBlocked'
-    /** Machine-readable so a runner can report `blocked` rather than `fail`. */
-    this.blocked = true
-    Object.assign(this, details)
-  }
-}
+// `IntegrationBlocked` moved to host-env.mjs when locating the dsh CLI grew the
+// same three outcomes. Re-exported so every existing importer is unaffected.
+export { IntegrationBlocked };
 
 /** The live profile tree the harness must not quietly reach into. */
 const LIVE_PROFILE_ROOT = path.join(homedir(), '.dsh')
@@ -124,37 +117,92 @@ export function resolvePlaywrightModule({ explicit, env = process.env, roots, li
 }
 
 /**
+ * Well-known absolute install paths for a Chrome/Chromium, per platform.
+ *
+ * Was a single four-entry list applied to every platform: the two macOS
+ * bundles plus `/usr/bin/google-chrome` and `/usr/bin/chromium`. That list
+ * describes a Debian box with the distro `chromium` package and nothing else —
+ * so on a Linux machine whose browser came from Google's own .deb
+ * (`/opt/google/chrome/chrome`, exposed as `google-chrome-stable`), from a snap
+ * (`/snap/bin/chromium`), or from a distro that kept the `-browser` suffix, a
+ * perfectly usable browser was present and the harness reported `blocked`.
+ *
+ * The list is deliberately still absolute paths only; {@link
+ * resolveBrowserExecutable} does the PATH search separately, so the predictable
+ * locations keep priority over whatever happens to be on PATH.
+ * @param platform - `process.platform` value to build the list for.
+ */
+export function browserCandidatePaths(platform = process.platform) {
+  if (platform === 'darwin') {
+    return [
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    ]
+  }
+  if (platform === 'linux') {
+    return [
+      '/usr/bin/google-chrome',
+      '/usr/bin/google-chrome-stable',
+      '/opt/google/chrome/chrome',
+      '/usr/bin/chromium',
+      '/usr/bin/chromium-browser',
+      '/snap/bin/chromium',
+    ]
+  }
+  return []
+}
+
+/**
+ * Command names to look for on PATH when no well-known path matched.
+ * @param platform - `process.platform` value to build the list for.
+ */
+export function browserCandidateNames(platform = process.platform) {
+  if (platform === 'darwin') return ['google-chrome', 'chromium']
+  return ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser']
+}
+
+/**
  * Decide which browser binary to drive. Nothing is ever downloaded.
- * @param options.env - environment to read `AGOS_BROWSER_EXECUTABLE` from.
+ *
+ * Order: explicit override → well-known absolute paths for this platform →
+ * PATH search → `blocked`. The PATH step is what makes a non-default install
+ * (a CI image, a nix profile, a per-user unpack) usable without an override,
+ * and it is also what makes an explicit override expressible as a command
+ * NAME: `AGOS_BROWSER_EXECUTABLE=google-chrome` used to be rejected as a
+ * missing file, because the value was only ever passed to `existsSync`.
+ * @param options.env - environment to read `AGOS_BROWSER_EXECUTABLE`/PATH from.
+ * @param options.platform - `process.platform` value (tests).
+ * @param options.candidates - override the well-known paths (tests).
  * @returns `{ executablePath, source }`.
  * @throws {IntegrationBlocked} when no usable browser exists on the machine.
  */
-export function resolveBrowserExecutable({ env = process.env } = {}) {
+export function resolveBrowserExecutable({ env = process.env, platform = process.platform, candidates } = {}) {
   const explicit = env.AGOS_BROWSER_EXECUTABLE
   if (typeof explicit === 'string' && explicit !== '') {
-    if (!existsSync(explicit)) {
+    const located = locateExecutable(explicit, env)
+    if (located === undefined) {
       throw new IntegrationBlocked(
-        `host-integration blocked: AGOS_BROWSER_EXECUTABLE points at ${explicit}, which does not exist.`,
+        `host-integration blocked: AGOS_BROWSER_EXECUTABLE points at ${explicit}, which is neither an `
+        + 'existing path nor a command on PATH.',
         { reason: 'browser-missing', requested: explicit },
       )
     }
-    return { executablePath: explicit, source: 'explicit' }
+    return { executablePath: located, source: 'explicit' }
   }
-  const installed = [
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    '/Applications/Chromium.app/Contents/MacOS/Chromium',
-    '/usr/bin/google-chrome',
-    '/usr/bin/chromium',
-  ]
-  const found = installed.find((candidate) => existsSync(candidate))
-  if (found === undefined) {
-    throw new IntegrationBlocked(
-      'host-integration blocked: no installed Chrome/Chromium found and the harness never downloads one. '
-      + 'Set AGOS_BROWSER_EXECUTABLE.',
-      { reason: 'browser-unavailable', tried: installed },
-    )
+  const installed = candidates ?? browserCandidatePaths(platform)
+  const found = installed.find((candidate) => isExecutableFile(candidate))
+  if (found !== undefined) return { executablePath: found, source: 'installed' }
+
+  const names = browserCandidateNames(platform)
+  for (const name of names) {
+    const onPath = locateExecutable(name, env)
+    if (onPath !== undefined) return { executablePath: onPath, source: 'path' }
   }
-  return { executablePath: found, source: 'installed' }
+  throw new IntegrationBlocked(
+    'host-integration blocked: no installed Chrome/Chromium found and the harness never downloads one. '
+    + 'Set AGOS_BROWSER_EXECUTABLE.',
+    { reason: 'browser-unavailable', tried: [...installed, ...names.map((name) => `PATH: ${name}`)] },
+  )
 }
 
 /** Inline/document schemes that cannot perform a network fetch. */

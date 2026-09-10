@@ -118,6 +118,143 @@ export function parseResultsXml(xml) {
 	return rows
 }
 
+/**
+ * 差分语料 —— 内联版与真实 swarm 逐输入对比时喂的东西。
+ *
+ * 放在 lib 而不是 test 里,是因为它有**两个**消费者:单测
+ * (test/swarm-compat.test.mjs)与集成层入口(scripts/acceptance/integration/swarm/)。
+ * 各自抄一份的话,两边迟早覆盖不同的输入,而"集成层报差分通过"就不再等价于
+ * "单测报差分通过"—— 那种偏差从两边的绿色上都看不出来。
+ *
+ * 选输入的原则是**挑重写时最容易走样的地方**,不是凑数量:
+ *   转义顺序(& 必须最先)、未闭合/未知实体、控制字符与 NUL、多字节与孤立代理对、
+ *   `]]>` 与 CDATA/注释/声明这些"看起来像 XML 但不是 subagent 行"的东西、
+ *   属性缺失(undefined vs null 的分水岭)、数值属性喂非数、
+ *   超长输入(正则回溯行为)、大小写与换行分隔的属性。
+ */
+
+/** escapeXml / unescapeXml 的输入。含非字符串 —— 两个函数都 String() 了,类型转换本身也要一致。 */
+export const SCALAR_DIFF_CASES = Object.freeze([
+	'', 'plain', '&', '&&&', '<', '>', '"', "'", '<>', '"q"', "'a'",
+	'&amp;', '&amp;amp;', '&lt;already&gt;', 'a&b<c>d"e\'f',
+	// 未知/残缺实体:unescapeXml 只认五个,其余必须原样留着
+	'&#38;', '&nbsp;', '&unknown;', '&am', '&;', '&lt', 'lt;',
+	// 控制字符与 NUL —— 转义表不含它们,必须原样穿过
+	'\u0000', '\u0001\u0002', '\u007f', '\t\n\r',
+	// 多字节、组合字符、孤立代理对(String() 与 replaceAll 在这里都可能走样)
+	'中文多字节', '\u{1F600}\u{1F4A9}', 'e\u0301', '\uD83D', '\uDE00',
+	// 看起来像 XML 的东西
+	']]>', '<![CDATA[x]]>', '<?xml version="1.0"?>', '<!-- c -->',
+	// 超长:& 的全量替换是 O(n),这里同时压回溯与性能
+	'x'.repeat(100_000), '&'.repeat(20_000),
+	// 非字符串:escapeXml 用 String(v)、unescapeXml 用 String(v ?? '') —— 两者在
+	// null/undefined 上**故意不同**,差分必须把这个差异一并钉住
+	0, 1, -0, NaN, Infinity, null, undefined, true, false,
+])
+
+/** textOf 的输入。它吃的是 LLM 结果结构,只有 type==='text' 的 block 参与拼接。 */
+export const TEXT_OF_DIFF_CASES = Object.freeze([
+	{ output: [] },
+	{ output: [{ type: 'text', text: ' hi ' }] },
+	{ output: [{ type: 'text', text: '' }] },
+	{ output: [{ type: 'text', text: 'a' }, { type: 'tool_use', id: 'x' }, { type: 'text', text: 'b' }] },
+	{ output: [{ type: 'tool_use', id: 'only-tool' }] },
+	{ output: [{ type: 'text', text: '中文 \u{1F600}' }, { type: 'text', text: '\u0000' }] },
+	// 缺字段 / 空洞元素 / 缺 output —— 原实现都没有防御性判空,内联版也不能"顺手加上"
+	{ output: [{ type: 'text' }] },
+	{ output: [{ type: 'text', text: null }] },
+	{ output: [null] },
+	{ output: [undefined] },
+	{},
+	{ output: null },
+])
+
+/** parseResultsXml 的输入。 */
+export const XML_DIFF_CASES = Object.freeze([
+	'',
+	'<subagent >',
+	'<subagent>no space</subagent>',                       // 正则要求 `<subagent ` 带空格 —— 这条**不该**匹配
+	'<subagent item="a" outcome="completed">ok</subagent>',
+	'<subagent item="a" outcome="failed">boom &amp; bust</subagent>',
+	'<subagent item="a" outcome="completed">unclosed',      // 未闭合标签
+	'<subagent item="a" outcome="completed">a]]>b</subagent>',
+	'<subagent item="&amp;amp;" outcome="completed">&amp;lt;</subagent>',  // 嵌套实体
+	'<subagent item="中文" outcome="completed">多字节 \u{1F600}</subagent>',
+	'<subagent item="a" outcome="completed">\u0000\u0001</subagent>',      // 控制字符
+	'<subagent item="a" outcome="weird">unknown outcome</subagent>',       // outcome 非法值 → 走 failed 分支
+	'<subagent item="&lt;x&gt;" model="m&amp;m" ms="12" tool_calls="3" tools="a,b" outcome="completed">r</subagent>',
+	'<subagent item="a" mode="resume" team="t" member="mm" agent_id="ag1" state="running" alive="1" stopped="0" outcome="completed">x</subagent>',
+	'<subagent item="a" depth="2" role="lead" forked="f1" images="4" at="99" outcome="completed">y</subagent>',
+	'<subagent item="one" outcome="completed">1</subagent><subagent item="two" outcome="failed">2</subagent>',
+	// 属性缺失:team/member 顶层带 ?? null、task 内不带,是生效语义
+	'<subagent outcome="completed">no attrs</subagent>',
+	// 数值属性喂非数 —— `Number(x) || 0` 的回落行为
+	'<subagent item="a" ms="abc" tool_calls="-3" depth="0" images="1e3" at="NaN" outcome="completed">n</subagent>',
+	'<subagent item="outer" outcome="completed"><subagent item="inner" outcome="failed">i</subagent></subagent>', // 嵌套(懒匹配先收在内层)
+	'<subagent item="a" outcome="completed">' + 'z'.repeat(50_000) + '</subagent>',
+	'<subagent ' + 'item="a" '.repeat(2000) + 'outcome="completed">many</subagent>',
+	'<SUBAGENT item="a" outcome="completed">case</SUBAGENT>',              // 大小写:正则不带 i,这条不该匹配
+	'<subagent\nitem="a"\noutcome="completed">newline attrs</subagent>',   // [^>]* 吃换行
+	'<subagent item="a" outcome="completed"></subagent>',
+	'<subagent item="" outcome="">empty attrs</subagent>',
+	'<![CDATA[<subagent item="a" outcome="completed">in cdata</subagent>]]>',
+])
+
+/** 稳定序列化 —— 差分要区分 undefined 与缺键,JSON.stringify 会把两者都吃掉。 */
+function stableRepr(value) {
+	if (value === undefined) return '«undefined»'
+	if (typeof value === 'number' && Object.is(value, -0)) return '«-0»'
+	if (typeof value === 'number' && Number.isNaN(value)) return '«NaN»'
+	return JSON.stringify(value, (_key, v) => {
+		if (v === undefined) return '«undefined»'
+		if (typeof v === 'number' && Number.isNaN(v)) return '«NaN»'
+		if (typeof v === 'number' && !Number.isFinite(v)) return `«${v > 0 ? 'Infinity' : '-Infinity'}»`
+		return v
+	})
+}
+
+function shortLabel(value) {
+	if (typeof value === 'string') return value.length > 48 ? `string(len=${value.length}) ${JSON.stringify(value.slice(0, 24))}…` : JSON.stringify(value)
+	return stableRepr(value).slice(0, 96)
+}
+
+/**
+ * 把内联实现与一份**参照实现**逐输入对比。
+ *
+ * 抛出的异常也参与比对:原实现在 `textOf(null)` 这类输入上就是会抛,内联版
+ * "顺手加个判空"同样是行为漂移 —— 所以异常类型与消息必须一致才算相同。
+ *
+ * @param {object} reference 参照模块(真实 swarm)。缺哪个函数就在 missing 里如实报,不静默跳过。
+ * @returns {{compared: number, mismatches: Array, missing: string[]}}
+ */
+export function diffAgainstReference(reference) {
+	const missing = []
+	for (const name of ['escapeXml', 'unescapeXml', 'textOf', 'parseResultsXml']) {
+		if (typeof reference?.[name] !== 'function') missing.push(name)
+	}
+	const mismatches = []
+	let compared = 0
+	const run = (fn, input) => {
+		try { return { ok: true, value: stableRepr(fn(input)) } } catch (error) {
+			return { ok: false, value: `${error?.constructor?.name ?? 'Error'}: ${error?.message ?? error}` }
+		}
+	}
+	const compare = (fnName, ours, theirs, input) => {
+		compared += 1
+		const a = run(ours, input)
+		const b = run(theirs, input)
+		if (a.ok === b.ok && a.value === b.value) return
+		mismatches.push({ fn: fnName, input: shortLabel(input), inline: `${a.ok ? '' : 'throws '}${a.value}`, reference: `${b.ok ? '' : 'throws '}${b.value}` })
+	}
+
+	if (!missing.includes('escapeXml')) for (const v of SCALAR_DIFF_CASES) compare('escapeXml', escapeXml, reference.escapeXml, v)
+	if (!missing.includes('unescapeXml')) for (const v of SCALAR_DIFF_CASES) compare('unescapeXml', unescapeXml, reference.unescapeXml, v)
+	if (!missing.includes('textOf')) for (const v of TEXT_OF_DIFF_CASES) compare('textOf', textOf, reference.textOf, v)
+	if (!missing.includes('parseResultsXml')) for (const v of XML_DIFF_CASES) compare('parseResultsXml', parseResultsXml, reference.parseResultsXml, v)
+
+	return { compared, mismatches, missing }
+}
+
 /** 解析结果缓存。一个进程里 swarm 在不在是稳定事实,不必每批次重新 import。 */
 let cachedPublisher
 
