@@ -644,12 +644,16 @@ export async function loadEarlierHistory(sessionId: string): Promise<void> {
 
 export function getEventClientId(): string | undefined { return eventClientId }
 
-async function sendContent(sessionId: string, content: PromptContentPart[]): Promise<{ ok: boolean, error?: string }> {
+async function sendContent(
+  sessionId: string,
+  content: PromptContentPart[],
+  mode: 'queue' | 'steer' = 'steer',
+): Promise<{ ok: boolean, error?: string }> {
   try {
     const res = await agos.call('session/prompt', {
       requestId: crypto.randomUUID() as never,
       sessionId: sessionId as never,
-      mode: 'steer',
+      mode,
       content,
       clientTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     })
@@ -665,8 +669,12 @@ export async function sendPrompt(sessionId: string, text: string): Promise<{ ok:
 }
 
 /** Send an already-assembled multimodal prompt; identical call semantics to sendPrompt. */
-export async function sendPromptParts(sessionId: string, parts: PromptContentPart[]): Promise<{ ok: boolean, error?: string }> {
-  return sendContent(sessionId, parts)
+export async function sendPromptParts(
+  sessionId: string,
+  parts: PromptContentPart[],
+  mode: 'queue' | 'steer' = 'steer',
+): Promise<{ ok: boolean, error?: string }> {
+  return sendContent(sessionId, parts, mode)
 }
 
 // ── telemetry (agos overview + swarm progress, plugin routes, same-origin) ────

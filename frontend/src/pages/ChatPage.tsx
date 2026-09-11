@@ -5,6 +5,7 @@ import { Chip } from '@/components/ui/Chip';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { CommandDeck, CONTINUE_PROMPT, canEmptySubmitContinue, type CommandDeckMessage } from '@/components/chat/CommandDeck';
+import { sessionPromptMode } from '@/components/chat/tool-cards';
 import { TurnEvidenceStrip } from '@/components/chat/TurnEvidenceStrip';
 import type { ImageAttachmentDraft } from '@/components/chat/ImageAttachments';
 import { VisionArbiterCard, type VisionArbiterCardState } from '@/components/chat/VisionArbiterCard';
@@ -560,7 +561,7 @@ export const ChatPage: React.FC<{
   const handleSend = async (message: CommandDeckMessage) => {
     if (!liveMode || !hasActiveLiveSession) return { ok: false, error: '事件信道未就绪，请先连接并选择会话' };
     if (convo.phase !== 'live') return { ok: false, error: '本会话事件订阅未就绪，请等待恢复后发送' };
-    const result = await sendPromptParts(activeSessionId, message.parts);
+    const result = await sendPromptParts(activeSessionId, message.parts, sessionPromptMode(activeRunning));
     if (mountedRef.current && result.ok && message.images.length > 0) {
       setOptimisticImageMessages((previous) => [...previous, {
         id: message.optimisticId ?? localId('image-message'),
@@ -1034,6 +1035,8 @@ export const ChatPage: React.FC<{
             onAnalyzeImage={handleAnalyzeImage}
             onFocusApproval={handleFocusApproval}
             canContinue={canContinue}
+            sessionRunning={activeRunning}
+            queuedTexts={convo.snapshot?.queuedUserTexts}
           />
           </>
         ) : (
