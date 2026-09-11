@@ -1,14 +1,15 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Chip } from '@/components/ui/Chip';
-import { createSession, ensureLiveConnection, fetchPresets, getHostHome, type PresetInfo } from '@/stores/live';
+import { createSession, ensureLiveConnection, fetchPresets, getHostHome, renameSession, type PresetInfo } from '@/stores/live';
+import { createNamedSession } from '@/components/chat/session-create';
 
 export interface NewSessionModalProps {
   isOpen: boolean;
   onClose: () => void;
-  /** 创建成功后回调(带真实 sessionId)。 */
-  onCreated?: (sessionId: string) => void;
+  /** 创建成功后回调(带真实 sessionId 与已写入的主题)。 */
+  onCreated?: (sessionId: string, title?: string) => void;
   /**
    * 打开时预选的 agentPreset id(空态胶囊排点击带入)。
    * 给定时优先于 agentPreset.list 的 isDefault;不给则维持原有默认行为。
@@ -29,6 +30,8 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
   const [presets, setPresets] = useState<{ id: string, name: string, desc: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  const titleRef = useRef<HTMLInputElement>(null);
+  const cwdRef = useRef<HTMLInputElement>(null);
 
   // DeepSeek 原生四模式(agentPreset.list 真值:标准/PTC/极简/创造)
   useEffect(() => {
@@ -56,21 +59,23 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
   const handleCreate = () => {
     if (busy) return;
     setBusy(true); setError(undefined);
-    const dir = cwd.trim();
-    if (dir === '') { setBusy(false); setError('工作目录未采集:宿主未返回 home,请手输绝对路径'); return; }
-    void createSession({ cwd: dir, agentPreset: preset }).then((sid) => {
+    const submittedTitle = titleRef.current?.value ?? title;
+    const submittedCwd = cwdRef.current?.value ?? cwd;
+    void createNamedSession(
+      { cwd: submittedCwd, title: submittedTitle, agentPreset: preset },
+      { createSession, renameSession },
+    ).then((result) => {
       setBusy(false);
-      if (sid !== undefined) { onCreated?.(sid); onClose(); }
-      else setError('创建失败:检查 cwd 是否存在');
+      if (result.ok) { onCreated?.(result.sessionId, result.title); onClose(); }
+      else setError(result.error);
     });
   };
-  void title; // 标题由宿主按首条消息自动生成
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={<span>⚡ 新建 Agent OS 会话</span>}
+      title="新建 Agent OS 会话"
       footer={
         <>
           <Button variant="ghost" size="sm" onClick={onClose}>
@@ -88,6 +93,8 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
         <input
           type="text"
           className="form-input"
+          ref={titleRef}
+          aria-label="会话主题"
           placeholder="例如: 重构分布式令牌轮转与流式事件管道..."
           value={title}
           onChange={(e) => setTitle(e.target.value)}
@@ -101,6 +108,8 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
             type="text"
             className="form-input"
             style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: '11.5px' }}
+            ref={cwdRef}
+            aria-label="工作目录"
             value={cwd}
             placeholder="宿主机上的绝对路径(打开时自动填宿主 home)"
             onChange={(e) => setCwd(e.target.value)}

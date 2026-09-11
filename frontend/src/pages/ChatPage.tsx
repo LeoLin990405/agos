@@ -32,6 +32,7 @@ import {
 import { SessionTrashPanel } from '@/components/chat/SessionTrashPanel';
 import { EmptyStateHero, EmptyStateBelow } from '@/components/chat/EmptyState';
 import { NEW_SESSION_EVENT } from '@/components/layout/AppRail';
+import { consumeNewSessionRequest, requestNewSession } from '@/components/layout/new-session-intent';
 import '@/design-system/chat-empty.css';
 import '@/design-system/session-menu.css';
 import {
@@ -165,7 +166,7 @@ export const ChatPage: React.FC<{
     };
   }, []);
 
-  // 侧栏「新会话」按钮与 ⌘K 走同一入口:CustomEvent → 打开建会话弹窗
+  // 侧栏 / 顶栏 / rail / ⌘K 走同一入口。rail 切页时事件可能先于监听到达,所以还要消费待办标记。
   useEffect(() => {
     const open = (): void => {
       if (canCreateSessionRef.current) setIsNewSessionOpen(true);
@@ -173,6 +174,10 @@ export const ChatPage: React.FC<{
     const onKey = (e: KeyboardEvent): void => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); open(); }
     };
+    if (consumeNewSessionRequest()) {
+      if (canCreateSessionRef.current) open();
+      else requestNewSession();
+    }
     window.addEventListener(NEW_SESSION_EVENT, open);
     window.addEventListener('keydown', onKey);
     return () => {
@@ -200,6 +205,9 @@ export const ChatPage: React.FC<{
   const disconnectedService = liveConnectionPhase === 'offline' ? 'remote.mux' : 'session.list';
   const liveMode = chatConnectionState === 'ready';
   canCreateSessionRef.current = chatConnectionState === 'empty' || liveMode;
+  useEffect(() => {
+    if (canCreateSessionRef.current && consumeNewSessionRequest()) setIsNewSessionOpen(true);
+  }, [chatConnectionState]);
   const hasActiveLiveSession = liveMode
     && activeSessionId !== ''
     && liveSessions.rows.some((row) => row.sessionId === activeSessionId && !deletedSessionIds.has(row.sessionId));
@@ -907,6 +915,15 @@ export const ChatPage: React.FC<{
                 {followUnavailable ? '会话订阅中断' : isStreamOnline ? '已连接' : chatConnectionState === 'connecting' ? '连接中' : '未连接'}
               </span>
               <TopbarAction
+                label="新会话"
+                icon={TOPBAR_ICONS.plus}
+                variant="primary"
+                collapsible={false}
+                disabled={chatConnectionState === 'connecting' || chatConnectionState === 'disconnected'}
+                title={chatConnectionState === 'disconnected' ? 'remote.mux 未连接，当前无法新建会话' : '新会话 (⌘K)'}
+                onClick={() => setIsNewSessionOpen(true)}
+              />
+              <TopbarAction
                 label="AgOS 的电脑"
                 icon={TOPBAR_ICONS.console}
                 onClick={() => setIsComputerOpen((v) => !v)}
@@ -1105,7 +1122,13 @@ export const ChatPage: React.FC<{
         isOpen={isNewSessionOpen}
         initialPresetId={pendingPresetId}
         onClose={() => { setIsNewSessionOpen(false); setPendingPresetId(undefined); }}
-        onCreated={(sid) => { setActiveSessionId(sid); setPendingPresetId(undefined); }}
+        onCreated={(sid, title) => {
+          setActiveSessionId(sid);
+          if (title !== undefined && title !== '') {
+            setTitleOverrides((current) => ({ ...current, [sid]: title }));
+          }
+          setPendingPresetId(undefined);
+        }}
       />
     </div>
   );

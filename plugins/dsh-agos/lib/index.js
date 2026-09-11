@@ -7,6 +7,7 @@
 //   GET  /api/agos/skills/evolve      —— 词面短名单 + 经验后验（不跑小模型）
 //   POST /api/agos/skills/evolve      —— record 胜负 / propose+可选小模型（失败回退）
 //   GET/POST /api/agos/session-memory/relevance —— 词面短名单 + 操作员有用/误召回（不跑模型）
+//   POST /api/agos/workspace-stat —— 建会话前核验 cwd 是否为存在的目录(不回 realpath)
 //   GET /api/agos/overview  —— 控制台仪表盘一次取数:会话/计划/技能/活跃派单 四组 KPI。
 //     全部**软依赖**:某个源不可用就缺那一组字段,绝不 500(仪表盘按有无渲染)。
 //     - sessions:优先 sessionPersistence 权威列表,仅在服务不可用时回落 projcache
@@ -36,6 +37,7 @@ import {
   writeSessionMemoryInjectConfig,
 } from './session-memory-inject.js'
 import { createYoloDecisionsRoute, defaultYoloAuditFile } from './yolo-decisions.mjs'
+import { createWorkspaceStatRoute } from './workspace-stat.mjs'
 import { createSessionTrashRoute, defaultDeleteLogFile, defaultDshRoot } from './session-trash.mjs'
 import { createSkillDraft, patchSkillDescription, readStudioSkill } from './skills-studio.js'
 import {
@@ -72,6 +74,7 @@ export { AGENT_HONESTY_PREAMBLE, composeSelectorSystemPrompt } from './agent-pro
 export { createSessionMemoryStore, extractSessionMemory, pinSessionMemoryItem } from './session-memory.mjs'
 export { bindSessionMemoryInject, describeSessionMemoryInject } from './session-memory-inject.js'
 export { createYoloDecisionsRoute, selectYoloDecisions, readYoloRows, defaultYoloAuditFile } from './yolo-decisions.mjs'
+export { createWorkspaceStatRoute, inspectWorkspacePath, assertUsableWorkspace } from './workspace-stat.mjs'
 export { createSessionTrashRoute, buildSessionTrashPayload, describeTrashEntry, splitTrashedTo, summarizeUnloggedRoots, readDeleteLogRows } from './session-trash.mjs'
 export {
   applyOptionalRerank,
@@ -1750,6 +1753,7 @@ export function apply(ctx, options = {}) {
       }],
       ...createAgosSessionRouteHandlers(sessionManager),
       // W11:权限裁决台账只读 GET(yolo-judge.jsonl 由 yolo-mode-aligned 写,这里不碰)。
+      createWorkspaceStatRoute({ sendJson, readJsonBody }),
       createYoloDecisionsRoute({ file: defaultYoloAuditFile(), validateSessionId, sendJson }),
       // W22(a):删除审计的可恢复清单只读 GET(delete.log 由本插件 appendDeleteAudit 写,这里只读、逐行 lstat)。
       createSessionTrashRoute({ file: defaultDeleteLogFile(), dshRoot: defaultDshRoot(), sendJson }),

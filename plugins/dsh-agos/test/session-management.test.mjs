@@ -208,7 +208,7 @@ test('apply scopes fixture state to an explicit home and disposes each route acr
 
   const dispose = apply(ctx, { home })
   assert.equal(typeof dispose, 'function')
-  assert.equal(registrations.length, 21)
+  assert.equal(registrations.length, 22)
   assert.equal(persistenceLists, 0)
   const routes = new Map(registrations.map(({ path, handler }) => [path, handler]))
   const evidenceUrl = '/api/agos/turn-evidence?sessionId=apply-fixture&turn=7&step=2'
@@ -244,17 +244,18 @@ test('apply scopes fixture state to an explicit home and disposes each route acr
     '/api/agos/session-meta/archive',
     '/api/agos/session-memory',
     '/api/agos/session/delete',
+    '/api/agos/workspace-stat',
     '/api/agos/yolo-decisions',
     '/api/agos/session-trash',
   ]
-  assert.equal(registrations.length, 21)
+  assert.equal(registrations.length, 22)
   assert.deepEqual(registrations.map((entry) => entry.path), routePaths)
   dispose()
   dispose()
   assert.equal(fiberDisposals, 1)
   assert.equal(readinessFiberDisposals, 1)
   assert.equal(agentFiberDisposals, 1)
-  assert.equal(routeDisposals, 21)
+  assert.equal(routeDisposals, 22)
 })
 
 test('delete normally moves the whole session directory and appends an audit row', async (t) => {
