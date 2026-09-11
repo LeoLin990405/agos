@@ -166,7 +166,7 @@ export const DispatchModal: React.FC<DispatchModalProps> = ({
     <Modal
       isOpen={open}
       onClose={close}
-      title={pending === undefined ? '派任务到 Homelab' : '确认模型调用'}
+      title={pending === undefined ? '派任务到机架' : '确认模型调用'}
       footer={footer}
       maxWidth="680px"
       initialFocusSelector={pending === undefined ? '[data-dispatch-tasks]' : '[data-dispatch-confirm]'}

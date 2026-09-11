@@ -1,12 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   deriveFleetRows,
   executeFleetCostConfirmation,
+  FLEET_FARM_HEADING,
   fleetBatchLamp,
+  fleetFarmSource,
   fleetHostVisualState,
+  fleetPluginAbsent,
   fleetRunLamp,
   fleetRunState,
+  fleetUncollectedCopy,
   parseFleetHosts,
 } from './fleet-model';
 
@@ -78,4 +85,34 @@ test('cancelled runs and batches map to a non-running terminal lamp', () => {
   assert.equal(fleetBatchLamp('cancelled'), 'failed');
   assert.notEqual(fleetRunLamp('cancelled'), 'running');
   assert.notEqual(fleetBatchLamp('cancelled'), 'queued');
+});
+
+test('无 fleet 插件时标题不写 Homelab，来源写未采集', () => {
+  assert.equal(FLEET_FARM_HEADING, '机器与机架');
+  assert.doesNotMatch(FLEET_FARM_HEADING, /Homelab/);
+  assert.equal(fleetPluginAbsent('HTTP 404 Not Found'), true);
+  assert.equal(fleetPluginAbsent('not found'), true);
+  assert.equal(fleetPluginAbsent('HTTP 500'), false);
+  assert.equal(fleetFarmSource({
+    hasHostData: false,
+    hostCount: 0,
+    reachableCount: 0,
+    stalled: false,
+    error: 'HTTP 404 not found',
+  }), '未采集');
+  assert.equal(fleetUncollectedCopy('HTTP 404 not found'), '未采集：HTTP 404');
+  assert.equal(fleetFarmSource({
+    hasHostData: true,
+    hostCount: 3,
+    reachableCount: 1,
+    stalled: false,
+  }), '已配置 3 · 可达 1');
+});
+
+test('FleetView 标题走采集函数，源码不得再写死 Homelab 执行农场', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(join(here, 'FleetView.tsx'), 'utf8');
+  assert.match(src, /FLEET_FARM_HEADING/);
+  assert.match(src, /fleetFarmSource\(/);
+  assert.doesNotMatch(src, /Homelab 执行农场/);
 });
