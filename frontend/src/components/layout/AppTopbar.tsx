@@ -80,6 +80,12 @@ export const TOPBAR_ICONS = {
       <path d="M13.2 9.7A5.6 5.6 0 0 1 6.3 2.8a5.6 5.6 0 1 0 6.9 6.9Z" />
     </svg>
   ),
+  /** 新会话 */
+  plus: (
+    <svg {...svgProps}>
+      <path d="M8 3.2v9.6M3.2 8h9.6" />
+    </svg>
+  ),
   /** 浅色模式 */
   sun: (
     <svg {...svgProps}>

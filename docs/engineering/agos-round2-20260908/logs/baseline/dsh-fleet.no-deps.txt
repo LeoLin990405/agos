@@ -1,0 +1,309 @@
+✔ run id and relative path gates pin requests below one run (0.8195ms)
+✔ manifest is exact, NUL-aware, and excludes controls, trace, and symlinks (118.244083ms)
+✔ missing and symlinked run directories are indistinguishable 404s (29.828209ms)
+✔ file helpers accept only regular files with no symlink in any segment (48.151792ms)
+✔ 2001st detail is only a sentinel while the summary stays authoritative (3.114625ms)
+✔ archive limit is inclusive and reports truthful count and bytes (0.161167ms)
+✔ tgz contains regular artifacts only (34.37575ms)
+✔ manifest and tgz consistently exclude newline-bearing names that cannot pass safeRelPath (112.502125ms)
+✔ manifest hex encoding never folds repeated pathname bytes into od star notation (74.181084ms)
+✔ Content-Disposition cannot inject headers and carries UTF-8 filename (0.412ms)
+✔ HTTP handlers enforce GET, cross-site, 404, and stream file/tgz bytes (335.42275ms)
+✔ local hosts are a 400 rather than pretending the host is unknown (3.397667ms)
+✔ tgz route returns 413 before spawning (1.379167ms)
+✔ disconnect during preflight aborts the read and never starts a stream child (1.20025ms)
+✔ client disconnect kills the injected ssh stream (22.353125ms)
+✔ a stream error after headers destroys the response and reports only scrubbed stderr (24.893333ms)
+✔ stdout EOF waits for ssh close so a later non-zero exit still truncates the response (23.771416ms)
+node:internal/modules/package_json_reader:301
+  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);
+        ^
+
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@deepseek-ai/schemastery' imported from /private/tmp/agos-baseline-7e7e359/plugins/dsh-fleet/lib/index.js
+    at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+    at packageResolve (node:internal/modules/esm/resolve:784:25)
+    at moduleResolve (node:internal/modules/esm/resolve:873:18)
+    at defaultResolve (node:internal/modules/esm/resolve:1006:11)
+    at #cachedDefaultResolve (node:internal/modules/esm/loader:708:20)
+    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:728:38)
+    at ModuleLoader.resolveSync (node:internal/modules/esm/loader:766:56)
+    at #resolve (node:internal/modules/esm/loader:690:17)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:610:35)
+    at ModuleJob.syncLink (node:internal/modules/esm/module_job:277:33) {
+  code: 'ERR_MODULE_NOT_FOUND'
+}
+
+Node.js v26.7.0
+✖ test/codex-host.test.mjs (79.8795ms)
+✔ registers four exact routes, disposes them, and returns Allow on method mismatch (1.794125ms)
+✔ 202 crosses durable barrier before background start and UI runs are remote-only (4.302042ms)
+✔ W2 registerDispatch adapter durably records every run before waking its shared pump (0.853958ms)
+✔ integrates with the concrete W2 runtime for dispatch, detail, pump and exact cancel (4.476666ms)
+✔ wake side effect starts only after dispatch event is durable (2.596042ms)
+✔ host assignment accounts for existing per-host load and configured capacity (0.493916ms)
+✔ queued reservations are not hidden by a smaller active-only hostInflight count (0.400291ms)
+✔ validates content type, JSON, body size, items, label and timeout (4.684625ms)
+✔ returns 404 for unknown host and rejects local explicitly (0.484084ms)
+✔ pinned unreachable matrix: wake disabled/no path/already waking (0.6775ms)
+✔ Codex remains local-only even if power is misconfigured with a wake path (0.2705ms)
+✔ returns 429 at global capacity and 503 with no healthy/wakeable remote (0.358666ms)
+✔ hosts and tag use intersection; selected down host is waking and wake summary is returned (0.569334ms)
+✔ durability failure returns 500 and never schedules background work (11.414125ms)
+✔ partial multi-run durability failure terminalizes the durable prefix and never pumps it (0.41775ms)
+✔ concrete W2 atomic batch failure publishes no runtime prefix (0.278875ms)
+✔ failed partial-ledger compensation reports the recoverable batch id instead of hiding it (0.263084ms)
+✔ wake-start failure compensates the durable batch and does not expose a zombie (2.473833ms)
+✔ race-time power error preserves its 423 status and compensates durable work (0.515416ms)
+✔ wake race reporting alreadyUp transitions waking run back to queued before response (0.7815ms)
+✔ pinned noWakePath race fails only affected runs and still pumps healthy siblings (0.545ms)
+✔ unpinned tag noWakePath race reroutes affected run to a healthy sibling (0.526708ms)
+✔ noWakePath never reroutes to another host that is merely waking (0.686917ms)
+✔ list summary/include runs and detail expose only bounded scrubbed public fields (5.563125ms)
+✔ cancel supports a whole batch or exactly one run and scrubs every response field (1.117792ms)
+✔ W2 cancel adapter checks run host and passes a reason instead of treating host as reason (0.595917ms)
+✔ restored preview is honest and invalid internal status fails closed (0.367833ms)
+✔ concrete W2 hydration exposes only durable preview with itemTruncated (0.418292ms)
+node:internal/modules/package_json_reader:301
+  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);
+        ^
+
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@deepseek-ai/schemastery' imported from /private/tmp/agos-baseline-7e7e359/plugins/dsh-fleet/lib/index.js
+    at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+    at packageResolve (node:internal/modules/esm/resolve:784:25)
+    at moduleResolve (node:internal/modules/esm/resolve:873:18)
+    at defaultResolve (node:internal/modules/esm/resolve:1006:11)
+    at #cachedDefaultResolve (node:internal/modules/esm/loader:708:20)
+    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:728:38)
+    at ModuleLoader.resolveSync (node:internal/modules/esm/loader:766:56)
+    at #resolve (node:internal/modules/esm/loader:690:17)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:610:35)
+    at ModuleJob.syncLink (node:internal/modules/esm/module_job:277:33) {
+  code: 'ERR_MODULE_NOT_FOUND'
+}
+
+Node.js v26.7.0
+✖ test/fake-jobs.test.mjs (83.649ms)
+node:internal/modules/package_json_reader:301
+  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);
+        ^
+
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@deepseek-ai/schemastery' imported from /private/tmp/agos-baseline-7e7e359/plugins/dsh-fleet/lib/index.js
+    at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+    at packageResolve (node:internal/modules/esm/resolve:784:25)
+    at moduleResolve (node:internal/modules/esm/resolve:873:18)
+    at defaultResolve (node:internal/modules/esm/resolve:1006:11)
+    at #cachedDefaultResolve (node:internal/modules/esm/loader:708:20)
+    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:728:38)
+    at ModuleLoader.resolveSync (node:internal/modules/esm/loader:766:56)
+    at #resolve (node:internal/modules/esm/loader:690:17)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:610:35)
+    at ModuleJob.syncLink (node:internal/modules/esm/module_job:277:33) {
+  code: 'ERR_MODULE_NOT_FOUND'
+}
+
+Node.js v26.7.0
+✖ test/farm-integration.test.mjs (73.778ms)
+node:internal/modules/package_json_reader:301
+  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);
+        ^
+
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@deepseek-ai/schemastery' imported from /private/tmp/agos-baseline-7e7e359/plugins/dsh-fleet/lib/index.js
+    at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+    at packageResolve (node:internal/modules/esm/resolve:784:25)
+    at moduleResolve (node:internal/modules/esm/resolve:873:18)
+    at defaultResolve (node:internal/modules/esm/resolve:1006:11)
+    at #cachedDefaultResolve (node:internal/modules/esm/loader:708:20)
+    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:728:38)
+    at ModuleLoader.resolveSync (node:internal/modules/esm/loader:766:56)
+    at #resolve (node:internal/modules/esm/loader:690:17)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:610:35)
+    at ModuleJob.syncLink (node:internal/modules/esm/module_job:277:33) {
+  code: 'ERR_MODULE_NOT_FOUND'
+}
+
+Node.js v26.7.0
+✖ test/fleet-hosts-route.test.mjs (73.263416ms)
+node:internal/modules/package_json_reader:301
+  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);
+        ^
+
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@deepseek-ai/schemastery' imported from /private/tmp/agos-baseline-7e7e359/plugins/dsh-fleet/lib/index.js
+    at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+    at packageResolve (node:internal/modules/esm/resolve:784:25)
+    at moduleResolve (node:internal/modules/esm/resolve:873:18)
+    at defaultResolve (node:internal/modules/esm/resolve:1006:11)
+    at #cachedDefaultResolve (node:internal/modules/esm/loader:708:20)
+    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:728:38)
+    at ModuleLoader.resolveSync (node:internal/modules/esm/loader:766:56)
+    at #resolve (node:internal/modules/esm/loader:690:17)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:610:35)
+    at ModuleJob.syncLink (node:internal/modules/esm/module_job:277:33) {
+  code: 'ERR_MODULE_NOT_FOUND'
+}
+
+Node.js v26.7.0
+✖ test/fleet.fake.test.mjs (121.76075ms)
+✔ a live owner started in a different timezone cannot have its lock stolen (255.625375ms)
+✔ two Node processes keep every dispatch/run/ref on one ledger (923.459958ms)
+✔ appendMany from one process interleaves with append from another without loss (484.629166ms)
+✔ two processes interleave appendMany with other writes and keep every ref (448.744125ms)
+✔ interrupt of a lock holder recovers; a live holder is not stolen (610.381542ms)
+✔ scrubSecrets redacts supported credentials recursively without hiding an env path (1.36325ms)
+✔ ledger appends through a durable single-writer chain and dispatch is on disk before spawn (302.803291ms)
+✔ compaction keeps the wider recent-or-tail union plus every event in an unfinished run chain (47.069958ms)
+✔ cancel and terminal reattach events make old chains eligible for removal (0.212166ms)
+✔ appendMany publishes all dispatches or leaves the previous ledger intact (54.442875ms)
+✔ exclusive lockfile recovers a dead owner and refuses to steal a live one (233.932792ms)
+✔ two in-process ledgers keep every dispatch/run/ref across appendMany plus append (260.29425ms)
+✔ dispatch fingerprint uses complete raw input and cannot be supplied for a preview (60.4945ms)
+✔ stale reapers cannot remove a replacement live lock, including after reaper death (149.495292ms)
+✔ a malformed lock and an unverifiable live start time fail closed (110.277416ms)
+node:internal/modules/package_json_reader:301
+  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);
+        ^
+
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@deepseek-ai/schemastery' imported from /private/tmp/agos-baseline-7e7e359/plugins/dsh-fleet/lib/index.js
+    at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+    at packageResolve (node:internal/modules/esm/resolve:784:25)
+    at moduleResolve (node:internal/modules/esm/resolve:873:18)
+    at defaultResolve (node:internal/modules/esm/resolve:1006:11)
+    at #cachedDefaultResolve (node:internal/modules/esm/loader:708:20)
+    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:728:38)
+    at ModuleLoader.resolveSync (node:internal/modules/esm/loader:766:56)
+    at #resolve (node:internal/modules/esm/loader:690:17)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:610:35)
+    at ModuleJob.syncLink (node:internal/modules/esm/module_job:277:33) {
+  code: 'ERR_MODULE_NOT_FOUND'
+}
+
+Node.js v26.7.0
+✖ test/local-cleanup-integration.test.mjs (75.692792ms)
+✔ default reconcile period stays 30s; tests must not hide the bug by lengthening it (0.602875ms)
+✔ probeLocalRun distinguishes this-process live local from post-restart orphans (0.519042ms)
+✔ slow local task stays running and occupies concurrency across two reconcile periods (4.533417ms)
+✔ hardcoded MISSING probe cannot settle a local run this process still holds (0.417917ms)
+✔ hydrated historical local run is lost after restart, not reserved forever (3.028125ms)
+✔ cancel of a live local run keeps its slot until cleanup confirms cancellation (1.014584ms)
+✔ local timeout aborts once and retains the slot until runner cleanup settles TIMEOUT (2.329666ms)
+✔ normal complete and reconcile do not double-settle or leak a slot (0.579916ms)
+✔ bare runtime shutdown models process loss; plugin must separately drain its local runners (0.733167ms)
+✔ runtime publishes exactly the nine specified run states (0.899084ms)
+✔ hydrate restores full batch topology while persisted dispatch uses its preview (2.411625ms)
+✔ reconciler maps SETTLED/ALIVE/DEAD/MISSING and SETTLED retrieves out.txt (1.663834ms)
+✔ an overdue run is probed alive before timeout handling and releases the global slot (1.108125ms)
+✔ timeout kill failure remains detached with timeoutPending instead of settling (0.422625ms)
+✔ three consecutive ssh failures clear stale control sockets and keep the run detached (0.380292ms)
+✔ hydrated detached cancel probes ALIVE then invokes the injected remote kill before cancelled (0.529292ms)
+✔ unreachable cancel stays detached and pending, then reconciler retries the real kill (0.43775ms)
+✔ cancel observes SETTLED and recovers output instead of killing or lying cancelled (0.336917ms)
+✔ active local run cancellation uses its live controller without remote probe or kill (0.990459ms)
+✔ markStart-to-spawn barrier can route cancellation through the owned controller (0.513125ms)
+✔ active remote cancellation delegates exactly one kill to its live runner (0.345833ms)
+✔ RUN_LOCK serializes terminal races; run and batch controllers cancel truthfully (0.426334ms)
+✔ registerDispatchBatch applies all runtime records only after one ledger barrier (1.235167ms)
+✔ reconciler timer is injectable and shutdown drains without aborting remote controllers (0.219458ms)
+node:internal/modules/package_json_reader:301
+  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);
+        ^
+
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@deepseek-ai/schemastery' imported from /private/tmp/agos-baseline-7e7e359/plugins/dsh-fleet/lib/index.js
+    at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+    at packageResolve (node:internal/modules/esm/resolve:784:25)
+    at moduleResolve (node:internal/modules/esm/resolve:873:18)
+    at defaultResolve (node:internal/modules/esm/resolve:1006:11)
+    at #cachedDefaultResolve (node:internal/modules/esm/loader:708:20)
+    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:728:38)
+    at ModuleLoader.resolveSync (node:internal/modules/esm/loader:766:56)
+    at #resolve (node:internal/modules/esm/loader:690:17)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:610:35)
+    at ModuleJob.syncLink (node:internal/modules/esm/module_job:277:33) {
+  code: 'ERR_MODULE_NOT_FOUND'
+}
+
+Node.js v26.7.0
+✖ test/remote-cmd.test.mjs (85.905584ms)
+✓ safeRelPath/shq 全部通过 (5 放行 / 15 拒绝 / 2 shq)
+✔ test/safe-rel-path.test.mjs (71.203709ms)
+node:internal/modules/package_json_reader:301
+  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);
+        ^
+
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@deepseek-ai/schemastery' imported from /private/tmp/agos-baseline-7e7e359/plugins/dsh-fleet/lib/index.js
+    at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+    at packageResolve (node:internal/modules/esm/resolve:784:25)
+    at moduleResolve (node:internal/modules/esm/resolve:873:18)
+    at defaultResolve (node:internal/modules/esm/resolve:1006:11)
+    at #cachedDefaultResolve (node:internal/modules/esm/loader:708:20)
+    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:728:38)
+    at ModuleLoader.resolveSync (node:internal/modules/esm/loader:766:56)
+    at #resolve (node:internal/modules/esm/loader:690:17)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:610:35)
+    at ModuleJob.syncLink (node:internal/modules/esm/module_job:277:33) {
+  code: 'ERR_MODULE_NOT_FOUND'
+}
+
+Node.js v26.7.0
+✖ test/trace-paging.test.mjs (78.845625ms)
+✔ power state keeps reachability, wake, smoke, and sleep orthogonal (2.6125ms)
+✔ independent wake joins one power-node flight; pinned dispatch gets 423 with ETA (3.650583ms)
+✔ a power node without a wake path fails before any process is spawned (0.131625ms)
+✔ one cancelled waiter does not cancel the shared power-node wake (0.681291ms)
+✔ concurrent reachability checks are singleflight per host (0.58425ms)
+✔ dispatch adapter returns after durable launch and leaves probe/smoke on the flight (0.528792ms)
+✔ dispatch request does not acknowledge before the wake ledger barrier (9.731417ms)
+✔ wake fails closed before spawn when its durable ledger is unavailable (2.141292ms)
+✔ a probe that reports ready after the wake deadline is still a timeout (0.635916ms)
+✔ missing smoke runner fails closed instead of silently skipping the gate (0.130042ms)
+✔ smoke result is singleflight and cached for six hours (0.536ms)
+✔ ledger replay restores wake ownership and sleep eligibility without inventing reachability (0.133458ms)
+✔ an expired restored wake normalizes to timeout instead of permanent waking (0.082792ms)
+✔ sleep eligibility is committed in memory only after its ledger event (0.182333ms)
+✔ sleep is fail-closed for confirmation, allowlist, activity, and wake evidence (0.242125ms)
+✔ sleep rechecks busy state inside the host power lock (0.555625ms)
+✔ sleep re-probes reachability while holding the power lock (0.784208ms)
+✔ eligible host sleeps with fixed argv and never exposes force (4.649292ms)
+✔ successful sleep command stays successful when only the terminal ledger write fails (0.297667ms)
+✔ dispatch and sleep callers share a per-host FIFO power lock (1.504583ms)
+✔ wake polling is an awaited loop, never an interval (0.319708ms)
+ℹ tests 114
+ℹ suites 0
+ℹ pass 106
+ℹ fail 8
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2829.817833
+
+✖ failing tests:
+
+test at test/codex-host.test.mjs:1:1
+✖ test/codex-host.test.mjs (79.8795ms)
+  'test failed'
+
+test at test/fake-jobs.test.mjs:1:1
+✖ test/fake-jobs.test.mjs (83.649ms)
+  'test failed'
+
+test at test/farm-integration.test.mjs:1:1
+✖ test/farm-integration.test.mjs (73.778ms)
+  'test failed'
+
+test at test/fleet-hosts-route.test.mjs:1:1
+✖ test/fleet-hosts-route.test.mjs (73.263416ms)
+  'test failed'
+
+test at test/fleet.fake.test.mjs:1:1
+✖ test/fleet.fake.test.mjs (121.76075ms)
+  'test failed'
+
+test at test/local-cleanup-integration.test.mjs:1:1
+✖ test/local-cleanup-integration.test.mjs (75.692792ms)
+  'test failed'
+
+test at test/remote-cmd.test.mjs:1:1
+✖ test/remote-cmd.test.mjs (85.905584ms)
+  'test failed'
+
+test at test/trace-paging.test.mjs:1:1
+✖ test/trace-paging.test.mjs (78.845625ms)
+  'test failed'

@@ -14,10 +14,15 @@ import {
   IMPLEMENTER_RETRY_COPY,
   MODEL_UNRESOLVED_COPY,
   REVIEWER_SEES_FINAL_COPY,
+  REVIEWER_TASK_LIMIT,
+  REVIEWER_RESULT_LIMIT,
+  RESULT_ABSENT_COPY,
+  boundedSection,
   dispatchTeam,
   resolveModelRoute,
   roleSystemPrompt,
   roleUserPrompt,
+  truncationNotice,
 } from '../lib/dispatch.js'
 import { appendLine, foldLedger, listRoutes } from '../lib/ledger.js'
 
@@ -38,7 +43,12 @@ test('known assemble labels resolve to host provider/model pairs', () => {
   assert.equal(resolveModelRoute('ghost-model'), null)
 })
 
-test('reviewer prompt sees implementer final only', () => {
+// C4 (2026-09-08) — deliberate contract change. Before this round the reviewer saw
+// only the implementer draft, so a verdict could not mean "this answers the task";
+// it could only mean "this text reads well". The reviewer now also gets the complete
+// original task. The planner draft stays hidden: that is the invariant this test
+// was really protecting, and it is unchanged.
+test('reviewer prompt sees the original task and the implementer final, never the plan', () => {
   const turns = [
     { role: 'planner', ok: true, text: 'PLAN-SECRET' },
     { role: 'implementer', ok: true, text: 'FINAL-DRAFT' },
@@ -46,9 +56,37 @@ test('reviewer prompt sees implementer final only', () => {
   const user = roleUserPrompt('reviewer', '整理 SQL', turns)
   assert.match(user, /FINAL-DRAFT/)
   assert.doesNotMatch(user, /PLAN-SECRET/)
-  assert.doesNotMatch(user, /整理 SQL/)
+  assert.match(user, /整理 SQL/, '评审必须看到原始任务，否则判定只是「文本好不好」')
   assert.match(roleSystemPrompt('reviewer'), new RegExp(REVIEWER_SEES_FINAL_COPY))
 })
+
+test('reviewer context is bounded per section, truncated deterministically, and never silently', () => {
+  const task = 'T'.repeat(REVIEWER_TASK_LIMIT + 500)
+  const draft = 'D'.repeat(REVIEWER_RESULT_LIMIT + 250)
+  const turns = [{ role: 'implementer', ok: true, text: draft }]
+  const user = roleUserPrompt('reviewer', task, turns)
+
+  // Announced, with the exact amount dropped — a reviewer judging a fragment is told so.
+  assert.match(user, new RegExp(escapeRe(truncationNotice(REVIEWER_TASK_LIMIT, 500))))
+  assert.match(user, new RegExp(escapeRe(truncationNotice(REVIEWER_RESULT_LIMIT, 250))))
+  // Each section keeps its own budget: a huge task cannot crowd out the draft.
+  assert.equal((user.match(/T/g) ?? []).length, REVIEWER_TASK_LIMIT)
+  assert.equal((user.match(/D/g) ?? []).length, REVIEWER_RESULT_LIMIT)
+  // Deterministic: same input, byte-identical prompt.
+  assert.equal(user, roleUserPrompt('reviewer', task, turns))
+
+  // Code points, not UTF-16 units: an emoji is one 字, and is never split in half.
+  const wide = boundedSection('🙂'.repeat(10), 4)
+  assert.equal(wide.dropped, 6)
+  assert.ok(wide.text.startsWith('🙂🙂🙂🙂\n'))
+  assert.equal([...wide.text.split('\n')[0]].length, 4)
+
+  // Absence is reported as absence, not as an empty success.
+  assert.match(roleUserPrompt('reviewer', '任务', []), new RegExp(RESULT_ABSENT_COPY))
+  assert.equal(boundedSection('short', 4000).truncated, false)
+})
+
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 test('dispatchTeam requires confirm and does not invent outcome', async () => {
   await assert.rejects(() => dispatchTeam(TEAM, { task: 'x' }), (err) => {
@@ -129,7 +167,21 @@ test('冻结文案字面量钉死：与 agos-frontend routes-assemble.ts 逐字�
 })
 
 // ── 2026-08-23 BAD_OUTPUT 拆码:用宿主真 BlockAssembler 喂块序列,直接打 streamRoleText ──
-import { BlockAssembler as HostAssembler } from '/Users/leo/.dsh/profiles/desktop/node_modules/@deepseek-ai/dsh-llm/lib/types/assembler.js'
+//
+// 路径为什么是「相对路径钻进 node_modules」而不是裸包名:@deepseek-ai/dsh-llm 的 exports
+// 映射没有导出 ./lib/types/assembler.js,裸 import 会 ERR_PACKAGE_PATH_NOT_EXPORTED。
+// 这是故意绕开导出映射去拿宿主内部类型 —— 别把它「整理」成裸包名,会直接加载失败。
+//
+// 2026-09-09 主控改:原本写的是 '/Users/<name>/.dsh/profiles/desktop/node_modules/...' 绝对
+// 路径。那有两个问题,第二个更重要:
+//   1. 模块级静态 import 指向个人 live profile,换任何一台机器整个测试文件都加载不了
+//      (A 包的依赖面测量与主控各自独立报到同一处)。
+//   2. desktop profile 那份是软链进 DSH Desktop.app 的 rc.6 时代副本,与本树 pin 的
+//      0.1.2-rc.1 **内容不同**(assembler.js sha256 cfe654a0… vs 3257b31b…)。也就是说
+//      这条「用宿主真 BlockAssembler」的契约镜像,镜的是 pin 之外的另一条版本线。
+// 改成仓库相对路径后对着 pin 的 0.1.2-rc.1 复跑,13/13 仍通过,所以断言在两条线上都成立;
+// 现在它至少断言的是 UPSTREAM.pin 真正声明的那一条。
+import { BlockAssembler as HostAssembler } from '../../node_modules/@deepseek-ai/dsh-llm/lib/types/assembler.js'
 import { streamRoleText } from '../lib/dispatch.js'
 
 const fakeDeadline = (upstream, ms) => {
@@ -248,4 +300,64 @@ test('implementer TOOL_CALL retries once without tools and does not invent a fin
   assert.equal(retryFail.retried, true)
   assert.equal(retryFail.text, '')
   assert.equal(failed.dispatch.turns.find((row) => row.role === 'reviewer').ok, true)
+})
+
+// C1 — the verdict booking is a read-modify-write, so it has to be one transaction.
+// This asserts the *wiring* in-process: that every ledger read and the append all
+// happen inside deps.transact(). The mutual exclusion that transact() delegates to
+// is proven separately against real child processes in ledger-multiprocess.test.mjs.
+test('the verdict booking reads and appends strictly inside one transaction', async () => {
+  const decision = { id: 'dec-tx-1', ts: 1, label: 'coding', pick: 'qwen3.8-max', candidates: ['qwen3.8-max', 'minimax-m3'], outcome: null }
+  const events = []
+  let depth = 0
+
+  const result = await dispatchTeam({ ...TEAM, ref: decision.id }, { confirm: true, task: 'x' }, {
+    transact: (fn) => {
+      depth += 1
+      events.push('enter')
+      try {
+        return fn()
+      } finally {
+        events.push('exit')
+        depth -= 1
+      }
+    },
+    readRows: () => {
+      events.push(depth > 0 ? 'read-inside' : 'read-OUTSIDE')
+      return [decision]
+    },
+    append: (row) => {
+      if (row.kind === 'outcome') events.push(depth > 0 ? 'append-inside' : 'append-OUTSIDE')
+      return row
+    },
+    streamRole: async ({ role }) => (role === 'reviewer' ? '判定：通过' : `${role}-ok`),
+  })
+
+  assert.equal(result.dispatch.verdictFed, true, 'the accept path must still book')
+  assert.equal(events.filter((e) => e === 'enter').length, 1, 'exactly one transaction')
+
+  const enterAt = events.indexOf('enter')
+  const exitAt = events.indexOf('exit')
+  assert.ok(enterAt >= 0 && exitAt > enterAt, events.join(' → '))
+
+  // One read precedes the transaction: the independence pre-check, which decides
+  // whether to call the reviewer model at all. It is read-only, feeds no append, and
+  // runs before three model streams — holding the lock across it is what we are
+  // specifically avoiding. What matters is that it appends nothing.
+  assert.deepEqual(events.slice(0, enterAt).filter((e) => e.startsWith('append')), [])
+
+  // The booking itself — the "already judged?" read and the append it decides — is
+  // one critical section, so a second process cannot slip between them.
+  const critical = events.slice(enterAt + 1, exitAt)
+  assert.ok(critical.includes('read-inside'), events.join(' → '))
+  assert.ok(critical.includes('append-inside'), events.join(' → '))
+  assert.equal(events.slice(enterAt).some((e) => e.endsWith('OUTSIDE')), false, events.join(' → '))
+
+  // Omitting transact keeps the previous behaviour for every in-process caller.
+  const plain = await dispatchTeam({ ...TEAM, ref: decision.id }, { confirm: true, task: 'x' }, {
+    readRows: () => [decision],
+    append: () => {},
+    streamRole: async ({ role }) => (role === 'reviewer' ? '判定：通过' : `${role}-ok`),
+  })
+  assert.equal(plain.dispatch.verdictFed, true)
 })

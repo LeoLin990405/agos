@@ -1,7 +1,7 @@
 // 国产模型能力插件(持久化):视觉 / 语音 / 生图 / 多模型委派 / ACP 委派。
 // 由动态插件 eyes-1 / voic-7 / delg-4 / dkim-8 固化而来。
 import z from '@deepseek-ai/schemastery'
-import { randomUUID } from 'node:crypto'
+import { randomInt, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createReadStream } from 'node:fs'
 import { appendFile, mkdir, open as openFile, readdir, readFile, realpath, stat, unlink, writeFile } from 'node:fs/promises'
@@ -10,7 +10,20 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, extname, join, sep } from 'node:path'
 import { formatCodexBarUsage, readCodexBarUsage } from './usage.mjs'
 import { composeOptimizeAgentPrompt, composePlanAppendix } from '../../dsh-agos/lib/agent-prompts.js'
-import { buildCouncilReviewRecord, councilReviewVerdict, disagreementsFromParsed, normalizeDisagreementItems } from './council-record.js'
+import { resolveSwarmModule } from '../../dsh-agos/lib/swarm-host-integration.mjs'
+import { buildCouncilReviewRecord, councilReviewVerdict } from './council-record.js'
+import { parseCouncilVerdict, evaluateCouncilStructure } from './council-parse.mjs'
+import { PLAN_NAME, resolvePlanPath, openPlanFile } from './plan-path.mjs'
+import { evaluatePlanApproval, planFingerprint } from './plan-approval.mjs'
+import {
+  createIsolatedAutoresearchWorkspace,
+  measureIsolatedBaseline,
+  runAutoresearchIteration,
+  applyCandidatePatch,
+  candidateSourceContext,
+  saveAutoresearchArtifacts,
+  disposeWorkspace,
+} from './autoresearch-workspace.mjs'
 
 const name = 'cn-capabilities'
 
@@ -31,9 +44,17 @@ function ownSessionEvents(session) {
 // 与文首 webServer 那条教训同类(附加能力不该是全体工具的启动前提)。
 // 加载失败只让 plan_run 执行阶段报一条可读错误。两个插件经 node_modules 同一真实路径
 // 解析 → 同一个模块实例 → 进度表 PROGRESS 与分派表 CURRENT_CONFIG 都是共享的。
+// 2026-09-09 校正:swarm 不再是本仓的包依赖(它的 registry 版本不导出这里需要的
+// runNormalizedBatch,且自身导入 installSettingsSection 会把整棵依赖树拖回冲突)。
+// 定性改为**宿主环境集成**,解析策略集中在 swarm-host-integration.mjs;干净依赖树里
+// 解析不到属预期,plan_run 执行阶段照旧报一条可读错误(下方 catch),其余 21 个工具不受影响。
 let SWARM = null
 const loadSwarm = async () => {
-  if (SWARM === null) SWARM = await import('dsh-kimicode-swarm')
+  if (SWARM === null) {
+    const resolution = await resolveSwarmModule()
+    if (!resolution.available) throw new Error(resolution.reason)
+    SWARM = resolution.module
+  }
   return SWARM
 }
 // ⚠️ 这个 cordis 版本(4.0.1)的 inject **只认数组**,写成 { required, optional }
@@ -360,7 +381,21 @@ function apply(ctx) {
   // PLAN_DIR 是 plan_run(出计划/写回结果)、exit_plan_mode 批准落盘(A3)与这条路由三方共用的
   // 唯一目录。DSH_CN_PLAN_DIR 只给离线测试指到临时目录用,默认值不变。
   const PLAN_DIR = process.env.DSH_CN_PLAN_DIR || join(homedir(), '.dsh', 'logs', 'plans')
-  const PLAN_NAME = /^plan-\d+\.json$/
+  // 计划文件名。原本是 `plan-${Date.now()}.json`,同一毫秒内建两份计划必然重名 ——
+  // writePlanObject 的 create:true 会 fail-closed 报「plan file already exists」而不是覆写
+  // (那道闸是对的,保留),但用户看到的是「计划保存失败」,一次正当操作被时钟精度挡掉。
+  // 这不是理论风险:本轮整合期 cn-capabilities 全套件三跑两绿一红,红的那次就是这个碰撞。
+  //
+  // 尾巴用**纯数字**而不是 hex,因为 plan-path.mjs 的 PLAN_NAME 是 /^plan-\d+\.json$/,
+  // 且 /api/cn/plans 与 plan_run 的 planFile 参数共用这道闸 —— 换成 hex 会让新建的计划
+  // 立刻通不过自己的路径校验。位数不限,所以直接接 6 位随机数字即可,契约不用动。
+  // 与 dsh-agos-router 的 asm-/dsp- 走的是同一条取舍(见 router lib/ids.js)。
+  // ⚠️ 尾数与时间戳之间**没有分隔符**(PLAN_NAME 的正则不允许第二个连字符),所以这个名字
+  // 不再是可解析的时间戳:Number(name.slice(5,-5)) 会得到纪元后约 5000 万年,且不报错。
+  // 任何要取时间的地方读文件内容里的时间字段(如 executedAt),不得解析文件名。
+  // 今天全仓没有这种消费者(接线审查者按 slice/substring/Number/replace 四种形状搜过),
+  // 这句是写给将来的。由接线审查者指出(C2)。
+  const planFileName = () => `${PLAN_DIR}/plan-${Date.now()}${String(randomInt(0, 1_000_000)).padStart(6, '0')}.json`
   // 计划 markdown 的第一个标题(与宿主 dsh-plan-mode 的 firstHeading 同一口径)
   const firstHeading = (md) => {
     for (const line of String(md || '').split('\n')) {
@@ -369,12 +404,31 @@ function apply(ctx) {
     }
     return ''
   }
-  const planPathOk = (raw) => {
-    const f = String(raw || '')
-    const base = f.slice(f.lastIndexOf('/') + 1)
-    if (!PLAN_NAME.test(base)) return null
-    const full = PLAN_DIR + '/' + base
-    return f === full || f === base ? full : null
+  const closePlanHandle = async (opened) => {
+    if (opened && opened.handle) try { await opened.handle.close() } catch {}
+  }
+  const readPlanObject = async (rawPath) => {
+    const opened = await openPlanFile({ path: rawPath, planDir: PLAN_DIR, flags: 'r' })
+    if (!opened.ok) return opened
+    try {
+      const text = await opened.handle.readFile('utf8')
+      return { ok: true, path: opened.path, name: opened.name, obj: JSON.parse(text) }
+    } catch (error) {
+      return { ok: false, code: 'READ', message: String((error && error.message) || error) }
+    } finally {
+      await closePlanHandle(opened)
+    }
+  }
+  const writePlanObject = async (rawPath, obj, { create = false } = {}) => {
+    await mkdir(PLAN_DIR, { recursive: true })
+    const opened = await openPlanFile({ path: rawPath, planDir: PLAN_DIR, flags: create ? 'wx' : 'w' })
+    if (!opened.ok) throw new Error(opened.message || opened.code || 'plan write rejected')
+    try {
+      await opened.handle.writeFile(JSON.stringify(obj, null, 2), 'utf8')
+      return { ok: true, path: opened.path, name: opened.name }
+    } finally {
+      await closePlanHandle(opened)
+    }
   }
   const plansRoute = () => {
     const ws = ctx.get('webServer')
@@ -393,12 +447,14 @@ function apply(ctx) {
             const out = []
             for (const n of names.filter((x) => PLAN_NAME.test(x)).sort().reverse().slice(0, 20)) {
               try {
-                const obj = JSON.parse(await readFile(PLAN_DIR + '/' + n, 'utf8'))
+                const got = await readPlanObject(n)
+                if (!got.ok) continue
+                const obj = got.obj
                 // ⚠️ source / markdown / sessionId / approvedAt 必须透传(2026-08-19 补):
                 // 之前路由把它们丢了,trace-view「计划」面板读 p.source 判来源、cur.markdown 显示计划全文,
                 // 结果所有计划都标成 plan_run、计划全文永远不亮。plan_run 落盘的带 source:'plan_run';
                 // exit_plan_mode 批准落盘(A3)的带 source:'plan-mode' + markdown + sessionId + approvedAt。
-                out.push({ file: PLAN_DIR + '/' + n, name: n, goal: String(obj.goal || ''), planner: obj.planner, steps: obj.steps || [],
+                out.push({ file: got.path, name: n, goal: String(obj.goal || ''), planner: obj.planner, steps: obj.steps || [],
                   source: typeof obj.source === 'string' ? obj.source : undefined,
                   markdown: typeof obj.markdown === 'string' ? obj.markdown : undefined,
                   sessionId: typeof obj.sessionId === 'string' ? obj.sessionId : undefined,
@@ -418,8 +474,9 @@ function apply(ctx) {
               chunks.push(c)
             }
             const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
-            const target = planPathOk(body.file)
-            if (!target) { send(400, { error: '文件名不合法(只接受 PLAN_DIR 下的 plan-<数字>.json)' }); return }
+            const named = resolvePlanPath(body.file, PLAN_DIR)
+            if (!named.ok) { send(400, { error: '文件名不合法(只接受 PLAN_DIR 下的 plan-<数字>.json)' }); return }
+            const target = named.path
             const steps = Array.isArray(body.steps) ? body.steps : null
             if (!steps || !steps.length) { send(400, { error: '步骤不能为空' }); return }
             // 只保留已知字段,不把客户端传来的任意结构写进盘。
@@ -432,10 +489,11 @@ function apply(ctx) {
               dependsOn: (Array.isArray(st.dependsOn) ? st.dependsOn : []).map(Number).filter((n) => Number.isFinite(n)),
               ...(st.type ? { type: String(st.type).slice(0, 40) } : {}),
             }))
-            let prev = {}
-            try { prev = JSON.parse(await readFile(target, 'utf8')) } catch {}
-            await writeFile(target, JSON.stringify({ ...prev, goal: String(body.goal || prev.goal || ''), steps: clean, editedAt: new Date().toISOString() }, null, 2), 'utf8')
-            send(200, { ok: true, file: target, steps: clean })
+            const prevRead = await readPlanObject(target)
+            const prev = prevRead.ok && prevRead.obj && typeof prevRead.obj === 'object' ? prevRead.obj : {}
+            const written = await writePlanObject(target, { ...prev, goal: String(body.goal || prev.goal || ''), steps: clean, editedAt: new Date().toISOString() })
+            if (!written.ok) { send(400, { error: written.message || written.code || '计划写入被拒绝' }); return }
+            send(200, { ok: true, file: written.path, steps: clean })
             return
           }
           send(405, { error: 'GET or POST' })
@@ -860,19 +918,26 @@ function apply(ctx) {
               '"disagreements":["描述之间不一致之处及你的判定"],' +
               '"suspect":[描述编号,你判定明显编造/看错的]}'
             arb = await runSee(path, arbQ, arbiter, 150000)
-            const parsed = arb.ok ? parseFirstJsonObject(arb.text) : null
-            if (parsed && typeof parsed.description === 'string' && parsed.description.trim()) {
-              parsedOk = true
-              description = parsed.description.trim()
-              disagreements = normalizeDisagreementItems(parsed.disagreements)
+            const extracted = parseCouncilVerdict(arb.ok ? arb.text : '')
+            const ev = evaluateCouncilStructure({
+              parsed: extracted.parsed,
+              panelists: answers,
+              kind: 'vision',
+              parseReason: extracted.reason,
+            })
+            parsedOk = ev.parsedOk
+            inconclusive = ev.inconclusive === true
+            disagreements = ev.disagreements
+            if (ev.parsedOk && extracted.parsed && typeof extracted.parsed.description === 'string' && extracted.parsed.description.trim()) {
+              description = extracted.parsed.description.trim()
               // 序号 → 厂商名的映射在这一侧做;越界/非数字一律丢掉,不猜
-              flagged = (Array.isArray(parsed.suspect) ? parsed.suspect : [])
+              flagged = (Array.isArray(extracted.parsed.suspect) ? extracted.parsed.suspect : [])
                 .map((x) => Number(String(x).replace(/[^0-9]/g, '')))
                 .filter((n) => Number.isInteger(n) && n >= 1 && n <= okOnes.length)
                 .map((n) => okOnes[n - 1].provider)
                 .filter((x, i, arr) => arr.indexOf(x) === i)
             } else if (arb.ok) {
-              // 没按 JSON 返回:原文当描述用,本次判定不入账
+              // 没按完整结构返回:原文当描述用,本次判定不入账
               description = arb.text.trim()
             } else {
               // 仲裁本身挂了:把各家原文原样给出去,别让用户空手而归
@@ -1310,7 +1375,7 @@ const PROVIDER_DEFAULT_MODEL = {
   // 零父上下文",评委之间互相看不见,也看不到本对话历史。
   // (对比:生态里的 review-workflow 只注册了一个 skill,189 行、零 subagents 调用,
   //  它的"角色隔离"是写给模型的指令,不是代码强制的。)
-  const COUNCIL_LOG = HOME + '/.dsh/logs/council-record.jsonl'
+  const COUNCIL_LOG = process.env.DSH_CN_COUNCIL_LOG || HOME + '/.dsh/logs/council-record.jsonl'
 
   // 单个评委:起一个隔离子代理,量出耗时,失败不抛(一家挂掉不该毁掉整场)
   // ── 真实 token 用量 ─────────────────────────────────────────────────
@@ -1606,39 +1671,26 @@ const PROVIDER_DEFAULT_MODEL = {
       const deepVerify = args.verify === true
       const arb = await runPanelist(exec, arbiter, PROVIDER_DEFAULT_MODEL[arbiter], arbPrompt, [],
         deepVerify ? { timeoutMs: 480000 } : { noTools: true, timeoutMs: 120000 })
-      // 容错解析:模型仍可能裹代码围栏或前后带话。取第一个平衡的 {...} 再 JSON.parse。
-      const parseVerdict = (raw) => {
-        if (!raw) return null
-        const t = String(raw).replace(/```(?:json)?/gi, '')
-        const i = t.indexOf('{')
-        if (i < 0) return null
-        let depth = 0
-        for (let j = i; j < t.length; j++) {
-          if (t[j] === '{') depth++
-          else if (t[j] === '}' && --depth === 0) {
-            try { return JSON.parse(t.slice(i, j + 1)) } catch { return null }
-          }
-        }
-        return null
-      }
-      const parsed = arb.ok ? parseVerdict(arb.text) : null
+      const extracted = parseCouncilVerdict(arb.ok ? arb.text : '')
+      const parsed = extracted.parsed
+      const ev = evaluateCouncilStructure({
+        parsed,
+        panelists: answers,
+        kind: 'review',
+        parseReason: extracted.reason,
+      })
       // suspect 只认真实存在的评委名 —— 模型偶尔会编一个不在名单里的名字
       // 序号 → 厂商名的映射在**我这一侧**做:仲裁只知道"答案2有问题",
       // 落进台账的才是真正的厂商名。序号越界或不是数字的一律丢掉,不猜。
-      const flagged = parsed && Array.isArray(parsed.suspect)
+      const flagged = ev.parsedOk && parsed && Array.isArray(parsed.suspect)
         ? parsed.suspect
             .map((x) => Number(String(x).replace(/[^0-9]/g, '')))
             .filter((n) => Number.isInteger(n) && n >= 1 && n <= ok.length)
             .map((n) => ok[n - 1].provider)
             .filter((x, i, arr) => arr.indexOf(x) === i)
         : []
-      const disagreements = disagreementsFromParsed(parsed)
-      // ⚠️ 原来取仲裁**自报**的 consensus 键,与 disagreements 完全解耦。模型返回
-      // {consensus:true, disagreements:['…']} 是常见输出(「大体一致但顺手列两条」),
-      // 落盘后台账页上面写「各家一致」、紧下面列「仍有分歧 1. …」—— 自己打自己脸,
-      // 与 W1 要清的那类矛盾同型(2026-08-22 验收 P1)。
-      // 改成与 vision 路径同一口径:从 disagreements 派生,单一事实来源。
-      const consensus = !!parsed && disagreements.length === 0
+      const disagreements = ev.disagreements
+      const consensus = ev.consensus
       const verdict = councilReviewVerdict({
         arbOk: arb.ok,
         arbError: arb.error,
@@ -1646,6 +1698,8 @@ const PROVIDER_DEFAULT_MODEL = {
         parsed,
         consensus,
         flagged,
+        parsedOk: ev.parsedOk,
+        structureReason: ev.reason,
       })
 
       // ── 战绩台账:谁答了、谁挂了、谁被判编造、各自多久 ──────────────
@@ -1654,18 +1708,20 @@ const PROVIDER_DEFAULT_MODEL = {
       // 新记录缺这两个字段时,台账页会说「本条记录早于该字段」—— 那是假解释。
       try {
         await appendFile(COUNCIL_LOG, JSON.stringify(buildCouncilReviewRecord({
-          parsedOk: !!parsed,
+          parsedOk: ev.parsedOk,
           question: q,
           hadImages: imageBlocks.length,
           arbiter,
           arbiterMetered: METERED.has(arbiter),
           consensus,
+          inconclusive: ev.inconclusive,
           // text 是给「分歧视图」对照用的答案原文。截到 6000 字:
           // 台账是本机日志,不外发;但没有上限的话一条记录能顶到几百 KB,读取端会被拖垮。
           panelists: answers.map((a) => ({ provider: a.provider, model: a.model, ok: a.ok, ms: a.ms, error: a.error || undefined, text: String(a.text || '').slice(0, 6000), usage: a.usage || undefined })),
           verdict,
           disagreements,
           flagged,
+          structureReason: ev.reason,
         })) + '\n', 'utf8')
       } catch {}
 
@@ -1680,7 +1736,7 @@ const PROVIDER_DEFAULT_MODEL = {
         bucket.out += r.usage.out
         if (!bucket.providers.includes(r.provider)) bucket.providers.push(r.provider)
       }
-      return { verdict, consensus, answers, arbiter, panelSource, arbiterMetered: METERED.has(arbiter), cost }
+      return { verdict, consensus, inconclusive: !ev.parsedOk || ev.inconclusive, answers, arbiter, panelSource, arbiterMetered: METERED.has(arbiter), cost }
     },
   }))
 
@@ -1782,13 +1838,15 @@ const PROVIDER_DEFAULT_MODEL = {
     String((s && s.id) ?? ''), String((s && s.title) ?? ''), String((s && s.detail) ?? ''),
     (s && Array.isArray(s.dependsOn) ? s.dependsOn : []).map(String), s && s.type ? String(s.type) : '',
   ]))
-  const findMatchingPlanFile = async (steps) => {
+  const findMatchingPlanFile = async (steps, sessionId) => {
     const sig = stepsSignature(steps)
     const names = (await readdir(PLAN_DIR).catch(() => [])).filter((n) => PLAN_NAME.test(n)).sort().reverse().slice(0, 20)
     for (const n of names) {
       try {
-        const obj = JSON.parse(await readFile(PLAN_DIR + '/' + n, 'utf8'))
-        if (obj && !obj.executedAt && stepsSignature(obj.steps) === sig) return { file: PLAN_DIR + '/' + n, obj }
+        const got = await readPlanObject(n)
+        if (got.ok && got.obj && got.obj.sessionId === sessionId && !got.obj.executedAt && stepsSignature(got.obj.steps) === sig) {
+          return { file: PLAN_DIR + '/' + n, obj: got.obj }
+        }
       } catch {}
     }
     return null
@@ -1857,9 +1915,9 @@ const PROVIDER_DEFAULT_MODEL = {
       // 与 /api/cn/plans 同一道闸 planPathOk:只认 PLAN_DIR 内的 plan-<数字>.json,别的路径一律拒绝并说明。
       let planFile = ''
       if (args.planFile) {
-        const ok = planPathOk(String(args.planFile))
-        if (!ok) return '❌ planFile 只能是 ' + PLAN_DIR + '/plan-<数字>.json(出计划阶段存盘的那个路径);不接受其它目录或文件名:' + String(args.planFile)
-        planFile = ok
+        const named = resolvePlanPath(String(args.planFile), PLAN_DIR)
+        if (!named.ok) return '❌ planFile 只能是 ' + PLAN_DIR + '/plan-<数字>.json(出计划阶段存盘的那个路径);不接受其它目录或文件名:' + String(args.planFile)
+        planFile = named.path
       }
       if (args.plan !== undefined && args.plan !== null && args.plan !== '') {
         planObj = typeof args.plan === 'string' ? parseFirstJsonObject(args.plan)
@@ -1868,7 +1926,8 @@ const PROVIDER_DEFAULT_MODEL = {
       }
       let planFromFile = null
       if (!planObj && planFile) {
-        try { planObj = JSON.parse(await readFile(planFile, 'utf8')) } catch { planObj = null }
+        const got = await readPlanObject(planFile)
+        planObj = got.ok ? got.obj : null
         if (!planObj) return '❌ 读不到计划文件:' + planFile
         planFromFile = planObj
       }
@@ -1887,33 +1946,41 @@ const PROVIDER_DEFAULT_MODEL = {
         if (!obj || !Array.isArray(obj.steps) || !obj.steps.length) {
           return '❌ 计划未按 JSON 返回,原文:\n' + pr.text.slice(0, 600)
         }
-        const file = PLAN_DIR + '/plan-' + Date.now() + '.json'
+        const file = planFileName()
         try {
-          await mkdir(PLAN_DIR, { recursive: true })
-          await writeFile(file, JSON.stringify({ goal: String(args.goal), planner, source: 'plan_run', steps: obj.steps }, null, 2), 'utf8')
-        } catch {}
+          await writePlanObject(file, { goal: String(args.goal), planner, source: 'plan_run', steps: obj.steps }, { create: true })
+        } catch (error) { return '❌ 计划保存失败: ' + String(error.message || error) }
         return renderPlanTable(obj.steps, file, '计划已生成(**尚未执行**)')
       }
 
-      // ── 阶段二:执行(必须显式 approve) ──────────────────────────────
+      // ── 阶段二:执行(必须显式 approve + 当前会话的 exit_plan_mode 宿主证据) ──
       if (args.approve !== true) {
         return renderPlanTable(planObj.steps || [], planFile, '已读到计划但**未获批准** —— 带 approve=true 才会执行')
       }
-      // ⚠️ 安全(审计 2026-08-20):approve 原来只是模型自报的布尔,"默认不执行"是约定不是强制。
-      // 绑定到真实批准痕迹:① 计划来自 PLAN_DIR 内已存盘文件(人看过那份才会拿它的路径来 approve);
-      // ② 或直传 JSON 能在 PLAN_DIR 匹配到一份带 approvedAt(exit_plan_mode A3 批准时落的)的文件。
-      // 两者都不满足(裸 JSON + approve=true、凭空编的计划)→ 只存盘不执行,让人看过再来。
-      if (!planFromFile) {
-        const pre = await findMatchingPlanFile(planObj.steps).catch(() => null)
-        const approvedOnDisk = !!(pre && pre.obj && pre.obj.approvedAt)
-        if (!approvedOnDisk) {
-          const file = PLAN_DIR + '/plan-' + Date.now() + '.json'
+      // approve:true / approvedAt / 文件存在都不是授权。必须有本会话
+      // exit_plan_mode 成功 tool/call+tool/result，且 dsh-plan 步骤指纹仍匹配。
+      const session = exec.agent && exec.agent.session
+      const sessionId = session && typeof session.id === 'string' ? session.id : ''
+      const gate = evaluatePlanApproval({
+        sessionId,
+        plan: planObj,
+        approvalRecord: planFromFile || planObj,
+        hostEvent: sessionId
+          ? { sessionId, events: ownSessionEvents(session) }
+          : null,
+      })
+      if (!gate.ok) {
+        if (!planFromFile && !planFile) {
+          const file = planFileName()
           try {
-            await mkdir(PLAN_DIR, { recursive: true })
-            await writeFile(file, JSON.stringify({ goal: String(args.goal || planObj.goal || ''), planner: String(planObj.planner || 'plan-mode'), source: String(planObj.source || 'plan-mode'), steps: planObj.steps }, null, 2), 'utf8')
-          } catch {}
-          return renderPlanTable(planObj.steps || [], file, '计划已存盘但**未执行**:approve 必须针对一份人看过的存盘计划 —— 请检查上面的文件,然后带 `approve=true, planFile="' + file + '"` 再调一次。(直传 JSON + approve=true 不会直接执行,除非它与一份计划模式已批准的存盘计划一致)')
+            await writePlanObject(file, { goal: String(args.goal || planObj.goal || ''), planner: String(planObj.planner || 'plan-mode'), source: String(planObj.source || 'plan-mode'), steps: planObj.steps }, { create: true })
+            planFile = file
+          } catch (error) { return '❌ 计划保存失败: ' + String(error.message || error) }
         }
+        const why = gate.code === 'UNWIRED'
+          ? '未接线/本会话没有 exit_plan_mode 批准对'
+          : '批准无效(' + (gate.reason || gate.code) + ')'
+        return renderPlanTable(planObj.steps || [], planFile, '计划已存盘但**未执行**:' + why + ' —— 请在当前会话用计划模式批准后再带 `approve=true, planFile="' + planFile + '"` 再调一次。approve=true / approvedAt / 文件存在单独都不构成授权。')
       }
       let swarm
       try { swarm = await loadSwarm() } catch (e) {
@@ -1926,7 +1993,7 @@ const PROVIDER_DEFAULT_MODEL = {
       // 计划 JSON 直传且没有 planFile:先落盘,追踪页的计划面板才看得见。
       // exit_plan_mode 批准时(A3)可能刚落过同一份 —— 步骤签名一致且没跑过就复用那份,不重复建档。
       let matched = null
-      if (!planFile) matched = await findMatchingPlanFile(planObj.steps)
+      if (!planFile) matched = await findMatchingPlanFile(planObj.steps, sessionId)
       const fileObj = matched ? matched.obj : null
       // 直传的计划 JSON 通常只有 steps(dsh-plan 块就是这样):目标取参数/匹配到的文件,
       // 计划者/来源没写就记 plan-mode(计划模式批准是直传的主路径);plan_run 自己出的计划文件里带 planner/source
@@ -1937,11 +2004,14 @@ const PROVIDER_DEFAULT_MODEL = {
       if (!planFile) {
         if (matched) planFile = matched.file
         else {
-          planFile = PLAN_DIR + '/plan-' + Date.now() + '.json'
+          // 四处生成点里后果最重的一处:这里是「人已批准、马上要执行」那一步,同毫秒重名会让
+          // 一次已获批准的执行被时钟精度挡掉(下面的 create:true 是同一道 fail-closed EEXIST 闸)。
+          // 主控首轮只修了另外三处 —— 漏掉这里是因为按模板字面量 `plan-${Date.now()}` 搜索,
+          // 而这一行是字符串拼接写法,形状不同。由接线审查者独立发现。
+          planFile = planFileName()
           try {
-            await mkdir(PLAN_DIR, { recursive: true })
-            await writeFile(planFile, JSON.stringify({ goal: goalGiven, planner: plannerLabel, source, steps }, null, 2), 'utf8')
-          } catch (e) { notes.push('计划落盘失败:' + String((e && e.message) || e)) }
+            await writePlanObject(planFile, { goal: goalGiven, planner: plannerLabel, source, steps, sessionId }, { create: true })
+          } catch (e) { return '❌ 计划落盘失败，未执行:' + String((e && e.message) || e) }
         }
       }
 
@@ -2048,13 +2118,15 @@ const PROVIDER_DEFAULT_MODEL = {
           ? { id: st.id, ok: r.ok, ms: r.ms, error: r.ok ? undefined : r.error, provider: r.provider ?? null, model: r.model ?? null, text: clipText(r.text, 3000) }
           : { id: st.id, ok: false, ms: 0, error: '未执行', provider: null, model: null, text: '' }
       })
+      let persistenceWarning = ''
       if (planFile) {
+        let opened
         try {
-          let prev = {}
-          try { prev = JSON.parse(await readFile(planFile, 'utf8')) } catch {}
-          if (!prev || typeof prev !== 'object' || Array.isArray(prev)) prev = {}
-          await mkdir(dirname(planFile), { recursive: true })
-          await writeFile(planFile, JSON.stringify({
+          opened = await openPlanFile({ path: planFile, planDir: PLAN_DIR, flags: 'r+' })
+          if (!opened.ok) throw new Error(opened.message || opened.code)
+          const prev = JSON.parse(await opened.handle.readFile('utf8'))
+          if (planFingerprint(prev) !== gate.fingerprint || (prev.sessionId && prev.sessionId !== sessionId)) throw new Error('计划在执行期间已改变，旧结果未写入新计划')
+          const updated = {
             ...prev,
             goal: prev.goal || goalGiven,
             steps: Array.isArray(prev.steps) && prev.steps.length ? prev.steps : steps,
@@ -2063,8 +2135,18 @@ const PROVIDER_DEFAULT_MODEL = {
             executor, reviewer,
             results,
             review: clipText(reviewText, 4000),
-          }, null, 2), 'utf8')
-        } catch {}   // 写不回去不影响这次执行的返回值,只是界面上看不到历史
+          }
+          const bytes = Buffer.from(JSON.stringify(updated, null, 2))
+          await opened.handle.truncate(0)
+          let written = 0
+          while (written < bytes.length) {
+            const part = await opened.handle.write(bytes, written, bytes.length - written, written)
+            if (!part.bytesWritten) throw new Error('计划写入未完成')
+            written += part.bytesWritten
+          }
+        } catch (error) {
+          persistenceWarning = '结果未持久化: ' + String(error.message || error)
+        } finally { await closePlanHandle(opened) }
       }
 
       // ── 输出:swarm 同款 <subagent> 行 + 一条 <plan/> 标签 + markdown 摘要 ──
@@ -2092,6 +2174,7 @@ const PROVIDER_DEFAULT_MODEL = {
         file: planFile, steps: flat.length, waves: waves.length, review_ok: rev.ok ? '1' : '0',
         reviewer, executor, planner: plannerLabel, source, cyclic: cyclic ? '1' : '0',
         goal: clipText(goal, 200), notes: clipText(notes.join(';'), 300),
+        persisted: persistenceWarning ? '0' : '1', persistence_error: persistenceWarning,
       }
       lines.push('<plan ' + Object.entries(planAttrs).map(([k, v]) => k + '="' + esc(String(v ?? '')) + '"').join(' ') + '/>')
       lines.push('</agent_swarm_result>')
@@ -2102,6 +2185,7 @@ const PROVIDER_DEFAULT_MODEL = {
         return '| ' + st.id + ' | ' + st.title + ' | ' + who + ' | ' + (r ? (r.ok ? '✅' : '❌ ' + clipText(r.error, 120)) : '⏹ 未执行') + ' | ' + Math.round((r?.ms || 0) / 100) / 10 + 's |'
       })
       const md = '\n\n🚀 **计划执行完毕**(' + waves.length + ' 波 · ' + nOk + '/' + results.length + ' 步成功)\n' +
+        (persistenceWarning ? '\n⚠️ ' + persistenceWarning + '\n' : '') +
         (notes.length ? '\n校验:' + notes.join(';') + '\n' : '') +
         '\n| # | 步骤 | 派给 | 结果 | 耗时 |\n|---|---|---|---|---|\n' + table.join('\n') +
         '\n\n**验收(' + reviewer + ')**\n' + reviewText +
@@ -2175,7 +2259,7 @@ const PROVIDER_DEFAULT_MODEL = {
     const plan = PLAN_EXIT_CALLS.get(key)
     if (plan === undefined) return
     PLAN_EXIT_CALLS.delete(key)
-    if (block && block.isError === true) return          // Keep planning / 被取消 → 不算批准
+    if (!block || block.isError === true || event.data?.error) return
     if (PLAN_PERSISTED.has(key)) return
     PLAN_PERSISTED.add(key)
     const m = /```dsh-plan\s*\n([\s\S]*?)```/.exec(plan)
@@ -2184,12 +2268,11 @@ const PROVIDER_DEFAULT_MODEL = {
     try { obj = JSON.parse(m[1]) } catch { obj = parseFirstJsonObject(m[1]) }
     const steps = obj && Array.isArray(obj.steps) ? obj.steps : null
     if (!steps || !steps.length) return
-    const file = PLAN_DIR + '/plan-' + Date.now() + '.json'
-    mkdir(PLAN_DIR, { recursive: true })
-      .then(() => writeFile(file, JSON.stringify({
-        goal: firstHeading(plan), planner: 'plan-mode', source: 'plan-mode', sessionId: session.id,
-        approvedAt: new Date().toISOString(), markdown: plan, steps,
-      }, null, 2), 'utf8'))
+    const file = planFileName()
+    writePlanObject(file, {
+      goal: firstHeading(plan), planner: 'plan-mode', source: 'plan-mode', sessionId: session.id,
+      approvedAt: new Date().toISOString(), markdown: plan, steps,
+    }, { create: true })
       .catch((e) => console.error('[cn-capabilities/plan] 已批准计划落盘失败:', String((e && e.message) || e)))
   }
   // 计划模式的「本机附加」以**独立的一段系统提示**接在原生 plan 段之后(order 51,紧跟宿主的 50),
@@ -2391,7 +2474,7 @@ const PROVIDER_DEFAULT_MODEL = {
     description: 'Karpathy 式自主迭代优化循环:给定目标(goal)+ 验证命令(verify,输出一个数字指标),循环让国产模型子代理做一次原子修改 → 验证 → 改进则保留(commit)否则回滚(discard)→ 记录日志。默认在 ~/Projects/OpenCLI 下运行。当用户要求"自主优化 X / 提升某指标 / 自动迭代改进"时使用。',
     parameters: {
       goal: { type: 'string', required: true, description: '优化目标,如"提升浏览器命令通过率到 59/59"' },
-      verify: { type: 'string', required: true, description: '验证命令,输出一个数字指标(如 npx tsx autoresearch/eval-browse.ts 2>&1 | tail -1)' },
+      verify: { type: 'string', required: true, description: '可信验证命令，在独立的基线副本叠加候选源代码后执行。stdout 必须输出 METRIC=数字 或 {"metric":数字}（metric 参数可指定字段）。测试/评分/配置不得由候选修改。' },
       scope: { type: 'string', description: '可修改文件范围(逗号分隔 glob,可选)' },
       metric: { type: 'string', description: '指标名,默认 metric' },
       direction: { type: 'string', enum: ['higher', 'lower'], description: '优化方向,默认 higher' },
@@ -2407,101 +2490,136 @@ const PROVIDER_DEFAULT_MODEL = {
     timeoutMs: 1800000,
     isConcurrencySafe: () => false,
     async execute(args, exec) {
-      const sub = ctx.get('subprocess')
       const subagents = ctx.get('subagents')
-      if (sub === undefined || subagents === undefined) return { error: 'subprocess/subagents 服务不可用' }
+      if (subagents === undefined) return { error: 'subagents 服务不可用' }
 
       const cwd = String(args.cwd || process.env.HOME + '/Projects/OpenCLI')
       const goal = String(args.goal || '')
       const verify = String(args.verify || '')
       if (!goal || !verify) return { error: '需要 goal 和 verify 参数' }
-      const scope = args.scope ? String(args.scope) : 'src/**/*.ts,clis/**/*.js'
+      const scope = args.scope ? String(args.scope) : 'src/**,lib/**,app/**,pkg/**,clis/**'
+      const sourceAllowlist = scope.split(',').map((s) => s.trim()).filter(Boolean)
       const metric = String(args.metric || 'metric')
       const direction = args.direction === 'lower' ? 'lower' : 'higher'
       const iterations = Math.max(1, Math.min(20, Number(args.iterations) || 5))
       const provider = String(args.provider || 'qwen')
       const model = args.model ? String(args.model) : 'qwen3.8-max'
+      const metricSpec = { field: metric }
 
-      const runCmd = async (command) => {
-        const handle = sub.spawn({
-          argv: ['/bin/bash', '-lc', command],
-          cwd,
-          stdio: {
-            stdin: 'ignore',
-            stdout: { maxBytes: 4 * 1024 * 1024, spill: { maxBytes: 8 * 1024 * 1024 } },
-            stderr: { maxBytes: 512 * 1024 },
-          },
-          graceMs: 5000,
+      const workspace = await createIsolatedAutoresearchWorkspace({
+        sourceRepo: cwd,
+        sourceAllowlist,
+      })
+      if (!workspace.ok) {
+        return { error: '隔离工作区创建失败: ' + (workspace.error || 'unknown') }
+      }
+
+      const lines = []
+      const outcome = { report: '' }
+      const iterationRecords = []
+      const artifactDir = join(process.env.DSH_CN_AUTORESEARCH_RESULT_DIR || join(homedir(), '.dsh', 'logs', 'autoresearch'), randomUUID())
+      try {
+        const measured = await measureIsolatedBaseline({
+          workspace,
+          verifyCmd: verify,
+          metricSpec,
           signal: exec.signal,
         })
-        const outcome = await handle.done
-        const out = handle.collected.stdout ? handle.collected.stdout.readFrom(0) : null
-        const err = handle.collected.stderr ? handle.collected.stderr.readFrom(0) : null
-        const text = (out && out.text ? out.text.trim() : '') + (err && err.text ? '\n' + err.text.trim() : '')
-        return { exit: outcome.exitCode, text }
-      }
+        const baseMetric = measured.ok ? measured.metric : NaN
+        lines.push('目标: ' + goal)
+        lines.push('候选在临时隔离仓评估，原仓保持不变；成功修改导出为补丁。')
+        lines.push('指标: ' + metric + '(' + direction + ') | baseline: ' + (measured.ok ? baseMetric : '解析失败:' + (measured.status || measured.reason || '')))
+        if (!measured.ok) { lines.push('[停止: baseline 指标无法解析]'); return outcome }
 
-      const extractMetric = (raw) => {
-        const m = raw.match(/(-?\d+(?:\.\d+)?)/)
-        return m ? Number(m[1]) : NaN
-      }
+        let best = baseMetric
+        let log = []
 
-      const baseline = await runCmd(verify)
-      const baseMetric = extractMetric(baseline.text)
-      const lines = []
-      lines.push('目标: ' + goal)
-      lines.push('指标: ' + metric + '(' + direction + ') | baseline: ' + (isNaN(baseMetric) ? '解析失败:' + baseline.text.slice(0, 80) : baseMetric))
-      if (isNaN(baseMetric)) return { report: lines.join('\n') + '\n[停止: baseline 指标无法解析]' }
+        for (let i = 1; i <= iterations; i++) {
+          const ctxText = composeOptimizeAgentPrompt({
+            goal,
+            metric,
+            best,
+            baseMetric,
+            direction,
+            scope,
+            recentLog: log.length ? log.join('; ') : '(无)',
+          }) + '\n你没有工具。根据以下源文件，只输出一个标准 unified diff（a/ 与 b/ 路径），不要执行命令或修改文件。禁止修改测试、评分或验证材料。\n'
+            + await candidateSourceContext(workspace)
 
-      let best = baseMetric
-      let log = []
+          let run
+          try {
+            run = await subagents.start('spawn', {
+              parent: exec.agent,
+              prompt: [{ type: 'text', text: ctxText }],
+              signal: exec.signal,
+              label: 'autoresearch-' + i,
+              toolFilter: { allow: [] },
+              agentOptions: model ? { provider, model } : { provider },
+            })
+          } catch (e) {
+            lines.push('第' + i + '轮委派失败: ' + String((e && e.message) || e))
+            break
+          }
+          let res
+          try { res = await run.result } finally { await run.dispose() }
+          if (exec.signal?.aborted || res.stopReason !== 'completed') {
+            lines.push('第' + i + '轮未完整产出候选: ' + (res.stopReason || 'unknown'))
+            break
+          }
+          const rawPatch = res.output.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim()
+          const patch = rawPatch.replace(/^```(?:diff|patch)?\s*\n/, '').replace(/\n```\s*$/, '')
+          const applied = await applyCandidatePatch(workspace, patch)
+          if (!applied.ok) {
+            lines.push('第' + i + '轮候选被拒绝: ' + applied.reason)
+            iterationRecords.push({ status: 'patch-rejected', reason: applied.reason })
+            continue
+          }
 
-      for (let i = 1; i <= iterations; i++) {
-        const ctxText = composeOptimizeAgentPrompt({
-          goal,
-          metric,
-          best,
-          baseMetric,
-          direction,
-          scope,
-          recentLog: log.length ? log.join('; ') : '(无)',
-        })
-
-        let run
-        try {
-          run = await subagents.start('spawn', {
-            parent: exec.agent,
-            prompt: [{ type: 'text', text: ctxText }],
+          // 子代理只改 isolatedDir;提交/回滚/指标都在隔离仓内完成,源仓 HEAD 不动。
+          const iter = await runAutoresearchIteration({
+            workspace,
+            verifyCmd: verify,
+            direction,
+            metricSpec,
             signal: exec.signal,
-            label: 'autoresearch-' + i,
-            agentOptions: model ? { provider, model } : { provider },  // model 现在几乎总有值(见上表)
+            commitMessage: 'autoresearch iter ' + i,
           })
-        } catch (e) {
-          lines.push('第' + i + '轮委派失败: ' + String((e && e.message) || e))
-          break
+          iterationRecords.push(iter)
+          const val = Number.isFinite(iter.metric) ? iter.metric : NaN
+          if (iter.status === 'improved') {
+            best = iter.metric
+            log.push('iter' + i + ':' + iter.metric + '(改进)')
+            lines.push('第' + i + '轮 ✅ ' + metric + ' ' + best)
+          } else if (iter.status === 'cancelled') {
+            lines.push('第' + i + '轮 取消')
+            break
+          } else {
+            log.push('iter' + i + ':' + (isNaN(val) ? 'N/A' : val) + '(' + (iter.status || '丢弃') + ')')
+            lines.push('第' + i + '轮 ❌ ' + (iter.reason || iter.status || '无改进') + (iter.rolledBack ? ',已回滚' : ''))
+          }
         }
-        const res = await run.result
-        await run.dispose()
-        const modDesc = res.output.filter((b) => b.type === 'text').map((b) => b.text).join(' ').slice(0, 120)
 
-        // git 提交当前修改,再验证
-        await runCmd('git add -A && git commit -m "autoresearch iter ' + i + '" --allow-empty -q')
-        const v = await runCmd(verify)
-        const val = extractMetric(v.text)
-        const improved = !isNaN(val) && (direction === 'higher' ? val > best : val < best)
-        if (improved) {
-          best = val
-          log.push('iter' + i + ':' + val + '(改进)')
-          lines.push('第' + i + '轮 ✅ ' + metric + ' ' + best + '(子代理: ' + modDesc.slice(0, 60) + ')')
-        } else {
-          await runCmd('git reset --hard HEAD~1 -q && git clean -fd -q')
-          log.push('iter' + i + ':' + (isNaN(val) ? 'N/A' : val) + '(丢弃)')
-          lines.push('第' + i + '轮 ❌ ' + (isNaN(val) ? '指标解析失败' : val + ' 无改进') + ',已回滚')
+        lines.push('最终 ' + metric + ': ' + best + '(baseline ' + baseMetric + ',共 ' + iterations + ' 轮)')
+        return outcome
+      } catch (error) {
+        lines.push('已停止: ' + String(error.message || error))
+        return outcome
+      } finally {
+        let exported = false
+        try {
+          const saved = await saveAutoresearchArtifacts(workspace, artifactDir, { goal, report: lines.join('\n'), iterations: iterationRecords })
+          lines.push('补丁: ' + saved.patchPath, '验收记录: ' + saved.manifestPath)
+          exported = true
+        } catch (error) {
+          lines.push('导出失败，保留候选仓: ' + workspace.isolatedDir + ' (' + String(error.message || error) + ')')
         }
+        if (exported) {
+          const disposed = await disposeWorkspace(workspace).catch((error) => ({ originalIntact: false, cleanupError: String(error) }))
+          if (!disposed.originalIntact) lines.push('注意: 检测到原仓在运行期间发生变化，请检查外部并发修改。')
+          if (disposed.cleanupError) lines.push('临时仓清理失败: ' + disposed.cleanupError)
+        }
+        outcome.report = lines.join('\n')
       }
-
-      lines.push('最终 ' + metric + ': ' + best + '(baseline ' + baseMetric + ',共 ' + iterations + ' 轮)')
-      return { report: lines.join('\n') }
     },
   }))
 

@@ -1,0 +1,19 @@
+# 套件 dsh-mcp-bridge(node --test test/*.mjs;该包无 test 脚本)
+# 处理口径(全部日志一致,共两步,此外未作任何删改):
+#   1) 路径前缀替换一次:用户主目录 → <HOME>、本 worktree 根 → <REPO>、系统临时目录 → <TMP>;
+#   2) 正文末尾空白规范化为恰好一个换行(捕获噪音);行内空白一字未动。
+# SHA256.txt 里的摘要是**经上述两步之后**这份文件本身的。
+#
+✔ initialize is emitted as one MCP SSE protocol frame (23.845959ms)
+✔ tools/list exposes the five bounded tools and warns that prompt burns quota (7.873917ms)
+✔ tools/call agos_sessions reads a fixture projcache through /mcp (5.688083ms)
+✔ prompt is intercepted and memory search goes through /api/memory/search (BM25), stripping non-contract fields (4.452333ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 147.246125
+EXIT=0

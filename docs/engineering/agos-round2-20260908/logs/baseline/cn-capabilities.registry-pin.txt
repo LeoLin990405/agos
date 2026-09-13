@@ -1,0 +1,160 @@
+✔ extractStructuredMetric accepts JSON / METRIC= / labeled field and never first number (0.974042ms)
+✔ compareMetric requires explicit direction and treats equality as not improved (0.095625ms)
+✔ staged + unstaged + untracked survive create, no-op, and dispose (908.641917ms)
+✔ commit failure is evidenced and does not mutate the original repo (1626.546709ms)
+✔ no improvement rolls back isolated HEAD only (965.732834ms)
+✔ improvement is kept in the isolated repo only (971.088125ms)
+✔ cancel is trackable and does not claim rollback without a reset (808.900333ms)
+✔ editing scorer, asserts, or fixtures is a protected violation (756.252875ms)
+✔ accepted source patch is verified in baseline evaluator and survives workspace cleanup (917.180958ms)
+✔ candidate cannot change verifier command or package scripts even with scope ** (609.624208ms)
+✔ verification side effects cannot rewrite baseline scoring material and claim improvement (722.956208ms)
+✔ production autoresearch uses a tool-free patch proposer and returns durable artifacts (924.041667ms)
+✔ real OS sandbox denies outside reads/writes, verifier writes, inherited secrets and network (41.213625ms)
+✔ empty object is not consensus and not parsedOk (0.850917ms)
+✔ missing required fields / wrong types / parse failure all refuse agree (0.140417ms)
+✔ empty raw and non-object JSON stay unknown (0.054208ms)
+✔ empty disagreements means agree only inside a complete typed structure (0.116375ms)
+✔ too few valid panelists cannot become consensus or parsedOk (0.05875ms)
+✔ valid review with disagreements is parsedOk and not consensus (0.077208ms)
+✔ self-reported consensus is ignored; disagreements are the source of truth (0.055208ms)
+✔ vision structure shares the same empty-object refusal (0.058667ms)
+✔ fenced JSON and braces inside strings still extract the object (0.064708ms)
+✔ raw answer text is preserved on every parse outcome (0.077209ms)
+✔ historical records missing structureReason stay uncollected (0.05075ms)
+✔ object-array disagreements still count so consensus cannot flip to true (0.050084ms)
+✔ council persist always has kind=review and an independent disagreements array (0.791166ms)
+✔ parse failure still writes disagreements:[] so UI cannot say 早于该字段 (0.685542ms)
+✔ non-string disagreement items are made readable, never String()-coerced into garbage (0.2655ms)
+✔ inconclusive persist has kind and panel status, no invented arbitration (0.249292ms)
+✔ speak tool definition is back and speech.py is on the execute path (0.256625ms)
+✔ 对象数组形态的分歧不再被丢弃，consensus 不会反转成 true (2026-08-22 验收 P1) (0.135167ms)
+✔ 读不出文本的分歧项留占位，不吐 [object Object]，也不减少条数 (0.188ms)
+✔ missing disagreements array is unknown, not an empty agree-list (was the empty-JSON bug) (0.089625ms)
+✔ empty / invalid arbiter JSON verdict keeps raw text and does not say 各家一致 (0.091667ms)
+✔ structureReason is written only when present; historical absence stays uncollected (0.254083ms)
+✔ 根内允许的文件通过,带出 mime (2.335708ms)
+✔ ../ 逃逸被拒(outside-root) (0.316375ms)
+✔ 软链绕行被拒(指向根外的符号链接 realpath 后出界) (0.194084ms)
+✔ 扩展名白名单:.txt 即使在根内也拒 (0.236917ms)
+✔ 不存在的文件 → not-found;空路径 → missing (0.1935ms)
+✔ 大小写不敏感:.PNG 视作图片 (0.315292ms)
+✔ 附件根本身不作为文件通过(无扩展名) (0.153583ms)
+✔ W19 正向:objects 下裸 sha256 名、无扩展名 → 嗅探定 mime;attachmentId 拼路径与之同源 (0.994958ms)
+✔ W19 闸 1 穿越:objects/ab/../../../outside/<hex> → outside-root(先于嗅探) (0.405166ms)
+✔ W19 闸 2 软链:objects 下的 <hex> 是软链 → 指向根外拒(outside-root);指向根内无扩展名文件也拒(realpath 后不在 objects 下 → bad-ext) (0.830542ms)
+✔ W19 闸 3 双扩展:objects 下带点的名字一律拒(<hex>.txt.png 即使真 PNG 头、<hex>.png.txt、<hex>.png) (1.326708ms)
+✔ W19 闸 4 伪造 mediaType:&mediaType= 与嗅探不符 → media-type-mismatch;非图片内容 → bad-magic;目录 → not-file;白名单扩展名文件也校验期望值 (5.378541ms)
+✔ a result without a real matching tool-result block, or with host error, is not approval (0.969625ms)
+✔ PLAN_APPROVAL_HOST documents the in-repo exit_plan_mode pair, not an invented event (0.091541ms)
+✔ planFingerprint is stable for the same steps and changes when a step changes (0.154125ms)
+✔ real exit_plan_mode approval succeeds and binds session + fingerprint + callId (0.260917ms)
+✔ events snapshot form also accepts the last successful exit_plan_mode pair (0.206917ms)
+✔ no host event is UNWIRED — generate/view stay allowed; execute is not closed (0.054334ms)
+✔ Keep planning (isError) is UNAPPROVED (0.063333ms)
+✔ cross-session reuse of a valid host pair fails (0.052416ms)
+✔ modified plan invalidates the old approval (0.34175ms)
+✔ forged approvedAt / approve:true are not authorization (0.156584ms)
+✔ approval/asked + approval/decided is not a plan-content approval (UNWIRED) (0.093458ms)
+✔ file existence / empty host object cannot close the loop (0.220917ms)
+✔ resolvePlanPath: basename and planDir/basename work; escape and illegal names fail (3.414875ms)
+✔ openPlanFile: ordinary file still works for read and write (5.685458ms)
+✔ openPlanFile: legal-name symlink is rejected (read and write) (1.813041ms)
+✔ openPlanFile: planDir symlink and non-regular leaf fail (1.450709ms)
+✔ openPlanFile: missing file is ENOENT; wx does not follow a planted name (1.990833ms)
+✔ openPlanFile: world-writable ordinary file is still a regular file we can read (1.839334ms)
+✔ a replacement during open is rejected before any truncation (string and numeric flags) (4.59375ms)
+✔ replacing planDir under the same pathname cannot redirect a write (1.717583ms)
+✔ 0.1.2 session helpers use public snapshotEvents/ownEvents only (0.786541ms)
+✔ A2: plan/mode active → read-only(记住原预设);inactive → 恢复;写操作不在 append 边界内重入 (10.289792ms)
+✔ A2: 没有 permissionPresets 服务时安静跳过 (3.081083ms)
+✔ A3: exit_plan_mode 批准 → dsh-plan 块落盘;拒绝 / 无块 / 重复结果 → 不落盘 (14.545875ms)
+✖ A4: plan_run approve=true(plan JSON 直传)→ 复用 A3 落的文件 → 两波执行 → 上游注入 → 验收 → 写回 → XML/presentationMeta (7.873958ms)
+✖ A4: 裸 JSON 即使 approve 也只落盘;planFile 批准后执行并记录依赖校验 (2.749ms)
+✔ A4 note: approve=true / approvedAt 不是宿主批准(evaluatePlanApproval 保持 UNWIRED/UNAPPROVED) (0.201375ms)
+✔ plan phase: 无 goal 报错;计划者返回 JSON → 存盘 → 返回 markdown 表(零行) (1.173ms)
+✔ production approval does not relabel inherited parent events as current-session approval (0.771625ms)
+✔ production council malformed arbiter structure renders inconclusive rather than a fabricated disagreement (8.53ms)
+✖ plan execution never writes old results over steps edited during execution (1.066167ms)
+✖ missing plan at writeback preserves returned execution results and reports persistence failure (0.859375ms)
+✔ normal cache parses history and provider responses without probing (8.738292ms)
+✔ missing Cache.db is a soft dependency: empty 200-shaped result with error (0.762916ms)
+✔ partial provider response is retained without inventing missing fields (3.509417ms)
+ℹ tests 82
+ℹ suites 0
+ℹ pass 78
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 9299.862209
+
+✖ failing tests:
+
+test at test/plan-run.fake.test.mjs:260:1
+✖ A4: plan_run approve=true(plan JSON 直传)→ 复用 A3 落的文件 → 两波执行 → 上游注入 → 验收 → 写回 → XML/presentationMeta (7.873958ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /<agent_swarm_result>/. Input:
+  
+  "❌ 无法加载 swarm 调度器(dsh-kimicode-swarm):The requested module '@deepseek-ai/dsh-settings' does not provide an export named 'installSettingsSection'"
+  
+      at TestContext.<anonymous> (file:///private/tmp/agos-baseline-7e7e359/plugins/cn-capabilities/test/plan-run.fake.test.mjs:279:10)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: "❌ 无法加载 swarm 调度器(dsh-kimicode-swarm):The requested module '@deepseek-ai/dsh-settings' does not provide an export named 'installSettingsSection'",
+    expected: /<agent_swarm_result>/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at test/plan-run.fake.test.mjs:334:1
+✖ A4: 裸 JSON 即使 approve 也只落盘;planFile 批准后执行并记录依赖校验 (2.749ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /依赖不存在的 zzz/. Input:
+  
+  "❌ 无法加载 swarm 调度器(dsh-kimicode-swarm):The requested module '@deepseek-ai/dsh-settings' does not provide an export named 'installSettingsSection'"
+  
+      at TestContext.<anonymous> (file:///private/tmp/agos-baseline-7e7e359/plugins/cn-capabilities/test/plan-run.fake.test.mjs:356:10)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: "❌ 无法加载 swarm 调度器(dsh-kimicode-swarm):The requested module '@deepseek-ai/dsh-settings' does not provide an export named 'installSettingsSection'",
+    expected: /依赖不存在的 zzz/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at test/plan-run.fake.test.mjs:454:1
+✖ plan execution never writes old results over steps edited during execution (1.066167ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /persisted="0"/. Input:
+  
+  "❌ 无法加载 swarm 调度器(dsh-kimicode-swarm):The requested module '@deepseek-ai/dsh-settings' does not provide an export named 'installSettingsSection'"
+  
+      at TestContext.<anonymous> (file:///private/tmp/agos-baseline-7e7e359/plugins/cn-capabilities/test/plan-run.fake.test.mjs:469:10)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: "❌ 无法加载 swarm 调度器(dsh-kimicode-swarm):The requested module '@deepseek-ai/dsh-settings' does not provide an export named 'installSettingsSection'",
+    expected: /persisted="0"/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at test/plan-run.fake.test.mjs:477:1
+✖ missing plan at writeback preserves returned execution results and reports persistence failure (0.859375ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /persisted="0"/. Input:
+  
+  "❌ 无法加载 swarm 调度器(dsh-kimicode-swarm):The requested module '@deepseek-ai/dsh-settings' does not provide an export named 'installSettingsSection'"
+  
+      at TestContext.<anonymous> (file:///private/tmp/agos-baseline-7e7e359/plugins/cn-capabilities/test/plan-run.fake.test.mjs:488:10)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: "❌ 无法加载 swarm 调度器(dsh-kimicode-swarm):The requested module '@deepseek-ai/dsh-settings' does not provide an export named 'installSettingsSection'",
+    expected: /persisted="0"/,
+    operator: 'match',
+    diff: 'simple'
+  }

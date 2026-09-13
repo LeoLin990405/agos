@@ -64,6 +64,37 @@ test('no overlap falls back to importance and says so', () => {
   assert.deepEqual(report.items.map((item) => item.id), [fold.id, port.id])
 })
 
+test('empty store reports empty-store, never claims a reinjection that did not happen', () => {
+  // 空 store 是 not-collected:没有任何条目可供比较或回注。2026-09-09 前这里报
+  // no-overlap 且 note 声称「按重要度回注」—— 那是对一次并未发生的回注的断言。
+  const withQuery = proposeSessionMemory([], '构建目录', [])
+  assert.equal(withQuery.fallback, 'empty-store')
+  assert.equal(withQuery.itemCount, 0)
+  assert.deepEqual(withQuery.items, [])
+  assert.deepEqual(withQuery.hits, [])
+  assert.equal(withQuery.method, null, '没有排序发生过,不声称走了 importance-recency')
+  assert.equal(withQuery.copy, '会话记忆为空，本跳没有条目可回注，不是没有匹配')
+  assert.equal(withQuery.note, withQuery.copy)
+  assert.equal(withQuery.copy.includes('按重要度回注'), false, '空 store 不许说按重要度回注')
+  assert.equal(withQuery.copy.includes('词面没有重合'), false, '空 store 不是无词面重合:没有东西可供比较')
+  // 空问句 + 空 store:同样报 empty-store —— 条目不存在是更根本的事实。
+  const noQuery = proposeSessionMemory([], '', [])
+  assert.equal(noQuery.fallback, 'empty-store')
+  assert.equal(noQuery.copy, '会话记忆为空，本跳没有条目可回注，不是没有匹配')
+  // 条目存在但正文全空:usable 为 0,同样没有可回注内容。
+  const blankOnly = proposeSessionMemory([{ id: 'eeeeeeeeeeeeeeeeeeeeeeee', kind: 'fact', text: '   ' }], '构建', [])
+  assert.equal(blankOnly.fallback, 'empty-store')
+  // 有条目但不匹配仍是 no-overlap:两种情形必须可区分。
+  const noOverlap = proposeSessionMemory([fold], 'inbox triage', [])
+  assert.equal(noOverlap.fallback, 'no-overlap')
+  assert.equal(noOverlap.itemCount, 1)
+  assert.match(noOverlap.copy, /按重要度回注 1 条/)
+  // describe 层原样透传新标签,不把 empty-store 折叠回 no-overlap。
+  const view = describeSessionMemoryRelevance('s1', withQuery)
+  assert.equal(view.fallback, 'empty-store')
+  assert.equal(view.itemCount, 0)
+})
+
 test('constraint reserve keeps lexical siblings when items have no id', () => {
   const report = proposeSessionMemory([
     { kind: 'constraint', text: '不要改 fold' },

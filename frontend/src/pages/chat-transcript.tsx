@@ -5,7 +5,7 @@
  * Gemini 的展示 mock 作为 demo 态。
  *
  * P0-3:连续的通用工具调用折叠成 Kimi 式时间线(ToolTimelineGroup),
- * 特化卡(TerminalCard / SwarmBatchCard / ApprovalPanel)保持卡形不动。
+ * 特化卡(TerminalCard / FileToolCard / SwarmBatchCard / ApprovalPanel)保持卡形不动。
  *
  * P1-7:可选 prop `replayLimit` 做纯渲染层截断(fold 与 store 都不动),
  * 供 <ReplayScrubber> 回放;不传时行为与之前完全一致。
@@ -17,10 +17,12 @@ import { Chip } from '@/components/ui/Chip';
 import { ReasoningBlock } from '@/components/chat/ReasoningBlock';
 import { TerminalCard } from '@/components/ui/TerminalCard';
 import { SwarmBatchCard } from '@/components/chat/SwarmBatchCard';
+import { FileToolCard } from '@/components/chat/FileToolCard';
 import { ApprovalPanel } from '@/components/chat/ApprovalPanel';
+import { chatToolCardKind, fileToolPath } from '@/components/chat/tool-cards';
 import { TodoBar } from '@/components/chat/TodoBar';
 import type { StateLamp } from '@/design-system/tokens';
-import { conversationStore, respondApproval } from '@/stores/live';
+import { approvalView, conversationStore, respondApproval } from '@/stores/live';
 import type { ConversationItem, FoldedConversation, ToolItem } from '@/fold/model';
 import type { OptimisticImageAttachment } from '@/components/chat/ImageAttachments';
 import { extractMultimodalMessageId, stripImagePlaceholder, stripMultimodalMessageMarker } from '@/components/chat/CommandDeck';
@@ -374,11 +376,9 @@ const ToolTimelineGroup: React.FC<{ tools: readonly ToolItem[], keyPrefix: strin
   </div>
 );
 
-/** 通用工具行(非 swarm、非 bash 特化卡)——这些才进时间线。 */
+/** 通用工具行(非 swarm / bash / 文件特化卡)——这些才进时间线。 */
 function isGenericToolItem(item: ConversationItem | undefined): item is ToolItem {
-  if (item === undefined || item.kind !== 'tool') return false;
-  if (item.swarm !== undefined && item.swarm.length > 0) return false;
-  return item.name !== 'bash';
+  return item !== undefined && item.kind === 'tool' && chatToolCardKind(item) === 'generic';
 }
 
 /* ==========================================================================
@@ -595,6 +595,19 @@ function renderItem(
         </div>
       );
     }
+    if (chatToolCardKind(item) === 'file') {
+      return (
+        <div className="message-wrap tl-enter" key={key}>
+          <FileToolCard
+            name={item.name}
+            path={fileToolPath(item.argsRaw)}
+            status={item.status}
+            duration={item.endAt !== undefined ? fmtDur(item.endAt - item.startAt) : undefined}
+            resultText={item.resultText}
+          />
+        </div>
+      );
+    }
     if (item.name === 'bash') {
       const judged = yoloByCallId.get(item.callId);
       return (
@@ -637,9 +650,9 @@ function renderItem(
       </div>
     );
   }
+  const approval = approvalView(item.callId ?? item.id, sessionId)
   const respond = (outcome: 'allowed-once' | 'rejected') => {
-    // 0.1.2: answer the live $events waterfall keyed by the tool callId.
-    respondApproval(item.callId ?? item.id, outcome);
+    void respondApproval(item.callId ?? item.id, outcome, sessionId);
   };
   return (
     <div className="message-wrap tl-enter" key={key}>
@@ -649,6 +662,11 @@ function renderItem(
         actionSummary={item.reason ?? item.callId ?? item.id}
         diffSnippet={[]}
         readOnly={readOnly}
+        status={approval.status}
+        error={approval.error}
+        busy={approval.busy}
+        decision={approval.decision}
+        canRetry={approval.canRetry}
         onAllow={readOnly ? undefined : () => respond('allowed-once')}
         onReject={readOnly ? undefined : () => respond('rejected')}
       />

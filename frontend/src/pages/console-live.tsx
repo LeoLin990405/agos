@@ -97,6 +97,8 @@ export interface ConsoleExtraSources {
   /** 拿到过数据但本轮刷新失败(useResource degraded)。 */
   routesStale?: boolean;
   councilStale?: boolean;
+  progressStale?: boolean;
+  skillsStale?: boolean;
 }
 
 /** /api/cn/council-records 服务端固定 slice(-30);回满 30 条就说明可能有更早的被截掉。 */
@@ -204,9 +206,9 @@ export function deriveConsole(t: TelemetryState, s: { rows: SessionSummaryRow[];
   const failed = numAt(ov, 'lineage', 'failed');
   const skillsGroup = typeof ov?.['skills'] === 'object' && ov?.['skills'] !== null;
   const inboxSources: InboxSourceState = {
-    progress: t.progress !== undefined ? 'ready' : 'absent',
+    progress: t.progress !== undefined ? (extra.progressStale ? 'stale' : 'ready') : 'absent',
     routes: extra.routes !== undefined ? (extra.routesStale ? 'stale' : 'ready') : 'absent',
-    skills: skillsGroup ? 'ready' : 'absent',
+    skills: skillsGroup ? (extra.skillsStale ? 'stale' : 'ready') : 'absent',
     council: extra.council !== undefined ? (extra.councilStale ? 'stale' : 'ready') : 'absent',
   };
   const inboxNotes: string[] = [];
@@ -289,7 +291,11 @@ export function useConsoleLive({
     routes: routesData, council: councilData,
     routesStale: routesEnabled && routes.status === 'degraded' && routes.data !== undefined,
     councilStale: councilEnabled && council.status === 'degraded' && council.data !== undefined,
-  }), [overview.at, overviewData, progressData, sessions, routesData, councilData, routesEnabled, routes.status, routes.data, councilEnabled, council.status, council.data]);
+    progressStale: progressEnabled && progress.status === 'degraded' && progress.data !== undefined,
+    skillsStale: overviewEnabled && overview.status === 'degraded'
+      && overviewData !== undefined
+      && typeof overviewData['skills'] === 'object' && overviewData['skills'] !== null,
+  }), [overview.at, overviewData, overview.status, progressData, progress.status, progress.data, progressEnabled, sessions, routesData, councilData, routesEnabled, routes.status, routes.data, councilEnabled, council.status, council.data, overviewEnabled]);
 
   return {
     ...derived,

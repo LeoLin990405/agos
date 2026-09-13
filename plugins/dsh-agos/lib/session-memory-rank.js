@@ -27,6 +27,10 @@ export const MEMORY_POSTERIOR_COPY = ALLOCATE_POSTERIOR_COPY
 export const MEMORY_LEXICAL_COPY = '词面短名单，不是模型推荐'
 export const MEMORY_FALLBACK_QUERY_COPY = '本跳没有可排序的用户问句，按重要度回注'
 export const MEMORY_FALLBACK_OVERLAP_COPY = '词面没有重合，按重要度回注'
+// 空 store 是 not-collected(没有任何条目可供比较),不是 no-overlap(有条目但都不匹配)。
+// 2026-09-09 前,两种情形共用 no-overlap,且空 store 的 note 也声称「按重要度回注」——
+// 那是对一次并未发生的回注的断言。空 store 的文案只陈述「没有条目」,不许提回注成功。
+export const MEMORY_FALLBACK_EMPTY_STORE_COPY = '会话记忆为空，本跳没有条目可回注，不是没有匹配'
 export const MEMORY_SHORTLIST_COPY = '本跳回注按词面短名单，不是全量条目'
 export const INJECT_IS_NOT_VERDICT_COPY = '回注曝光不是胜负'
 export const RELEVANCE_UNCOLLECTED_COPY = '相关账本未采集'
@@ -204,9 +208,17 @@ export function proposeSessionMemory(items, query, state, options = {}) {
   const label = normalizeEvolveLabel(options.label || needle)
   const limit = options.limit ?? MEMORY_SHORTLIST_K
   const rows = Array.isArray(state) ? state : []
-  const lexical = shortlistMemoryItems(items, needle, limit)
+  const usable = usableMemoryItems(items).length
+  const lexicalAll = shortlistMemoryItems(items, needle, limit)
+  // fallback 三态:空 store 优先于一切 —— 条目本身不存在时,问句与词面比较都无从谈起,
+  // 任何「按重要度回注」的说法都是对未发生行为的断言。
+  const fallback = usable === 0
+    ? 'empty-store'
+    : !needle ? 'empty-query'
+      : lexicalAll.length === 0 ? 'no-overlap'
+        : null
+  const lexical = fallback === null ? lexicalAll : []
   const queryCollected = needle !== ''
-  const fallback = !queryCollected ? 'empty-query' : lexical.length === 0 ? 'no-overlap' : null
   const hits = fallback === null
     ? blendMemoryShortlist(lexical, rows, label, options)
     : rankByImportance(items, limit).map((item, index) => ({
@@ -228,9 +240,9 @@ export function proposeSessionMemory(items, query, state, options = {}) {
     ))
     return item === undefined ? [] : [item]
   })
-  const usable = usableMemoryItems(items).length
   let copy = MEMORY_SHORTLIST_COPY
-  if (fallback === 'empty-query') copy = MEMORY_FALLBACK_QUERY_COPY
+  if (fallback === 'empty-store') copy = MEMORY_FALLBACK_EMPTY_STORE_COPY
+  else if (fallback === 'empty-query') copy = MEMORY_FALLBACK_QUERY_COPY
   else if (fallback === 'no-overlap') copy = MEMORY_FALLBACK_OVERLAP_COPY
   const reserved = fallback === null
     ? reserveConstraint(selected, items, limit)
@@ -265,7 +277,8 @@ export function proposeSessionMemory(items, query, state, options = {}) {
     queryCollected,
     fallback,
     reserved: reserved.reserved === true,
-    method: fallback === null ? MEMORY_LEXICAL_METHOD : MEMORY_FALLBACK_METHOD,
+    // empty-store 没有任何排序发生过:method 是 null,不是 importance-recency。
+    method: fallback === null ? MEMORY_LEXICAL_METHOD : fallback === 'empty-store' ? null : MEMORY_FALLBACK_METHOD,
     note: fallback === null && rows.some((row) => row.label === label)
       ? MEMORY_POSTERIOR_COPY
       : fallback === null ? MEMORY_LEXICAL_COPY : copy,

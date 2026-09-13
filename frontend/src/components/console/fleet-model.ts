@@ -131,3 +131,34 @@ export function fleetRunState(run: FleetRun): 'running' | 'completed' | 'failed'
   if (run.ok === false) return 'failed';
   return 'unknown';
 }
+
+/** 页面标题只说功能面。农场名必须来自采集结果，禁止写死 Homelab。 */
+export const FLEET_FARM_HEADING = '机器与机架';
+
+export function fleetPluginAbsent(error?: string): boolean {
+  if (!error) return false;
+  const text = error.trim();
+  return /\bHTTP\s+404\b/i.test(text) || /^not found$/i.test(text) || /^404\b/.test(text);
+}
+
+export function fleetFarmSource(input: {
+  hasHostData: boolean;
+  hostCount: number;
+  reachableCount: number;
+  stalled: boolean;
+  error?: string;
+}): string {
+  if (input.hasHostData) return `已配置 ${input.hostCount} · 可达 ${input.reachableCount}`;
+  if (fleetPluginAbsent(input.error)) return '未采集';
+  if (input.stalled) return 'SSH 探测未返回，机架配置尚未采集';
+  if (input.error) return input.error;
+  return '等待 SSH 探测结果';
+}
+
+export function fleetUncollectedCopy(error?: string): string {
+  if (fleetPluginAbsent(error)) {
+    const http = error?.match(/HTTP\s+(\d+)/i);
+    return http ? `未采集：HTTP ${http[1]}` : '未采集';
+  }
+  return error || '机器数据暂不可用。';
+}

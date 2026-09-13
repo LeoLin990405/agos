@@ -1,0 +1,35 @@
+{
+  "schema": "agos-acceptance/host-dep-layers@1",
+  "rationale": "宿主包按**实测**依赖面分层,不按猜测。层次结构照抄真实宿主(~/.dsh/profiles/node_modules 与 ~/.dsh/profiles/<profile>/node_modules 两层),原因是 dsh-kimicode-swarm 经 @deepseek-ai/dsh-commands 声明 peer @deepseek-ai/dsh-agent@^0.0.1-rc.1,与 UPSTREAM.pin 的 0.1.2-rc.1 真冲突(已实测 ERESOLVE)。绝不用 --force / --legacy-peer-deps 掩盖。",
+  "pinnedHarness": "deepseek-harness @ a66e470204 (0.1.2-rc.1)",
+  "layers": [
+    {
+      "id": "plugins",
+      "target": "plugins",
+      "servesSuites": "所有从 plugins/<name>/lib 向上解析的套件",
+      "packages": {
+        "@deepseek-ai/schemastery": "3.18.1"
+      },
+      "why": "实测:12 个套件因缺 @deepseek-ai/schemastery 而 ERR_MODULE_NOT_FOUND。版本取 plugins/cn-capabilities 与 plugins/dsh-fleet 的 package.json 声明。"
+    },
+    {
+      "id": "dsh-mcp-bridge",
+      "target": "plugins/dsh-mcp-bridge",
+      "servesSuites": "dsh-mcp-bridge/mcp.test.mjs",
+      "packages": {
+        "@deepseek-ai/dsh-agent": "0.1.2-rc.1"
+      },
+      "why": "实测:唯一需要 @deepseek-ai/dsh-agent 的套件只有这一个。装在插件私有层而不是 plugins/ 层,避开与 dsh-kimicode-swarm 的 peer 冲突。"
+    }
+  ],
+  "runtimeOnlyNotRequiredByTests": {
+    "note": "以下包被插件源码 import,但实测**没有任何测试套件**需要它们(都在懒加载分支里)。部署到真实宿主时需要;离线代码验收不需要。",
+    "packages": {
+      "@deepseek-ai/dsh-llm": "0.1.2-rc.1",
+      "@deepseek-ai/dsh-tools": "0.1.2-rc.1",
+      "@deepseek-ai/dsh-timeout": "0.1.2-rc.1",
+      "dsh-kimicode-swarm": "0.1.0",
+      "@openai/codex-sdk": "0.147.0"
+    }
+  }
+}

@@ -1,33 +1,127 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { closeSync, existsSync, fstatSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, writeSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { randomUUID } from 'node:crypto'
 import { sanitizeOutcomeRef, sanitizePreview } from './sanitize.js'
+import { mintDecisionId } from './ids.js'
+import { withLedgerLock, withLedgerLockAsync } from './ledger-lock.js'
+import { taskFingerprint, isTaskFingerprint } from './task-fingerprint.mjs'
+
+export { withLedgerLock, withLedgerLockAsync, acquireLedgerLock, acquireLedgerLockAsync, releaseLedgerLock, lockPathFor, LedgerLockError } from './ledger-lock.js'
 
 export function defaultLedgerPath(home) {
   return `${home}/.dsh/logs/route-outcome.jsonl`
 }
 
+/**
+ * Append one record as one line, atomically with respect to other processes.
+ *
+ * Three separate hazards, three separate mitigations:
+ *   1. interleaving — the cross-process lock means only one writer is inside the
+ *      open/write/close window at a time, so two records can never share a line;
+ *   2. a torn tail from a writer killed mid-write — the previous line is closed
+ *      with a newline before this record is written, so the fragment stays on its
+ *      own line (where the reader rejects it) instead of swallowing this record;
+ *   3. loss on power failure — fsync before releasing the lock, so a record that
+ *      appendLine() has returned for is on disk.
+ * The payload is emitted in a single write(2) with its trailing newline included.
+ */
 export function appendLine(file, record) {
   mkdirSync(dirname(file), { recursive: true })
-  appendFileSync(file, JSON.stringify(record) + '\n', 'utf8')
+  const payload = JSON.stringify(record) + '\n'
+  withLedgerLock(file, () => {
+    writeRecordSync(file, payload)
+  })
   return record
+}
+
+/**
+ * Async sibling of appendLine(): the wait for the cross-process lock never
+ * parks the event loop. HTTP handlers must use this — a sync appendLine under
+ * a contended lock would freeze the whole host, not just the one request.
+ */
+export async function appendLineAsync(file, record) {
+  mkdirSync(dirname(file), { recursive: true })
+  const payload = JSON.stringify(record) + '\n'
+  await withLedgerLockAsync(file, () => {
+    writeRecordSync(file, payload)
+  })
+  return record
+}
+
+function writeRecordSync(file, payload) {
+  const fd = openSync(file, 'a+', 0o600)
+  try {
+    writeSync(fd, healingPrefix(fd) + payload, null, 'utf8')
+    fsyncSync(fd)
+  } finally {
+    closeSync(fd)
+  }
+}
+
+/** '\n' when the file ends mid-line, so a crashed writer's fragment cannot absorb this record. */
+function healingPrefix(fd) {
+  const { size } = fstatSync(fd)
+  if (size === 0) return ''
+  const tail = Buffer.alloc(1)
+  readSync(fd, tail, 0, 1, size - 1)
+  return tail[0] === 0x0a ? '' : '\n'
 }
 
 /** @deprecated use appendLine */
 export const appendOutcome = appendLine
 
-export function readLedgerLines(file) {
-  if (!existsSync(file)) return []
+/**
+ * A record is a complete line that parses to a plain object.
+ *
+ * A truncated write is never accepted: any proper prefix of a JSON object is
+ * missing its closing brace and fails to parse, and a non-object line (bare
+ * number, string, array, null) is not a record no matter how well it parses.
+ */
+export function scanLedger(file) {
+  if (!existsSync(file)) return { rows: [], rejected: 0 }
   const rows = []
+  let rejected = 0
   for (const line of readFileSync(file, 'utf8').split('\n')) {
     if (!line.trim()) continue
+    let parsed
     try {
-      rows.push(JSON.parse(line))
+      parsed = JSON.parse(line)
     } catch {
-      // skip corrupt line; do not invent a record
+      rejected += 1 // corrupt or torn line; do not invent a record
+      continue
     }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      rejected += 1
+      continue
+    }
+    rows.push(parsed)
   }
-  return rows
+  return { rows, rejected }
+}
+
+export function readLedgerLines(file) {
+  return scanLedger(file).rows
+}
+
+/**
+ * Fold-time revalidation of one outcome row against its decision (LUNA P1).
+ *
+ * A verdict is evidence about ONE task. Rows are appended under a lock, but a
+ * ledger can be reloaded from disk, replayed, or fed rows written by an older
+ * build — so the task binding must be re-proved at read time, not trusted:
+ *   - a decision that predates taskRef cannot be checked and stays bindable;
+ *   - any other decision only accepts an outcome row whose taskRef is exactly
+ *     its own. A row fingerprinted for a *different* task overlays nothing:
+ *     the decision stays pending instead of being credited with another
+ *     task's result. The taskUnverified marker is honest metadata, not a fold
+ *     gate — an unverified manual row still names its decision's fingerprint
+ *     (checkTaskBinding fills it in), and manual feedback keeps counting.
+ */
+export function outcomeMatchesDecision(patch, decision) {
+  const expected = decision && typeof decision === 'object' && isTaskFingerprint(decision.taskRef)
+    ? decision.taskRef
+    : null
+  if (!expected) return true
+  return Boolean(patch) && typeof patch === 'object' && patch.taskRef === expected
 }
 
 export function foldLedger(rows) {
@@ -65,7 +159,8 @@ export function foldLedger(rows) {
   }
   const folded = decisions.map((d) => {
     const ref = String(d.id ?? d.ts ?? '')
-    const patch = outcomesByRef.get(ref)
+    const stored = outcomesByRef.get(ref)
+    const patch = outcomeMatchesDecision(stored, d) ? stored : undefined
     const annotations = notesByRef.get(ref)
     const base = annotations ? { ...d, annotations } : { ...d }
     if (!patch) return { ...base, outcome: d.outcome === undefined ? null : d.outcome }
@@ -100,6 +195,12 @@ export function buildAnnotateRecord({ ref, note }) {
 export function publicizeDecision(row) {
   const out = { ...row }
   delete out.task
+  // The fingerprint is the sha256 of the FULL task text. Publicizing it — or
+  // letting a client echo it back — turns GET /routes into a confirmation
+  // oracle and, worse, lets anyone flip an unverified binding into "verified"
+  // by parroting the hash. Binding checks happen server-side only; public
+  // rows carry neither the raw task nor its fingerprint.
+  delete out.taskRef
   return out
 }
 
@@ -166,8 +267,11 @@ export function listRoutes(file, limit = 50) {
 
 export function buildDecisionRecord(input, decision, source) {
   const ts = Date.now()
+  // The identity of the task this decision was made for, hashed from the full
+  // text before any preview clipping. The raw task never reaches the ledger.
+  const taskRef = taskFingerprint(typeof input.task === 'string' ? input.task : '')
   return {
-    id: `dec-${ts}-${randomUUID().slice(0, 8)}`,
+    id: mintDecisionId(ts),
     ts,
     taskType: input.taskType || decision.role || '',
     role: decision.role,
@@ -177,11 +281,12 @@ export function buildDecisionRecord(input, decision, source) {
     reason: decision.reason,
     label: decision.label,
     source,
+    ...(taskRef ? { taskRef } : {}),
     outcome: null,
   }
 }
 
-export function buildOutcomeRecord({ ref, result, source }) {
+export function buildOutcomeRecord({ ref, result, source, taskRef, taskUnverified }) {
   if (result !== 'ok' && result !== 'fail') {
     throw new Error('outcome result must be ok or fail')
   }
@@ -189,11 +294,19 @@ export function buildOutcomeRecord({ ref, result, source }) {
   if (!safeRef) {
     throw new Error('outcome ref is required')
   }
+  // Verified vs unverified must be distinguishable ON DISK, not just in the
+  // in-memory return value: a row whose binding was never checked keeps an
+  // explicit taskUnverified marker so fold-time revalidation (and any later
+  // audit) can tell it apart from a row whose fingerprint was actually compared.
+  const carried = /^[a-f0-9]{64}$/.test(String(taskRef ?? '')) ? String(taskRef) : undefined
   return {
     kind: 'outcome',
     ref: safeRef,
     result,
     at: Date.now(),
     source: sanitizePreview(typeof source === 'string' ? source : 'manual', 80) || 'manual',
+    // Carried so a stored verdict stays checkable against its decision after the fact.
+    ...(carried !== undefined ? { taskRef: carried } : {}),
+    ...(taskUnverified === true ? { taskUnverified: true } : {}),
   }
 }

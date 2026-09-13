@@ -99,11 +99,31 @@ export interface SkillsPayload {
 }
 
 export const SKILLS_USAGE_READY_COPY = '使用率分母已采集';
+export const SKILL_USAGE_UNCOLLECTED_COPY = '使用次数未采集';
+export const SKILL_USAGE_NEVER_COPY = '从未调用';
+export const USAGE_SCAN_FAILED_COPY = '使用率扫描失败，不是 0 次调用';
+export const AUDIT_FINDINGS_UNCOLLECTED_COPY = '审计未返回检查明细。';
+export const AUDIT_FINDINGS_CLEAR_COPY = '当前根没有发现问题。';
+export const AUDIT_FINDINGS_NO_MATCH_COPY = '当前筛选没有匹配项。';
+export const SKILLS_CATALOG_EMPTY_COPY = '技能目录为空。';
+export const SKILLS_CATALOG_NO_MATCH_COPY = '没有匹配的技能。';
 
-export function skillUsageHonesty(usage: SkillUsageStat | undefined): string {
-  if (usage === undefined) return '使用次数未采集。';
-  if (usage.count === 0) return '当前样本下从未调用，不是删除判决。';
-  return `当前样本调用 ${usage.count} 次。`;
+export type SkillUsageKind = 'uncollected' | 'never' | 'used';
+
+/** Missing row in an unready sample is 未采集, not 0 / 从未调用. */
+export function skillUsageKind(
+  usage: SkillUsageStat | undefined,
+  sampleReady: boolean,
+): SkillUsageKind {
+  if (usage !== undefined) return usage.count === 0 ? 'never' : 'used';
+  return sampleReady ? 'never' : 'uncollected';
+}
+
+export function skillUsageHonesty(usage: SkillUsageStat | undefined, sampleReady = false): string {
+  const kind = skillUsageKind(usage, sampleReady);
+  if (kind === 'uncollected') return '使用次数未采集。';
+  if (kind === 'never') return '当前样本下从未调用，不是删除判决。';
+  return `当前样本调用 ${usage?.count ?? 0} 次。`;
 }
 
 /** 分母锚点只在扫描成功态出现。error 或缺 files/roots = 失败,不能绿。 */
@@ -113,6 +133,38 @@ export function usageDenominatorReady(meta: SkillsPayload['usageMeta'] | undefin
   if (!Number.isFinite(meta.files)) return false;
   if (!Array.isArray(meta.roots)) return false;
   return true;
+}
+
+/** Failed / partial meta must not print 样本 0 会话 / 0 次调用. */
+export function usageSampleCopy(meta: SkillsPayload['usageMeta'] | undefined): string | undefined {
+  if (meta === undefined) return undefined;
+  if (typeof meta.error === 'string' && meta.error !== '') return USAGE_SCAN_FAILED_COPY;
+  const files = Number.isFinite(meta.files) ? String(meta.files) : '未采集';
+  const events = Number.isFinite(meta.events) ? String(meta.events) : '未采集';
+  return `样本 ${files} 会话 / ${events} 次调用`;
+}
+
+/** Never-used count is only a number after the usage sample actually loaded. */
+export function collectedNeverUsedCount(
+  catalog: readonly SkillCatalogEntry[],
+  usage: Record<string, SkillUsageStat> | undefined,
+  meta: SkillsPayload['usageMeta'] | undefined,
+): number | undefined {
+  if (!usageDenominatorReady(meta)) return undefined;
+  return neverUsedCount(catalog, usage ?? {});
+}
+
+export function auditFindingsEmptyCopy(
+  findings: readonly SkillFinding[] | undefined,
+  query: string,
+): string | undefined {
+  if (findings === undefined) return AUDIT_FINDINGS_UNCOLLECTED_COPY;
+  if (findings.length > 0) return undefined;
+  return query.trim() === '' ? AUDIT_FINDINGS_CLEAR_COPY : AUDIT_FINDINGS_NO_MATCH_COPY;
+}
+
+export function skillsCatalogEmptyCopy(query: string): string {
+  return query.trim() === '' ? SKILLS_CATALOG_EMPTY_COPY : SKILLS_CATALOG_NO_MATCH_COPY;
 }
 
 export function vanishedUsageSkills(
@@ -150,6 +202,9 @@ export function parseSkillsPayload(value: unknown): SkillsPayload {
   }
   if (value.error !== undefined && typeof value.error !== 'string') {
     throw new Error('技能审计响应的 error 字段无效');
+  }
+  if (value.error === undefined && !Array.isArray(value.catalog)) {
+    throw new Error('技能审计响应缺少 catalog 数组');
   }
   return value as unknown as SkillsPayload;
 }

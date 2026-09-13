@@ -1,15 +1,12 @@
 import React from 'react';
 import { useTheme } from '@/design-system/theme-context';
 import { DeepSeekMark } from './DeepSeekMark';
+import { requestNewSession } from './new-session-intent';
 import './app-rail-grammar.css';
 
 export type MainTab = 'chat' | 'console' | 'graph' | 'settings';
 
-/**
- * 新会话请求事件:rail 拿不到 ChatPage 内部的 isNewSessionOpen 回调,
- * 通过 window CustomEvent 解耦;由 ChatPage 监听后打开 NewSessionModal。
- */
-export const NEW_SESSION_EVENT = 'agos:new-session';
+export { NEW_SESSION_EVENT, requestNewSession } from './new-session-intent';
 
 export interface AppRailProps {
   currentTab: MainTab;
@@ -30,9 +27,9 @@ export const AppRail: React.FC<AppRailProps> = ({
   const { theme, toggleTheme } = useTheme();
 
   const handleNewSession = () => {
-    // 新会话属于对话域:先切到对话页,再广播打开新建弹窗
+    // 新会话属于对话域:先切到对话页。待消费标记避免切页时把事件丢掉。
     onSelectTab('chat');
-    window.dispatchEvent(new CustomEvent(NEW_SESSION_EVENT));
+    requestNewSession();
   };
 
   return (

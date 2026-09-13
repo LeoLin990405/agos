@@ -16,6 +16,9 @@ import { ASSEMBLE_EMPTY_COPY, LIVE_DISPATCH_OFF_COPY } from './assemble.js'
 import { sanitizePreview } from './sanitize.js'
 import { classifyStream, streamError } from './stream-outcome.js'
 import { foldLedger as foldLedgerRows } from './ledger.js'
+import { bindOrdinaryOutcome, gateReviewerVerdictFeed } from './feedback-bind.mjs'
+import { mintDispatchId } from './ids.js'
+import { taskFingerprint } from './task-fingerprint.mjs'
 
 export const DISPATCH_COPY = '本次是三角色试跑，未换本跳会话模型'
 export const DISPATCH_NO_TOOLS_COPY = '三角色只出文本，不改仓库'
@@ -29,6 +32,64 @@ export const DEFAULT_DISPATCH_TASK = '三角色试跑。各角色只回不超过
 export const TURN_TEXT_LIMIT = 400
 export const DISPATCH_TIMEOUT_MS = 45000
 export const DISPATCH_MAX_TOKENS = 256
+
+/**
+ * C4 — reviewer context bounds.
+ *
+ * The reviewer used to be handed the implementer draft and nothing else, so
+ * 「判定：通过」 meant "this text looks fine", not "this answers the task". It now
+ * receives the complete original task as well. Two per-section budgets rather than
+ * one shared one, so a long task cannot crowd out the draft it is judging.
+ * Truncation is by leading code points (deterministic: same input, same prompt)
+ * and always announced in the prompt itself — a reviewer told nothing about a cut
+ * will confidently judge a fragment.
+ *
+ * 2026-09-09 P1: the prompt must be fed from the RAW streamed text, never from the
+ * turn row. The row is a 400-char ledger preview (its own contract, with an
+ * explicit truncation notice since this round); the reviewer's window is
+ * REVIEWER_*_LIMIT and must be a separate budget. Feeding the row preview made
+ * the reviewer judge a fragment it could not see the end of — while the verdict
+ * still counted as a full review in the posterior.
+ */
+export const REVIEWER_TASK_LIMIT = 4000
+export const REVIEWER_RESULT_LIMIT = 4000
+export const REVIEWER_SEES_TASK_COPY = '评审看到原始任务与实现终稿，看不到规划稿'
+export const TASK_ABSENT_COPY = '任务未采集'
+export const RESULT_ABSENT_COPY = '实现未采集'
+// verdictSkip codes for the honesty gate below — a verdict over a truncated
+// section is a verdict over a fragment, and a fragment's pass must not feed
+// the posterior as if the whole material had been reviewed.
+export const REVIEW_TASK_TRUNCATED = 'REVIEW_TASK_TRUNCATED'
+export const REVIEW_RESULT_TRUNCATED = 'REVIEW_RESULT_TRUNCATED'
+
+/** `[已截断：保留前 N 字，省略 M 字]` — honest, machine-checkable, never silent. */
+export function truncationNotice(kept, dropped) {
+  return `[已截断：保留前 ${kept} 字，省略 ${dropped} 字]`
+}
+
+/**
+ * C1 — the verdict booking below is a read-modify-write: it reads the ledger to
+ * check "does this decision already have a result", then appends one. Two trials
+ * finishing in the same instant both read "no", and both append — which is exactly
+ * the 改判不改史 rule being defeated by a race rather than by a bug.
+ *
+ * The whole sequence therefore runs inside deps.transact(). index.js passes
+ * `(fn) => withLedgerLock(auditFile, fn)`; the lock cannot simply wrap dispatchTeam()
+ * from outside because three model streams (45s each) sit in front of this point and
+ * would hold a cross-process lock far past its timeout. Callers with no shared
+ * ledger — every in-process test — get the pass-through and behave exactly as before.
+ */
+const runDirect = (fn) => fn()
+
+/** Deterministic head-truncation with an explicit marker. Counts code points, not UTF-16 units. */
+export function boundedSection(text, limit) {
+  const source = typeof text === 'string' ? text : ''
+  const chars = [...source]
+  if (chars.length <= limit) return { text: source, truncated: false, kept: chars.length, dropped: 0 }
+  const kept = chars.slice(0, limit).join('')
+  const dropped = chars.length - limit
+  return { text: `${kept}\n${truncationNotice(limit, dropped)}`, truncated: true, kept: limit, dropped }
+}
 
 export const MODEL_ROUTES = Object.freeze({
   'glm-5.2': { provider: 'zhipu', model: 'glm-5.2' },
@@ -47,17 +108,42 @@ export function roleSystemPrompt(role) {
   return composeAssembleRolePrompt(role)
 }
 
-export function roleUserPrompt(role, task, turns) {
+/**
+ * Ledger/display preview of one turn's text: flattened like the old
+ * sanitizePreview row (same whitespace/secret gates) but, when clipped, with an
+ * explicit truncationNotice appended — the row must never silently present a
+ * fragment as the whole turn. Internal review material does NOT come from here;
+ * it uses the raw streamed text via `raw` in roleUserPrompt.
+ */
+export function previewTurnText(text, limit = TURN_TEXT_LIMIT) {
+  const cleaned = sanitizePreview(text, Number.MAX_SAFE_INTEGER) ?? ''
+  return boundedSection(cleaned, limit).text
+}
+
+export function roleUserPrompt(role, task, turns, raw = {}) {
   const job = typeof task === 'string' && task.trim() ? task.trim() : DEFAULT_DISPATCH_TASK
   if (role === 'planner') {
     return `任务：${job}`
   }
   if (role === 'implementer') {
-    const plan = lastTurnText(turns, 'planner')
+    const plan = typeof raw.planner === 'string' && raw.planner.trim()
+      ? raw.planner
+      : lastTurnText(turns, 'planner')
     return `任务：${job}\n规划：${plan || '规划未采集'}`
   }
-  const finalText = lastTurnText(turns, 'implementer')
-  return `实现终稿：${finalText || '实现未采集'}`
+  // Reviewer: the task it is judging against, plus the candidate result. Still no
+  // planner draft — that invariant (REVIEWER_SEES_FINAL_COPY, 「看不到规划稿」) is unchanged.
+  // raw.implementer carries the UNCLIPPED streamed text: the turn row is only a
+  // bounded preview and must never be what the reviewer judges.
+  const finalText = typeof raw.implementer === 'string' && raw.implementer.trim()
+    ? raw.implementer
+    : lastTurnText(turns, 'implementer')
+  const boundedTask = boundedSection(job, REVIEWER_TASK_LIMIT)
+  const boundedResult = boundedSection(finalText, REVIEWER_RESULT_LIMIT)
+  return [
+    `任务原文：${boundedTask.text || TASK_ABSENT_COPY}`,
+    `实现终稿：${boundedResult.text || RESULT_ABSENT_COPY}`,
+  ].join('\n')
 }
 
 /**
@@ -107,19 +193,28 @@ function failedRoleTurn(role, model, route, err, extra = {}) {
 }
 
 export function buildDispatchRecord(assemble, turns, task) {
+  const full = typeof task === 'string' && task.trim() ? task : DEFAULT_DISPATCH_TASK
   return {
     kind: 'dispatch',
-    id: `dsp-${Date.now()}`,
+    id: mintDispatchId(),
     ref: assemble && assemble.id,
     decisionRef: assemble && assemble.ref,
+    // Identity of the task actually run, hashed before the 80-char preview below.
+    // `task` is a preview for humans; `taskRef` is what the verdict is bound to.
+    taskRef: taskFingerprint(full),
     ts: Date.now(),
     dispatched: true,
     sessionSwitched: false,
+    // C5 — these two say in the row itself what kind of run this was. A text-only
+    // trial that every role answered is still not a repository execution, and
+    // nothing downstream may upgrade it into one.
+    execution: 'text-only',
+    repoModified: false,
     outcome: null,
     note: DISPATCH_COPY,
     live: LIVE_DISPATCH_OFF_COPY,
     tools: DISPATCH_NO_TOOLS_COPY,
-    task: sanitizePreview(typeof task === 'string' ? task : DEFAULT_DISPATCH_TASK, 80),
+    task: sanitizePreview(full, 80),
     roles: Array.isArray(assemble && assemble.roles) ? assemble.roles : [],
     turns,
   }
@@ -184,12 +279,29 @@ export async function dispatchTeam(assemble, input, deps = {}) {
     throw error
   }
   const task = typeof input.task === 'string' && input.task.trim() ? input.task.trim() : DEFAULT_DISPATCH_TASK
+  const transact = typeof deps.transact === 'function' ? deps.transact : runDirect
   const turns = []
+  // Raw streamed text per role, unclipped. Reviewer/implementer prompts are
+  // composed from this — never from the turn rows, which are bounded previews
+  // for the ledger and would silently hand the reviewer a fragment.
+  const rawByRole = new Map()
   // 判定必须从评审「原文」解析:sanitizePreview 会把换行压成空格,整行判定在净文里已不可辨。
   let reviewerRawText = ''
+  let reviewBlocked = null
   for (const row of assemble.roles) {
     const role = row && row.role
     const model = row && row.model
+    if (role === 'reviewer') {
+      const target = typeof deps.readRows === 'function'
+        ? foldLedgerRows(deps.readRows()).decisions.find((decision) => decision.id === assemble.ref)
+        : undefined
+      const independence = gateReviewerVerdictFeed({ assemble, turns, reviewer: model, candidates: target?.candidates })
+      if (!independence.feed) {
+        reviewBlocked = independence.verdictSkip || 'NOT_INDEPENDENT'
+        turns.push({ role, model, ok: false, error: reviewBlocked, text: '', learnable: false })
+        continue
+      }
+    }
     const route = resolveModelRoute(model)
     if (!route) {
       turns.push({
@@ -214,7 +326,10 @@ export async function dispatchTeam(assemble, input, deps = {}) {
       })
       continue
     }
-    const user = roleUserPrompt(role, task, turns)
+    const user = roleUserPrompt(role, task, turns, {
+      planner: rawByRole.get('planner'),
+      implementer: rawByRole.get('implementer'),
+    })
     let streamed
     let retried = false
     try {
@@ -248,6 +363,7 @@ export async function dispatchTeam(assemble, input, deps = {}) {
     // streamRole 可返回裸字符串(测试替身)或 {text, detail}(streamRoleText)。
     const text = typeof streamed === 'string' ? streamed : streamed && typeof streamed.text === 'string' ? streamed.text : ''
     const detail = streamed && typeof streamed === 'object' && streamed.detail ? streamed.detail : undefined
+    rawByRole.set(role, text)
     if (role === 'reviewer') reviewerRawText = text
     turns.push({
       role,
@@ -255,7 +371,9 @@ export async function dispatchTeam(assemble, input, deps = {}) {
       provider: route.provider,
       hostModel: route.model,
       ok: true,
-      text: sanitizePreview(text, TURN_TEXT_LIMIT) || '',
+      // Row text is the bounded ledger preview with an explicit truncation
+      // notice when clipped; the review material itself is rawByRole.
+      text: previewTurnText(text),
       // 成功行也记 finish/usage:回答「256 的上限为什么 output 334」要靠它。不带 error(前端契约:ok 行无 error)。
       ...(retried ? { retried: true, note: IMPLEMENTER_RETRY_COPY } : {}),
       ...(detail ? { finish: detail.finish, blockTypes: detail.blockTypes, ...(detail.usage ? { usage: detail.usage } : {}) } : {}),
@@ -275,11 +393,25 @@ export async function dispatchTeam(assemble, input, deps = {}) {
     : parsed === 'ambiguous' ? 'AMBIGUOUS'
     : 'UNPARSEABLE'
   record.verdictFed = false
-  record.verdictSkip = null
+  record.verdictSkip = reviewBlocked
+  if (reviewBlocked) record.learnable = false
+  // Honesty gate for bounded review material: these are exactly the windows the
+  // reviewer prompt was built from (roleUserPrompt uses the same limits on the
+  // same raw text). If either was clipped, the verdict passed judgement on a
+  // fragment — it is displayed, but it must not feed the posterior as a full
+  // review.
+  const reviewWindow = {
+    task: boundedSection(task, REVIEWER_TASK_LIMIT),
+    result: boundedSection(rawByRole.get('implementer') ?? '', REVIEWER_RESULT_LIMIT),
+  }
   if (verdict !== null) {
     if (!implementerFinal) {
       // 评审判的是「实现未采集」——判决属实但对象缺席,不喂(今天现网就发生过这种判)。
       record.verdictSkip = 'IMPLEMENTER_ABSENT'
+    } else if (reviewWindow.result.truncated) {
+      record.verdictSkip = REVIEW_RESULT_TRUNCATED
+    } else if (reviewWindow.task.truncated) {
+      record.verdictSkip = REVIEW_TASK_TRUNCATED
     } else if (!implementerTurn || typeof implementerTurn.model !== 'string' || !implementerTurn.model) {
       record.verdictSkip = 'IMPLEMENTER_ABSENT'
     } else if (typeof (assemble && assemble.ref) !== 'string' || !assemble.ref) {
@@ -287,34 +419,68 @@ export async function dispatchTeam(assemble, input, deps = {}) {
     } else if (typeof deps.readRows !== 'function') {
       record.verdictSkip = 'NO_LEDGER'
     } else {
-      const { decisions } = foldLedgerRows(deps.readRows())
-      const target = decisions.find((d) => d && d.id === assemble.ref)
-      if (!target) {
-        record.verdictSkip = 'DECISION_NOT_FOUND'
-      } else if (target.outcome === 'ok' || target.outcome === 'fail') {
-        // 改判不改史:已有胜负(手工或回填)的决策,评审判定只展示不入账。
-        record.verdictSkip = 'ALREADY_JUDGED'
-      } else if (typeof target.pick !== 'string' || target.pick.trim().toLowerCase() !== implementerTurn.model.trim().toLowerCase()) {
-        // 归因门(对抗审查 P1):后验按 (label, decision.pick) 记账,而评审只判了 implementer 的产出。
-        // 两者不是同一个模型时喂进去就是替人挨打/领功——归因有歧义就不喂,一分都不喂。
-        record.verdictSkip = 'PICK_NOT_IMPLEMENTER'
-      } else if (typeof deps.append === 'function') {
-        deps.append({
-          kind: 'outcome',
-          ref: assemble.ref,
-          result: verdict,
-          at: Date.now(),
-          source: 'reviewer-verdict',
-          judge: reviewerTurn.model,
-          judged: implementerTurn.model,
-        })
-        record.verdictFed = true
-      } else {
-        record.verdictSkip = 'NO_LEDGER'
-      }
+      // Read → check → append is one transaction; see runDirect above for why the
+      // lock is injected here rather than wrapped around the whole trial.
+      // The callback is async and its result is awaited: the host's transact is
+      // withLedgerLockAsync (the event-loop-friendly lock), and the append must
+      // complete before the lock — which protects read→append — is released.
+      await transact(async () => {
+        const { decisions } = foldLedgerRows(deps.readRows())
+        const target = decisions.find((d) => d && d.id === assemble.ref)
+        if (!target) {
+          record.verdictSkip = 'DECISION_NOT_FOUND'
+        } else if (target.outcome === 'ok' || target.outcome === 'fail') {
+          // 改判不改史:已有胜负(手工或回填)的决策,评审判定只展示不入账。
+          record.verdictSkip = 'ALREADY_JUDGED'
+        } else if (typeof target.pick !== 'string' || target.pick.trim().toLowerCase() !== implementerTurn.model.trim().toLowerCase()) {
+          // 归因门(对抗审查 P1):后验按 (label, decision.pick) 记账,而评审只判了 implementer 的产出。
+          // 两者不是同一个模型时喂进去就是替人挨打/领功——归因有歧义就不喂,一分都不喂。
+          record.verdictSkip = 'PICK_NOT_IMPLEMENTER'
+        } else if (typeof deps.append === 'function') {
+          const independence = gateReviewerVerdictFeed({
+            assemble,
+            turns,
+            implementer: implementerTurn.model,
+            reviewer: reviewerTurn.model,
+            candidates: target.candidates,
+          })
+          if (!independence.feed) {
+            record.verdictSkip = independence.verdictSkip || 'NOT_INDEPENDENT'
+          } else {
+            const bound = bindOrdinaryOutcome({
+              authority: 'dispatch',
+              // nonce is derived from this trial, so the same trial replayed into the
+              // ledger is refused instead of appending a second identical verdict.
+              body: { ref: assemble.ref, result: verdict, nonce: record.id },
+              rows: deps.readRows(),
+              assemble,
+              turns,
+              implementer: implementerTurn.model,
+              reviewer: reviewerTurn.model,
+              candidates: target.candidates,
+              // The task this trial actually ran. If the decision was made for a
+              // different task, bindOrdinaryOutcome refuses with TASK_MISMATCH.
+              taskRef: record.taskRef,
+            })
+            if (!bound.ok) {
+              record.verdictSkip = bound.code
+            } else if (bound.idempotent) {
+              record.verdictFed = true
+            } else {
+              await deps.append(bound.record)
+              record.verdictFed = bound.feed !== false
+              if (bound.feed === false) record.verdictSkip = bound.verdictSkip
+            }
+          }
+        } else {
+          record.verdictSkip = 'NO_LEDGER'
+        }
+      })
     }
   }
-  if (typeof deps.append === 'function') deps.append(record)
+  // await: the host may inject appendLineAsync so a contended lock never parks
+  // the event loop; sync fakes keep working unchanged.
+  if (typeof deps.append === 'function') await deps.append(record)
   return {
     dispatch: record,
     assemble,

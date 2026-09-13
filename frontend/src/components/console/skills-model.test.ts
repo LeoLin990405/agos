@@ -1,16 +1,29 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  AUDIT_FINDINGS_CLEAR_COPY,
+  AUDIT_FINDINGS_NO_MATCH_COPY,
+  AUDIT_FINDINGS_UNCOLLECTED_COPY,
+  auditFindingsEmptyCopy,
   clipDescription,
+  collectedNeverUsedCount,
   filterCatalog,
   filterSkillFindings,
   groupCatalogByCategory,
   mergeRpcCatalog,
   neverUsedCount,
   parseSkillsPayload,
+  SKILL_USAGE_NEVER_COPY,
+  SKILL_USAGE_UNCOLLECTED_COPY,
+  SKILLS_CATALOG_EMPTY_COPY,
+  SKILLS_CATALOG_NO_MATCH_COPY,
   skillUsageHonesty,
+  skillUsageKind,
+  skillsCatalogEmptyCopy,
   sortCatalog,
+  USAGE_SCAN_FAILED_COPY,
   usageDenominatorReady,
+  usageSampleCopy,
   vanishedUsageSkills,
   type SkillCatalogEntry,
   type SkillFinding,
@@ -35,11 +48,13 @@ test('filterSkillFindings searches true finding fields and preserves empty-query
 });
 
 test('parseSkillsPayload distinguishes a true empty audit from missing or malformed roots', () => {
-  assert.deepEqual(parseSkillsPayload({ roots: [], librarian: '/tool', at: 1 }).roots, []);
+  assert.deepEqual(parseSkillsPayload({ roots: [], catalog: [], librarian: '/tool', at: 1 }).roots, []);
   assert.throws(() => parseSkillsPayload({ librarian: '/tool' }), /缺少 roots 数组/);
   assert.throws(() => parseSkillsPayload({ roots: {} }), /缺少 roots 数组/);
+  assert.throws(() => parseSkillsPayload({ roots: [], librarian: '/tool' }), /缺少 catalog 数组/);
   assert.throws(() => parseSkillsPayload({ roots: [{ root: '/skills', skills: 2, counts: {} }] }), /审计字段不完整/);
-  assert.equal(parseSkillsPayload({ roots: [{ root: '/skills', error: '读取失败' }] }).roots[0]?.error, '读取失败');
+  assert.equal(parseSkillsPayload({ roots: [{ root: '/skills', error: '读取失败' }], catalog: [] }).roots[0]?.error, '读取失败');
+  assert.equal(parseSkillsPayload({ roots: [], error: 'librarian missing' }).error, 'librarian missing');
   const rich = parseSkillsPayload({
     roots: [{ root: '/a', skills: 1, counts: { warn: 0 }, findings: [], servedToModel: true }],
     shadowing: [],
@@ -70,6 +85,32 @@ test('skillUsageHonesty does not treat a missing sample as never-used', () => {
   assert.equal(skillUsageHonesty(undefined), '使用次数未采集。');
   assert.equal(skillUsageHonesty({ count: 0, lastAt: 1 }), '当前样本下从未调用，不是删除判决。');
   assert.equal(skillUsageHonesty({ count: 4, lastAt: 1 }), '当前样本调用 4 次。');
+  assert.equal(skillUsageHonesty(undefined, true), '当前样本下从未调用，不是删除判决。');
+  assert.equal(skillUsageKind(undefined, false), 'uncollected');
+  assert.equal(skillUsageKind(undefined, true), 'never');
+  assert.equal(skillUsageKind({ count: 0, lastAt: 1 }, false), 'never');
+  assert.notEqual(SKILL_USAGE_UNCOLLECTED_COPY, SKILL_USAGE_NEVER_COPY);
+});
+
+test('usage sample copy never paints a failed scan as 0 sessions / 0 calls', () => {
+  assert.equal(usageSampleCopy(undefined), undefined);
+  assert.equal(usageSampleCopy({ error: 'EACCES' }), USAGE_SCAN_FAILED_COPY);
+  assert.notEqual(usageSampleCopy({ error: 'EACCES' }), '样本 0 会话 / 0 次调用');
+  assert.equal(usageSampleCopy({ files: 6, events: 0, roots: ['/a'] }), '样本 6 会话 / 0 次调用');
+  assert.equal(usageSampleCopy({ note: 'x' }), '样本 未采集 会话 / 未采集 次调用');
+  assert.equal(collectedNeverUsedCount(catalog, {}, { error: 'scan failed' }), undefined);
+  assert.equal(collectedNeverUsedCount(catalog, undefined, undefined), undefined);
+  assert.equal(collectedNeverUsedCount(catalog, { ask: { count: 1, lastAt: 1 } }, { files: 6, roots: ['/a'] }), 2);
+});
+
+test('audit findings empty copy keeps uncollected / clear / no-match apart', () => {
+  assert.equal(auditFindingsEmptyCopy(undefined, ''), AUDIT_FINDINGS_UNCOLLECTED_COPY);
+  assert.equal(auditFindingsEmptyCopy([], ''), AUDIT_FINDINGS_CLEAR_COPY);
+  assert.equal(auditFindingsEmptyCopy([], 'frontmatter'), AUDIT_FINDINGS_NO_MATCH_COPY);
+  assert.equal(auditFindingsEmptyCopy(findings, ''), undefined);
+  assert.notEqual(AUDIT_FINDINGS_UNCOLLECTED_COPY, AUDIT_FINDINGS_CLEAR_COPY);
+  assert.equal(skillsCatalogEmptyCopy(''), SKILLS_CATALOG_EMPTY_COPY);
+  assert.equal(skillsCatalogEmptyCopy('play'), SKILLS_CATALOG_NO_MATCH_COPY);
 });
 
 test('usageDenominatorReady is success-only', () => {

@@ -11,8 +11,8 @@
  * 这条测试跑的是插件真源的代码,零网络、零模型调用。
  */
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -139,12 +139,11 @@ test('插件真实信封:POST /assemble、POST /assemble/dispatch、GET /routes 
   assert.equal(view.dispatchOfThis?.ref, plan.id);
 });
 
-test('台账真实历史行(改名前的文案)经退役表仍零违约', () => {
-  const file = join(homedir(), '.dsh', 'logs', 'route-outcome.jsonl');
-  const rows = readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
-  const assemble = rows.find((r) => r.kind === 'assemble');
-  const dispatch = rows.find((r) => r.kind === 'dispatch');
-  assert.ok(assemble && dispatch, '台账里应有 2026-08-23 首跳的 assemble 与 dispatch 行');
+test('自带旧文案台账夹具经退役表仍零违约，不读取个人账本', async () => {
+  const { routesGet } = await realEnvelopes();
+  const rows = routesGet.decisions as Record<string, unknown>[];
+  const assemble = { ...rows.find((r) => r.kind === 'assemble'), note: fe.RETIRED_ASSEMBLE_NOTES[0], ts: fe.RETIRED_BEFORE_TS - 1 };
+  const dispatch = { ...rows.find((r) => r.kind === 'dispatch'), note: fe.RETIRED_DISPATCH_NOTES[0], ts: fe.RETIRED_BEFORE_TS - 1 };
   assert.deepEqual(fe.assembleContractViolations(assemble), []);
   assert.deepEqual(fe.dispatchContractViolations(dispatch), []);
   assert.equal(fe.parseDispatchRun(dispatch)?.ref, fe.parseAssemblePlan(assemble)?.id);

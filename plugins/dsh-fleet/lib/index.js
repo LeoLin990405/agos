@@ -19,24 +19,28 @@ import { chmodSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { publishProgress, parseResultsXml, escapeXml, textOf } from 'dsh-kimicode-swarm'
+import { parseResultsXml, escapeXml, textOf, resolveProgressPublisher } from './fleet-swarm-compat.mjs'
 import { createFleetLedger, scrubSecrets } from './fleet-ledger.mjs'
 import { createFleetRuntime, TERMINAL_RUN_STATUSES } from './fleet-runtime.mjs'
 import { registerFleetDispatchRoutes } from './fleet-dispatch.mjs'
 import {
   buildArtifactFileCommand,
-  buildArtifactFileProbeCommand,
   createArtifactHandlers,
-  parseArtifactFileProbe,
+  parseArtifactStreamStatus,
   safeRelPath as safeArtifactRelPath,
   validateRunId,
 } from './fleet-artifacts.mjs'
 import { createFleetPower } from './fleet-power.mjs'
 import { DEFAULT_CODEX_WORKSPACE, createCodexHostRunner } from './fleet-codex.mjs'
 import { FLEET_GUIDANCE } from '../../dsh-agos/lib/agent-prompts.js'
+import { validateFleetItems, InputLimitError } from '../../dsh-agos/lib/input-limits.js'
+import { probeLocalRun } from './local-probe.mjs'
 
 const name = '@dsh-local/fleet'
 const inject = ['tools', 'subagents', 'commands', 'systemPrompt']
+
+/** 进度通路不可用只警告一次:一个会话里可能跑几十批 fleet,每批一行会淹掉日志。 */
+let PROGRESS_UNAVAILABLE_WARNED = false
 
 const DEFAULT_HOSTS = [
   // kind:'local' = 本机进程内子代理;kind:'codex' = 本机 Codex SDK;kind:'remote' = ssh worker。
@@ -106,7 +110,7 @@ function apply(ctx, config, dependencies = {}) {
   const PROBES = new Map()   // name → 正在进行的 probe Promise，冷缓存并发请求只发一次 ssh
   const EXECUTIONS = new Map() // runId → 本进程中可启动/等待结算的完整 prompt 与承诺
   const LIVE_RUNS = new Set() // runner 已真正挂上 abort listener 的 runId
-  const CODEX_SETTLEMENTS = new Map() // runId → plugin dispose 必须等待的本机 SDK 执行
+  const LOCAL_SETTLEMENTS = new Map() // runId → plugin dispose 必须等待的本机子代理/SDK 执行
   const WAKE_WAITS = new Map()
   const STARTING_RUNS = new Map() // runId → host，关闭 markStart fsync 窗口的重入间隙
   let runtime = null
@@ -302,16 +306,25 @@ function apply(ctx, config, dependencies = {}) {
 
   const runLocal = async (host, prompt, signal, exec) => {
     const t0 = Date.now()
-    let run
+    let run, outcome, cleanupError
     try {
       run = await ctx.subagents.start('spawn', { parent: exec.agent, prompt: [{ type: 'text', text: prompt }], signal, label: 'fleet:local' })
-    } catch (e) { return { ok: false, text: '', error: String(e?.message ?? e), ms: Date.now() - t0, host: host.name } }
-    try {
       const res = await run.result
       const text = textOf(res).trim()
-      return { ok: !!text, text, error: text ? '' : ('无输出(' + res.stopReason + ')'), ms: Date.now() - t0, host: host.name }
-    } catch (e) { return { ok: false, text: '', error: String(e?.message ?? e), ms: Date.now() - t0, host: host.name } }
-    finally { try { await run.dispose() } catch {} }
+      outcome = { ok: !!text, text, error: text ? '' : ('无输出(' + res.stopReason + ')') }
+    } catch (error) {
+      outcome = { ok: false, text: '', error: String(error?.message ?? error) }
+    } finally {
+      try { await run?.dispose() } catch (error) { cleanupError = String(error?.message ?? error) }
+    }
+    const base = { host: host.name, ms: Date.now() - t0 }
+    if (cleanupError) return { ...base, ok: false, text: '', error: 'local cleanup failed: ' + cleanupError }
+    if (signal?.aborted) {
+      return String(signal.reason) === 'TIMEOUT'
+        ? { ...base, ok: false, text: '', timedOut: true, error: 'TIMEOUT' }
+        : { ...base, ok: false, text: '', cancelled: true, error: '已取消' }
+    }
+    return { ...base, ...outcome }
   }
 
   const runOnHost = (host, prompt, signal, exec, assignment = {}) =>
@@ -497,7 +510,14 @@ function apply(ctx, config, dependencies = {}) {
       // markDispatchStarted awaits the shared host power lock. Cancellation can
       // win during that wait, so re-read durable state and signal immediately
       // before the synchronous spawn continuation.
-      if (!current || TERMINAL_RUN_STATUSES.has(current.status) || controller.signal.aborted) return
+      if (!current || TERMINAL_RUN_STATUSES.has(current.status)) return
+      if (controller.signal.aborted) {
+        // Cancellation may win after markStart but before there is any runner.
+        // No process needs cleanup in this window, so settle the pending intent.
+        if (String(controller.signal.reason) === 'TIMEOUT') await runtime.markEnd(queued.runId, { ok: false, error: 'TIMEOUT' })
+        else await runtime.confirmRemoteCancelled(queued.runId, current.cancelReason || '已取消（未启动）')
+        return
+      }
       publishExecution(current, 'running')
       LIVE_RUNS.add(queued.runId)
       try {
@@ -566,10 +586,10 @@ function apply(ctx, config, dependencies = {}) {
               await runtime.markEnd(queued.runId, { ok: false, error: scrubSecrets(error?.message ?? error) })
             }
           }).finally(() => {
-            CODEX_SETTLEMENTS.delete(queued.runId)
+            LOCAL_SETTLEMENTS.delete(queued.runId)
             queuePump()
           })
-          if (hostByName(queued.host)?.kind === 'codex') CODEX_SETTLEMENTS.set(queued.runId, settlement)
+          if (['local', 'codex'].includes(hostByName(queued.host)?.kind)) LOCAL_SETTLEMENTS.set(queued.runId, settlement)
           void settlement
         }
       } while (pumpAgain)
@@ -658,8 +678,13 @@ function apply(ctx, config, dependencies = {}) {
     timeoutMs: 3600000,
     isConcurrencySafe: () => true,
     async execute(args, exec) {
-      const items = (Array.isArray(args.items) ? args.items : []).map((x) => String(x || '').trim()).filter(Boolean)
-      if (!items.length) throw new Error('fleet_run 需要至少一个 items')
+      let items
+      try {
+        items = validateFleetItems(args.items)
+      } catch (error) {
+        if (error instanceof InputLimitError) throw new Error(error.message)
+        throw error
+      }
       const goal = clip(items.join(' | '), 200)
       const tasks = items.map((it, i) => ({ item: '#' + (i + 1), prompt: it }))
       // 宿主 Job Panel 是软依赖：服务缺席、start 抛错或没有 owner 时，仍走原执行路径。
@@ -708,7 +733,16 @@ function apply(ctx, config, dependencies = {}) {
         if (args.tag) hs = hs.filter((h) => (h.tags || []).includes(String(args.tag)))
         if (!hs.length) throw new Error(scrubSecrets('没有可用的机(预检:' + [...HEALTH.entries()].map(([n, v]) => n + '=' + (v.ok ? 'ok' : (v.error || 'down'))).join(', ') + ')'))
         const parentSessionId = exec.agent?.session?.id ?? exec.agent?.id
-        const publish = (rows) => publishProgress(exec.callId, rows, parentSessionId)
+        // 进度发布是**跨插件**集成:写的是 swarm 模块级的 PROGRESS,由 swarm 自己的
+        // /api/swarm/progress 路由喂前端(frontend/src/stores/live.ts:689 消费 calls)。
+        // 真实宿主上 swarm 是同级插件,必然解析得到,行为与拆解前一致;干净依赖树里
+        // 解析不到就**显式**警告一次,而不是静默丢进虚空 —— 见 fleet-swarm-compat.mjs。
+        const progress = await resolveProgressPublisher()
+        if (!progress.available && !PROGRESS_UNAVAILABLE_WARNED) {
+          PROGRESS_UNAVAILABLE_WARNED = true
+          console.warn('[fleet] 批次进度不会发布到 /api/swarm/progress:' + progress.reason)
+        }
+        const publish = (rows) => progress.publish(exec.callId, rows, parentSessionId)
         ;({ results } = await scheduleAcross(tasks, hs, exec, publish, batchSignal, {
           origin: 'tool',
           label: ('fleet ×' + tasks.length + ' · ' + goal).slice(0, 120),
@@ -897,7 +931,13 @@ function apply(ctx, config, dependencies = {}) {
         // A local in-process subagent cannot survive plugin/process restart.
         // Treat its durable orphan as lost instead of detached, which would
         // otherwise reserve a global slot forever with no remote pid to probe.
-        if (host.kind === 'local') return { ok: true, out: 'MISSING' }
+        if (host.kind === 'local') {
+          return probeLocalRun({
+            run,
+            liveSet: LIVE_RUNS,
+            controllerLookup: () => STARTING_RUNS.has(run.runId),
+          })
+        }
         if (host.kind === 'codex') return { ok: true, out: LIVE_RUNS.has(run.runId) ? 'ALIVE' : 'MISSING' }
         return probeRemoteRun(host, run)
       },
@@ -930,6 +970,7 @@ function apply(ctx, config, dependencies = {}) {
         if (host.kind !== 'remote') return { ok: false, error: 'host has no remote process' }
         return remoteKill(host, run.runDir)
       },
+      isLocalRun: (run) => hostByName(run.host)?.kind === 'local',
       isLocalExecution: (run) => hostByName(run.host)?.kind === 'local' || STARTING_RUNS.has(run.runId),
       hasLiveController: (run) => LIVE_RUNS.has(run.runId),
       clearControlSockets: async () => {
@@ -1287,15 +1328,26 @@ function apply(ctx, config, dependencies = {}) {
             const path = safeArtifactRelPath(rawPath)
             if (!validateRunId(runId)) { send(res, 400, { error: 'run is required and must be a valid run id' }); return }
             if (!path) { send(res, 400, { error: 'path must be a safe artifact-relative path' }); return }
+            // 单次远端执行:判决行先到,字节从同一个已校验的描述符出。
+            //
+            // 原先这里是两趟 SSH(probe 拿元数据、再读字节),而且第二趟被管进
+            // `head -c 40000` —— 管道的退出码是 **head 的**,于是远端的拒绝
+            // (exit 9)被吞掉,预览路径把「我拒绝给你」变成「成功读到一个空文件」的 200。
+            // 实测(E 的 verify-index-patch.mjs,guard→open 之间做 hardlink 替换):
+            // 旧写法 200 + 空体,新写法 409 artifact refused: hard-links。
+            // 不泄漏 sentinel(字节那趟本来就绑描述符),但它**不诚实** —— 操作者
+            // 分不清「产物是空的」和「产物被拒了」。limitBytes 在已持有的 fd 上截断
+            // (`head -c N <&3`),是同一个对象的更小一次读,不是第二次解析名字。
             const target = { workspace: wsdir, runId, path }
-            let probeCommand
-            try { probeCommand = buildArtifactFileProbeCommand(target) }
+            let command
+            try { command = buildArtifactFileCommand({ ...target, protocol: true, limitBytes: 40000 }) }
             catch { send(res, 400, { error: 'invalid artifact path' }); return }
-            const probe = await sshRead(h, probeCommand, 15000)
-            const metadata = probe.ok ? parseArtifactFileProbe(probe.out) : { ok: false, status: 502, error: probe.err || ('ssh exit ' + probe.code) }
-            if (!metadata.ok) { send(res, metadata.status, { error: metadata.error }); return }
-            const r = await sshRead(h, '(' + buildArtifactFileCommand(target) + ') | head -c 40000', 20000)
-            send(res, r.ok ? 200 : 502, r.ok ? { host: h.name, runId, path, content: r.out } : { error: r.err || ('ssh exit ' + r.code) })
+            const r = await sshRead(h, command, 20000)
+            if (!r.ok) { send(res, 502, { error: r.err || ('ssh exit ' + r.code) }); return }
+            const nl = r.out.indexOf('\n')
+            const verdict = parseArtifactStreamStatus(nl === -1 ? '' : r.out.slice(0, nl))
+            if (!verdict.ok) { send(res, verdict.status, { error: verdict.error }); return }
+            send(res, 200, { host: h.name, runId, path, content: r.out.slice(nl + 1) })
           } else {
             // POSIX 列表(GNU/BSD stat 双试),排除 .trace 内部;深度 4 覆盖 tasks/<runId>/产物
             const r = await sshRead(h, posixList({ cwd: wsdir, maxDepth: 4, limit: 300 }), 20000)
@@ -1379,13 +1431,19 @@ function apply(ctx, config, dependencies = {}) {
     await Promise.allSettled(drains)
     try { await runtimeReady } catch {}
     // Remote jobs intentionally survive plugin churn and reconcile later. A local
-    // Codex SDK child cannot be reattached, so abort and await only those runs
+    // subagent or Codex SDK child cannot be reattached, so abort and await them
     // before the runtime/ledger handles are released.
     if (runtime) {
-      const liveCodex = runtime.listRuns().filter((run) =>
-        hostByName(run.host)?.kind === 'codex' && !TERMINAL_RUN_STATUSES.has(run.status))
-      await Promise.allSettled(liveCodex.map((run) => runtime.cancelRun(run.runId, 'plugin disposed')))
-      await Promise.allSettled(liveCodex.map((run) => CODEX_SETTLEMENTS.get(run.runId)).filter(Boolean))
+      const liveLocal = runtime.listRuns().filter((run) =>
+        ['local', 'codex'].includes(hostByName(run.host)?.kind) && !TERMINAL_RUN_STATUSES.has(run.status))
+      await Promise.allSettled(liveLocal.map((run) => runtime.cancelRun(run.runId, 'plugin disposed')))
+      // The pump is stopped during shutdown; queued cancellations still need
+      // their waiting tool promises resolved even though no active slot changed.
+      for (const run of runtime.listRuns()) settleExecution(run)
+      await Promise.allSettled(liveLocal.map((run) => LOCAL_SETTLEMENTS.get(run.runId)).filter(Boolean))
+      // A pre-spawn cancellation can become terminal only while awaiting the
+      // settlement above. Sweep again because the shutdown pump is disabled.
+      for (const run of runtime.listRuns()) settleExecution(run)
     }
     try { await runtime?.shutdown?.() } catch {}
     try { await ledger.drain() } catch {}

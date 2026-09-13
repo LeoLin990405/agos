@@ -1,0 +1,24 @@
+{
+  "note": "隔离宿主依赖树里「不可由 registry 精确复现」的包的内容基准。摘要口径见 verify-host-tree.mjs 顶部注释。仅在套件全绿时用 --write 重算。",
+  "convention": "sha256 over sorted lines of `<relpath>\\0<bytes>\\0<sha256(file)>\\n`, nested node_modules excluded",
+  "packages": [
+    {
+      "name": "dsh-kimicode-swarm",
+      "dir": "plugins/node_modules/dsh-kimicode-swarm",
+      "why": "registry 无任何版本提供 dsh-fleet 需要的四个导出;磁盘为本机构建产物,操作者必须显式提供",
+      "provenance": "~/.dsh/profiles/desktop/plugins/kimicode-swarm-aligned",
+      "version": "0.1.0",
+      "fileCount": 34,
+      "digest": "78edb7fbd2f7a526435065c14e3dec7d560926126cd1333c3e40502e3704ea97"
+    },
+    {
+      "name": "@deepseek-ai/dsh-settings",
+      "dir": "plugins/node_modules/@deepseek-ai/dsh-settings",
+      "why": "磁盘 0.1.0-rc.6 与清单声明的 0.1.2-rc.1 不一致(npm ls 报 invalid);内容与 registry 的 0.1.0-rc.6 字节等同,但该版本的 peer 与 pin 线冲突",
+      "provenance": "registry @deepseek-ai/dsh-settings@0.1.0-rc.6(与 DSH Desktop.app 内副本字节等同)",
+      "version": "0.1.0-rc.6",
+      "fileCount": 10,
+      "digest": "00f521f8ffce429117a9897053e0c75cb68cb06cbcea5e18446ed1f55359c1e5"
+    }
+  ]
+}
