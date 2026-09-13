@@ -37,6 +37,9 @@
 //   node scripts/acceptance/prepare-host-modules.mjs --strict-graph     # 未解析的相对导入也算不就绪
 //   node scripts/acceptance/prepare-host-modules.mjs --graph-json=<f>   # 导出完整导入图(取证用)
 //   node scripts/acceptance/prepare-host-modules.mjs --allow-write-root=<dir>  # 收窄允许写入根(可重复;给了就**替换**默认值)
+//
+// 未知参数 / 裸 --prefix / 裸 --out:立刻退 78(与 NC19c / NC21 同类)。
+// 没有 --out;--prefix 必须写成 --prefix=<dir>,否则会静默走默认安装根。
 import { existsSync, lstatSync, mkdirSync, writeFileSync, readFileSync, readdirSync, readlinkSync, symlinkSync, cpSync } from 'node:fs'
 import { join, relative, resolve, dirname } from 'node:path'
 import { homedir } from 'node:os'
@@ -47,11 +50,15 @@ import {
 	inspectWriteTarget, defaultAllowedRoots, defaultForbiddenRoots,
 	assertSameObject, writeFileNoFollow,
 } from './lib/safe-write-root.mjs'
+import { assertKnownArgv, PREPARE_HOST_MODULES_ARGV } from './lib/argv.mjs'
 
 const HERE = dirname(new URL(import.meta.url).pathname)
 const DSH_HOME = join(homedir(), '.dsh')
 // --layers / --surface 是可测性接缝:让自检能注入合成清单去验证安全不变量与诊断路径。
 const rawArgs = process.argv.slice(2)
+// 必须在读 layers.json / 守卫 / 安装之前。裸 --prefix 或拼错的 --out
+// 否则会落空,然后按默认安装根写入。
+assertKnownArgv(rawArgs, PREPARE_HOST_MODULES_ARGV)
 const argOf = (n, d) => { const h = rawArgs.find((a) => a.startsWith(`--${n}=`)); return h ? h.slice(n.length + 3) : d }
 const LAYERS = JSON.parse(readFileSync(resolve(argOf('layers', join(HERE, 'host-deps', 'layers.json'))), 'utf8'))
 const SURFACE = resolve(argOf('surface', join(HERE, 'dependency-surface.json')))

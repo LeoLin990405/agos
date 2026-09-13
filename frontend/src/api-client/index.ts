@@ -35,7 +35,7 @@ import {
 } from '../contract/api/sessions.schema.ts'
 import { agentPresetListValueSchema } from '../contract/api/agent-presets.schema.ts'
 import { skillListValueSchema } from '../contract/api/skills.schema.ts'
-import { settingsDescribeValueSchema, settingsOpenDocumentValueSchema } from '../contract/api/settings.schema.ts'
+import { settingsDescribeValueSchema, settingsMutateValueSchema, settingsOpenDocumentValueSchema } from '../contract/api/settings.schema.ts'
 import { credentialsDescribeValueSchema } from '../contract/api/credentials.schema.ts'
 import { llmListConfigurableProvidersValueSchema, llmListProvidersValueSchema } from '../contract/api/llm.schema.ts'
 
@@ -56,18 +56,30 @@ const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseV
   'skills/list': skillListValueSchema,
   'settings/describe': settingsDescribeValueSchema,
   'settings/openSettingsDocument': settingsOpenDocumentValueSchema,
+  'settings/mutate': settingsMutateValueSchema,
   'credentials/describe': credentialsDescribeValueSchema,
   'llm/listProviders': llmListProvidersValueSchema,
   'llm/listConfigurableProviders': llmListConfigurableProvidersValueSchema,
 }
 
 /**
- * Wire arg key per method: 0.1.2 keys the `args` object by the Host Remote
- * method's parameter name. null = a no-parameter method (args stays `{}`).
- * (session/list's param is `_request`; most are `request`; the catalog and
- * capability probes and the preset roster take none.)
+ * Payload fields are the Remote args. Used when the live Typert method has
+ * several named parameters (`mutate(ns, ops, expectedRevision)`), not one
+ * `request` envelope. Wrapping those as `{ request: payload }` is what the
+ * gateway rejects: missing "ns", "ops"; unexpected "request".
  */
-const ARG_KEY: { [K in keyof RpcMethodMap]: string | null } = {
+const ARG_FIELDS = '*' as const
+
+/**
+ * Wire arg encoding per method. 0.1.2 keys `args` by the Host Remote
+ * method's parameter name (UPSTREAM.pin).
+ * - `null`: no-parameter method → `args` stays `{}`.
+ * - string: single named parameter → `{ [name]: payload }`.
+ * - `ARG_FIELDS`: payload's own keys ARE the args.
+ */
+type ArgKey = string | null | typeof ARG_FIELDS
+
+const ARG_KEY: { [K in keyof RpcMethodMap]: ArgKey } = {
   'session/list': '_request',
   'session/search': 'request',
   'session/create': 'request',
@@ -83,9 +95,21 @@ const ARG_KEY: { [K in keyof RpcMethodMap]: string | null } = {
   'skills/list': 'request',
   'settings/describe': null,
   'settings/openSettingsDocument': null,
+  'settings/mutate': ARG_FIELDS,
   'credentials/describe': 'refs',
   'llm/listProviders': null,
   'llm/listConfigurableProviders': null,
+}
+
+function encodeCallArgs(key: ArgKey, payload: unknown): object {
+  if (key === null) return {}
+  if (key === ARG_FIELDS) {
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+      throw new Error('multi-param Remote args must be a plain object of parameter fields')
+    }
+    return payload
+  }
+  return { [key]: payload }
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000
@@ -149,7 +173,7 @@ export function createAgosClient(options: AgosClientOptions = {}): AgosClient {
   ): Promise<RpcResponse<ResponseValue<K>>> {
     const rpcId = mintRpcId()
     const key = ARG_KEY[method]
-    const args = key === null ? {} : { [key]: payload }
+    const args = encodeCallArgs(key, payload)
     try {
       const value = await postEnvelope(method, args, signal)
       const parsed = UNARY_VALUE_SCHEMAS[method].parse(value) as ResponseValue<K>

@@ -16,6 +16,13 @@ test('SkillsView and MemorySkillsDock keep honesty copy', () => {
   assert.match(view, /POSTERIOR_METHOD_COPY/);
   assert.match(view, /CALL_IS_NOT_VERDICT_COPY/);
   assert.match(view, /在工作室打开/);
+  assert.match(view, /skillUsageKind/);
+  assert.match(view, /collectedNeverUsedCount/);
+  assert.match(view, /usageSampleCopy/);
+  assert.match(view, /auditFindingsEmptyCopy/);
+  assert.doesNotMatch(view, /usage\?\.count \?\? 0/);
+  assert.doesNotMatch(view, /usageMeta\.files \?\? 0/);
+  assert.doesNotMatch(view, /usageMeta\.events \?\? 0/);
   assert.doesNotMatch(view, /['"`]\/api\/agos\/routes\/decide['"`]/);
   assert.match(dock, /SHORTLIST_METHOD_COPY/);
   assert.match(dock, /POSTERIOR_METHOD_COPY/);

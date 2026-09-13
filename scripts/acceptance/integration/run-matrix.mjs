@@ -47,6 +47,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { dirname, join, relative, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { REPO_ROOT, neutralEnv, runCommand } from '../lib/exec.mjs'
+import { assertKnownArgv, RUN_MATRIX_ARGV } from '../lib/argv.mjs'
 import { LAYERS, buildLayerResult, digestDriftVerdict, emptyCounts, platformInfo, resolveVerdict, validateLayerResult } from './lib/layer-result.mjs'
 import { sha256File, verifyLogs } from './lib/evidence.mjs'
 import { trackedWorktreeDigest, worktreeDigest } from './lib/worktree.mjs'
@@ -87,14 +88,28 @@ const PRODUCER_REGISTRY = {
 }
 
 const args = process.argv.slice(2)
-const flag = (n) => args.includes(`--${n}`)
-const opt = (n, d) => { const h = args.find((a) => a.startsWith(`--${n}=`)); return h ? h.slice(n.length + 3) : d }
-const optAll = (n) => args.filter((a) => a.startsWith(`--${n}=`)).map((a) => a.slice(n.length + 3))
 
 function die(code, lines) {
 	for (const l of lines) console.error(l)
 	process.exit(code)
 }
+
+// 裸 `--only` / 空 `--require=` 与未知 `--print` 都必须在 resolve / mkdir / spawn / writeFileSync 之前退 78。
+// `--only` 与 `--require=` 另有产品文案(G1b 认「裸标志」、G2 认 empty-require);其余未知 token 走共享 helper。
+if (args.includes('--only')) {
+	die(EXIT_REFUSE, ['❌ --only 需要 --only=<layer>[,<layer>…] 形式,裸标志会被静默忽略所以直接拒绝。'])
+}
+if (args.includes('--require=') || args.includes('--only=')) {
+	die(EXIT_REFUSE, [
+		'❌ --require/--only 为空,拒绝运行:empty-require',
+		'   一层都不要求的运行不是「全过」,是「什么都没验」—— 那正是本矩阵要挡的那类结论。',
+	])
+}
+assertKnownArgv(args, RUN_MATRIX_ARGV)
+
+const flag = (n) => args.includes(`--${n}`)
+const opt = (n, d) => { const h = args.find((a) => a.startsWith(`--${n}=`)); return h ? h.slice(n.length + 3) : d }
+const optAll = (n) => args.filter((a) => a.startsWith(`--${n}=`)).map((a) => a.slice(n.length + 3))
 
 /** `<layer>=<value>` 形式的可重复参数。层名不认识就直接退 78,不静默丢弃。 */
 function parsePerLayer(name) {
@@ -129,9 +144,6 @@ const allowExistingLogdir = flag('allow-existing-logdir')
 const printPlanOnly = flag('print-plan')
 
 const onlyCsv = opt('only', null)
-if (args.includes('--only')) {
-	die(EXIT_REFUSE, ['❌ --only 需要 --only=<layer>[,<layer>…] 形式,裸标志会被静默忽略所以直接拒绝。'])
-}
 if (onlyCsv !== null) {
 	if (flag('all') || opt('require', null) !== null || opt('skip', '') !== '') {
 		die(EXIT_REFUSE, ['❌ --only 不能和 --all / --require / --skip 同时用。', '   --only 的含义就是「要求这些层、其余 skip」。'])

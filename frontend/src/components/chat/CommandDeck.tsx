@@ -289,6 +289,10 @@ const PermissionCapsule: React.FC<{
   );
 };
 
+/* P2 lock: composer is text + images + queue only.
+   Host has no suggestion / autocomplete channel (no mux frame, no RPC).
+   Do not locally invent ghost overlay, chip lists, or a completer.
+   Inline host suggestions wait for a real wire; do not fake one. */
 export const CommandDeck: React.FC<CommandDeckProps> = ({
   onSend,
   onAnalyzeImage,

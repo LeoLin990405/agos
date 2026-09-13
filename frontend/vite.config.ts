@@ -22,11 +22,16 @@ export default defineConfig({
     },
   },
   server: {
+    // Desktop shell and host-integration only talk to 127.0.0.1. Vite's
+    // default localhost bind is IPv6-only on this machine ([::1]:3092),
+    // which makes http://127.0.0.1:3092/agos/ ECONNREFUSED.
+    host: '127.0.0.1',
     port: 3092,
     // 同源代理到本机 dsh(:3091):/api 全部(含两条 WS)——绕开宿主的 cross-site 栅栏
     proxy: { '/api': dshProxy() },
   },
   preview: {
+    host: '127.0.0.1',
     port: 4173,
     proxy: { '/api': dshProxy() },
   },

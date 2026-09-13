@@ -35,7 +35,7 @@ try {
   })
   record(traceStatus.status === 404, `/api/trace/sessions 在本宿主是 HTTP ${traceStatus.status}`)
 
-  await page.getByRole('button', { name: '控制台', exact: true }).click()
+  await page.locator('.rail-btn[aria-label="控制台"]').click()
   await page.getByRole('button', { name: '机器与机架', exact: true }).click()
   const farmTitle = page.locator('#fleet-view-title')
   await farmTitle.waitFor({ timeout: 15_000 })

@@ -37,6 +37,7 @@ import { surfaceInputsDigest } from './lib/surface-inputs.mjs'
 import { join, relative, dirname } from 'node:path'
 import { homedir, tmpdir } from 'node:os'
 import { REPO_ROOT, runCommand, parseNodeTestCounts, detectMissingModules, neutralEnv, verdictOf } from './lib/exec.mjs'
+import { assertKnownArgv, MEASURE_DEPENDENCY_SURFACE_ARGV } from './lib/argv.mjs'
 
 const PLUGINS = ['dsh-agos', 'dsh-agos-router', 'dsh-mcp-bridge', 'cn-capabilities', 'dsh-fleet']
 
@@ -54,12 +55,7 @@ const SB = {
 }
 
 const args = process.argv.slice(2)
-const opt = (name, dflt) => {
-	const hit = args.find((a) => a.startsWith(`--${name}=`))
-	return hit ? hit.slice(name.length + 3) : dflt
-}
-
-// 未知参数必须**在测量之前**报错。
+// 未知参数必须**在测量 / 写盘之前**报错。
 //
 // `opt()` 只认 `--name=value`,`--no-shield` 走 includes,其余一概落不到任何分支 ——
 // 于是拼错的标志被**一声不响**吞掉,而这个脚本的默认输出路径就是 tracked 的
@@ -73,24 +69,10 @@ const opt = (name, dflt) => {
 // 这与 run-acceptance.mjs 里裸 `--write-floors` 是同一类缺陷:对无法识别的输入保持沉默,
 // 然后做一件与操作者意图不同的、破坏性的事。位置放在参数解析处而不是写盘前,
 // 是因为放在后面就要先烧掉六分半钟。
-{
-	const LEGAL_VALUE_FLAGS = ['out', 'plugin', 'logdir']
-	const LEGAL_BARE_FLAGS = ['--no-shield']
-	const unknown = args.filter((a) => {
-		if (LEGAL_BARE_FLAGS.includes(a)) return false
-		const m = /^--([a-z-]+)=/.exec(a)
-		if (m) return !LEGAL_VALUE_FLAGS.includes(m[1])
-		return true
-	})
-	if (unknown.length > 0) {
-		console.error(`❌ 无法识别的参数:${unknown.join(' ')}`)
-		console.error(`   合法参数:${LEGAL_VALUE_FLAGS.map((f) => `--${f}=<值>`).join('  ')}  ${LEGAL_BARE_FLAGS.join(' ')}`)
-		console.error('   本脚本默认写入 tracked 的 scripts/acceptance/dependency-surface.json,')
-		console.error('   静默忽略未知参数 = 花数分钟测量后覆写版本控制里的基线,且操作者以为自己在做别的事。')
-		console.error('   只想看当前基线的内容:node -e "console.log(require(\'fs\').readFileSync(\'scripts/acceptance/dependency-surface.json\',\'utf8\'))"')
-		console.error('   想测量但不动基线:--out=<临时路径>')
-		process.exit(78)
-	}
+assertKnownArgv(args, MEASURE_DEPENDENCY_SURFACE_ARGV)
+const opt = (name, dflt) => {
+	const hit = args.find((a) => a.startsWith(`--${name}=`))
+	return hit ? hit.slice(name.length + 3) : dflt
 }
 
 const outPath = opt('out', join(REPO_ROOT, 'scripts/acceptance/dependency-surface.json'))

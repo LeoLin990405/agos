@@ -42,15 +42,22 @@
 //   node scripts/acceptance/verify-host-tree.mjs --json=<f>   机读报告
 //   node scripts/acceptance/verify-host-tree.mjs --repo-root=<dir>   可测性接缝:对夹具树跑
 //   node scripts/acceptance/verify-host-tree.mjs --baseline=<f>      可测性接缝:换基准文件
+//
+// 未知参数 / 裸 --repo-root 等 / 空 --write= :立刻退 78(与 NC19c / NC21 同类)。
+// --write 是故意的裸改写标志;--print / --write-floors 不存在,不能被吞掉后再走默认路径。
 
 import { createHash } from 'node:crypto'
 import { readFileSync, readdirSync, statSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join, relative, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { entryPointsOf, walkImportGraph } from './lib/import-graph.mjs'
+import { assertKnownArgv, VERIFY_HOST_TREE_ARGV } from './lib/argv.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const argv = process.argv.slice(2)
+// 必须在解析路径、读树、--write 写盘之前。opt() 只认 --name=value,
+// 未知 token 否则会一声不响地落空,然后 --write 改写 tracked 的 host-tree-digests.json。
+assertKnownArgv(argv, VERIFY_HOST_TREE_ARGV)
 const opt = (n, d) => { const h = argv.find((a) => a.startsWith(`--${n}=`)); return h ? h.slice(n.length + 3) : d }
 // --repo-root / --baseline 是**可测性接缝**:让自检能在 mkdtemp 夹具树上验证
 // 版本矛盾与内容漂移两条判定路径,而不必污染真实仓库、也不必真的装包。
