@@ -1,0 +1,62 @@
+.file-tool-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--bg-layer-1);
+}
+
+.file-tool-card.is-running {
+  border-color: color-mix(in srgb, var(--state-running) 35%, var(--border-subtle));
+}
+
+.file-tool-card.is-failed {
+  border-color: color-mix(in srgb, var(--state-failed) 40%, var(--border-subtle));
+}
+
+.file-tool-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.file-tool-card__name {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.file-tool-card__file {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.file-tool-card__missing,
+.file-tool-card__path,
+.file-tool-card__dur {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.file-tool-card__path {
+  margin: 4px 0 0;
+  word-break: break-all;
+}
+
+.file-tool-card__toggle {
+  margin-top: 8px;
+  border: 0;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.file-tool-card__body {
+  margin: 8px 0 0;
+  max-height: 240px;
+  overflow: auto;
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

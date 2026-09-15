@@ -6,6 +6,7 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { MEMORY_REMINDER_RULES } from './agent-prompts.js'
+import { resolveHostTurnBind } from './turn-evidence.js'
 import {
   MEMORY_FALLBACK_METHOD,
   MEMORY_LEXICAL_METHOD,
@@ -158,7 +159,7 @@ export function bindSessionMemoryInject(ctx, options = {}) {
             enabled: false,
             copy: '回注未启用：本跳没有 prepend',
           }),
-        })
+        }, undefined, resolveHostTurnBind(event))
       }
       return decision
     }
@@ -192,7 +193,7 @@ export function bindSessionMemoryInject(ctx, options = {}) {
             query,
             copy,
           },
-        })
+        }, undefined, resolveHostTurnBind(event))
       }
       return nextDecision
     } catch {
@@ -202,7 +203,7 @@ export function bindSessionMemoryInject(ctx, options = {}) {
             error: 'inject-failed',
             copy: '回注失败，本跳没有 prepend',
           }),
-        })
+        }, undefined, resolveHostTurnBind(event))
       }
       return decision
     }

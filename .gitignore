@@ -4,3 +4,5 @@ dist
 *.log
 *.bak-*
 .DS_Store
+# prepare-host-modules 隔离安装层(只跟踪 layers.json)
+scripts/acceptance/host-deps/*/

@@ -1,0 +1,237 @@
+✔ run id and relative path gates pin requests below one run (1.032834ms)
+✔ manifest is exact, NUL-aware, and excludes controls, trace, and symlinks (63.866167ms)
+✔ missing and symlinked run directories are indistinguishable 404s (16.240583ms)
+✔ file helpers accept only regular files with no symlink in any segment (26.881083ms)
+✔ 2001st detail is only a sentinel while the summary stays authoritative (1.908875ms)
+✔ archive limit is inclusive and reports truthful count and bytes (0.100709ms)
+✔ tgz contains regular artifacts only (27.539792ms)
+✔ manifest and tgz consistently exclude newline-bearing names that cannot pass safeRelPath (58.911875ms)
+✔ manifest hex encoding never folds repeated pathname bytes into od star notation (38.989459ms)
+✔ Content-Disposition cannot inject headers and carries UTF-8 filename (0.467667ms)
+✔ HTTP handlers enforce GET, cross-site, 404, and stream file/tgz bytes (164.242333ms)
+✔ local hosts are a 400 rather than pretending the host is unknown (2.257417ms)
+✔ tgz route returns 413 before spawning (0.633ms)
+✔ disconnect during preflight aborts the read and never starts a stream child (0.954666ms)
+✔ client disconnect kills the injected ssh stream (14.101125ms)
+✔ a stream error after headers destroys the response and reports only scrubbed stderr (14.862834ms)
+✔ stdout EOF waits for ssh close so a later non-zero exit still truncates the response (13.848792ms)
+file:///private/tmp/agos-baseline-7e7e359/plugins/node_modules/dsh-kimicode-swarm/lib/index.js:2
+import { installSettingsSection, settingsNamespace } from "@deepseek-ai/dsh-settings";
+         ^^^^^^^^^^^^^^^^^^^^^^
+SyntaxError: The requested module '@deepseek-ai/dsh-settings' does not provide an export named 'installSettingsSection'
+    at #asyncInstantiate (node:internal/modules/esm/module_job:463:21)
+    at async ModuleJob.run (node:internal/modules/esm/module_job:561:5)
+    at async node:internal/modules/esm/loader:650:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v26.7.0
+✖ test/codex-host.test.mjs (64.979708ms)
+✔ registers four exact routes, disposes them, and returns Allow on method mismatch (2.998833ms)
+✔ 202 crosses durable barrier before background start and UI runs are remote-only (4.672625ms)
+✔ W2 registerDispatch adapter durably records every run before waking its shared pump (0.965625ms)
+✔ integrates with the concrete W2 runtime for dispatch, detail, pump and exact cancel (2.697292ms)
+✔ wake side effect starts only after dispatch event is durable (1.378125ms)
+✔ host assignment accounts for existing per-host load and configured capacity (0.3475ms)
+✔ queued reservations are not hidden by a smaller active-only hostInflight count (0.264208ms)
+✔ validates content type, JSON, body size, items, label and timeout (1.695667ms)
+✔ returns 404 for unknown host and rejects local explicitly (0.267458ms)
+✔ pinned unreachable matrix: wake disabled/no path/already waking (0.471333ms)
+✔ Codex remains local-only even if power is misconfigured with a wake path (0.237042ms)
+✔ returns 429 at global capacity and 503 with no healthy/wakeable remote (0.582416ms)
+✔ hosts and tag use intersection; selected down host is waking and wake summary is returned (0.94925ms)
+✔ durability failure returns 500 and never schedules background work (0.256625ms)
+✔ partial multi-run durability failure terminalizes the durable prefix and never pumps it (0.276958ms)
+✔ concrete W2 atomic batch failure publishes no runtime prefix (0.251542ms)
+✔ failed partial-ledger compensation reports the recoverable batch id instead of hiding it (0.251458ms)
+✔ wake-start failure compensates the durable batch and does not expose a zombie (0.225708ms)
+✔ race-time power error preserves its 423 status and compensates durable work (0.236667ms)
+✔ wake race reporting alreadyUp transitions waking run back to queued before response (0.305459ms)
+✔ pinned noWakePath race fails only affected runs and still pumps healthy siblings (0.3665ms)
+✔ unpinned tag noWakePath race reroutes affected run to a healthy sibling (0.24ms)
+✔ noWakePath never reroutes to another host that is merely waking (0.216583ms)
+✔ list summary/include runs and detail expose only bounded scrubbed public fields (3.237584ms)
+✔ cancel supports a whole batch or exactly one run and scrubs every response field (0.695958ms)
+✔ W2 cancel adapter checks run host and passes a reason instead of treating host as reason (0.200125ms)
+✔ restored preview is honest and invalid internal status fails closed (0.193625ms)
+✔ concrete W2 hydration exposes only durable preview with itemTruncated (0.338458ms)
+file:///private/tmp/agos-baseline-7e7e359/plugins/node_modules/dsh-kimicode-swarm/lib/index.js:2
+import { installSettingsSection, settingsNamespace } from "@deepseek-ai/dsh-settings";
+         ^^^^^^^^^^^^^^^^^^^^^^
+SyntaxError: The requested module '@deepseek-ai/dsh-settings' does not provide an export named 'installSettingsSection'
+    at #asyncInstantiate (node:internal/modules/esm/module_job:463:21)
+    at async ModuleJob.run (node:internal/modules/esm/module_job:561:5)
+    at async node:internal/modules/esm/loader:650:26
+    at async file:///private/tmp/agos-baseline-7e7e359/plugins/dsh-fleet/test/fake-jobs.test.mjs:11:27
+
+Node.js v26.7.0
+✖ test/fake-jobs.test.mjs (56.551417ms)
+file:///private/tmp/agos-baseline-7e7e359/plugins/node_modules/dsh-kimicode-swarm/lib/index.js:2
+import { installSettingsSection, settingsNamespace } from "@deepseek-ai/dsh-settings";
+         ^^^^^^^^^^^^^^^^^^^^^^
+SyntaxError: The requested module '@deepseek-ai/dsh-settings' does not provide an export named 'installSettingsSection'
+    at #asyncInstantiate (node:internal/modules/esm/module_job:463:21)
+    at async ModuleJob.run (node:internal/modules/esm/module_job:561:5)
+    at async node:internal/modules/esm/loader:650:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v26.7.0
+✖ test/farm-integration.test.mjs (57.330958ms)
+file:///private/tmp/agos-baseline-7e7e359/plugins/node_modules/dsh-kimicode-swarm/lib/index.js:2
+import { installSettingsSection, settingsNamespace } from "@deepseek-ai/dsh-settings";
+         ^^^^^^^^^^^^^^^^^^^^^^
+SyntaxError: The requested module '@deepseek-ai/dsh-settings' does not provide an export named 'installSettingsSection'
+    at #asyncInstantiate (node:internal/modules/esm/module_job:463:21)
+    at async ModuleJob.run (node:internal/modules/esm/module_job:561:5)
+    at async node:internal/modules/esm/loader:650:26
+    at async file:///private/tmp/agos-baseline-7e7e359/plugins/dsh-fleet/test/fleet-hosts-route.test.mjs:29:27
+
+Node.js v26.7.0
+✖ test/fleet-hosts-route.test.mjs (55.805709ms)
+file:///private/tmp/agos-baseline-7e7e359/plugins/node_modules/dsh-kimicode-swarm/lib/index.js:2
+import { installSettingsSection, settingsNamespace } from "@deepseek-ai/dsh-settings";
+         ^^^^^^^^^^^^^^^^^^^^^^
+SyntaxError: The requested module '@deepseek-ai/dsh-settings' does not provide an export named 'installSettingsSection'
+    at #asyncInstantiate (node:internal/modules/esm/module_job:463:21)
+    at async ModuleJob.run (node:internal/modules/esm/module_job:561:5)
+    at async node:internal/modules/esm/loader:650:26
+    at async file:///private/tmp/agos-baseline-7e7e359/plugins/dsh-fleet/test/fleet.fake.test.mjs:23:27
+
+Node.js v26.7.0
+✖ test/fleet.fake.test.mjs (55.114625ms)
+✔ a live owner started in a different timezone cannot have its lock stolen (263.998417ms)
+✔ two Node processes keep every dispatch/run/ref on one ledger (637.199541ms)
+✔ appendMany from one process interleaves with append from another without loss (367.557375ms)
+✔ two processes interleave appendMany with other writes and keep every ref (396.865125ms)
+✔ interrupt of a lock holder recovers; a live holder is not stolen (458.959166ms)
+✔ scrubSecrets redacts supported credentials recursively without hiding an env path (2.427041ms)
+✔ ledger appends through a durable single-writer chain and dispatch is on disk before spawn (222.150541ms)
+✔ compaction keeps the wider recent-or-tail union plus every event in an unfinished run chain (17.591417ms)
+✔ cancel and terminal reattach events make old chains eligible for removal (0.14475ms)
+✔ appendMany publishes all dispatches or leaves the previous ledger intact (23.123792ms)
+✔ exclusive lockfile recovers a dead owner and refuses to steal a live one (215.830334ms)
+✔ two in-process ledgers keep every dispatch/run/ref across appendMany plus append (160.304416ms)
+✔ dispatch fingerprint uses complete raw input and cannot be supplied for a preview (55.622708ms)
+✔ stale reapers cannot remove a replacement live lock, including after reaper death (150.88925ms)
+✔ a malformed lock and an unverifiable live start time fail closed (103.82625ms)
+file:///private/tmp/agos-baseline-7e7e359/plugins/node_modules/dsh-kimicode-swarm/lib/index.js:2
+import { installSettingsSection, settingsNamespace } from "@deepseek-ai/dsh-settings";
+         ^^^^^^^^^^^^^^^^^^^^^^
+SyntaxError: The requested module '@deepseek-ai/dsh-settings' does not provide an export named 'installSettingsSection'
+    at #asyncInstantiate (node:internal/modules/esm/module_job:463:21)
+    at async ModuleJob.run (node:internal/modules/esm/module_job:561:5)
+    at async node:internal/modules/esm/loader:650:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v26.7.0
+✖ test/local-cleanup-integration.test.mjs (54.009625ms)
+✔ default reconcile period stays 30s; tests must not hide the bug by lengthening it (0.422792ms)
+✔ probeLocalRun distinguishes this-process live local from post-restart orphans (0.385458ms)
+✔ slow local task stays running and occupies concurrency across two reconcile periods (1.294583ms)
+✔ hardcoded MISSING probe cannot settle a local run this process still holds (0.262875ms)
+✔ hydrated historical local run is lost after restart, not reserved forever (0.401ms)
+✔ cancel of a live local run keeps its slot until cleanup confirms cancellation (0.825333ms)
+✔ local timeout aborts once and retains the slot until runner cleanup settles TIMEOUT (0.765125ms)
+✔ normal complete and reconcile do not double-settle or leak a slot (0.513458ms)
+✔ bare runtime shutdown models process loss; plugin must separately drain its local runners (0.556666ms)
+✔ runtime publishes exactly the nine specified run states (0.926792ms)
+✔ hydrate restores full batch topology while persisted dispatch uses its preview (1.729083ms)
+✔ reconciler maps SETTLED/ALIVE/DEAD/MISSING and SETTLED retrieves out.txt (1.666125ms)
+✔ an overdue run is probed alive before timeout handling and releases the global slot (1.173042ms)
+✔ timeout kill failure remains detached with timeoutPending instead of settling (0.361834ms)
+✔ three consecutive ssh failures clear stale control sockets and keep the run detached (0.28675ms)
+✔ hydrated detached cancel probes ALIVE then invokes the injected remote kill before cancelled (0.370667ms)
+✔ unreachable cancel stays detached and pending, then reconciler retries the real kill (0.448917ms)
+✔ cancel observes SETTLED and recovers output instead of killing or lying cancelled (0.363625ms)
+✔ active local run cancellation uses its live controller without remote probe or kill (0.467583ms)
+✔ markStart-to-spawn barrier can route cancellation through the owned controller (0.199334ms)
+✔ active remote cancellation delegates exactly one kill to its live runner (0.214709ms)
+✔ RUN_LOCK serializes terminal races; run and batch controllers cancel truthfully (0.281333ms)
+✔ registerDispatchBatch applies all runtime records only after one ledger barrier (0.66825ms)
+✔ reconciler timer is injectable and shutdown drains without aborting remote controllers (0.239ms)
+file:///private/tmp/agos-baseline-7e7e359/plugins/node_modules/dsh-kimicode-swarm/lib/index.js:2
+import { installSettingsSection, settingsNamespace } from "@deepseek-ai/dsh-settings";
+         ^^^^^^^^^^^^^^^^^^^^^^
+SyntaxError: The requested module '@deepseek-ai/dsh-settings' does not provide an export named 'installSettingsSection'
+    at #asyncInstantiate (node:internal/modules/esm/module_job:463:21)
+    at async ModuleJob.run (node:internal/modules/esm/module_job:561:5)
+    at async node:internal/modules/esm/loader:650:26
+    at async file:///private/tmp/agos-baseline-7e7e359/plugins/dsh-fleet/test/remote-cmd.test.mjs:63:27
+
+Node.js v26.7.0
+✖ test/remote-cmd.test.mjs (57.56725ms)
+✓ safeRelPath/shq 全部通过 (5 放行 / 15 拒绝 / 2 shq)
+✔ test/safe-rel-path.test.mjs (40.395583ms)
+file:///private/tmp/agos-baseline-7e7e359/plugins/node_modules/dsh-kimicode-swarm/lib/index.js:2
+import { installSettingsSection, settingsNamespace } from "@deepseek-ai/dsh-settings";
+         ^^^^^^^^^^^^^^^^^^^^^^
+SyntaxError: The requested module '@deepseek-ai/dsh-settings' does not provide an export named 'installSettingsSection'
+    at #asyncInstantiate (node:internal/modules/esm/module_job:463:21)
+    at async ModuleJob.run (node:internal/modules/esm/module_job:561:5)
+    at async node:internal/modules/esm/loader:650:26
+    at async file:///private/tmp/agos-baseline-7e7e359/plugins/dsh-fleet/test/trace-paging.test.mjs:41:27
+
+Node.js v26.7.0
+✖ test/trace-paging.test.mjs (55.353833ms)
+✔ power state keeps reachability, wake, smoke, and sleep orthogonal (2.17775ms)
+✔ independent wake joins one power-node flight; pinned dispatch gets 423 with ETA (3.902ms)
+✔ a power node without a wake path fails before any process is spawned (0.114ms)
+✔ one cancelled waiter does not cancel the shared power-node wake (0.864042ms)
+✔ concurrent reachability checks are singleflight per host (0.365791ms)
+✔ dispatch adapter returns after durable launch and leaves probe/smoke on the flight (0.607208ms)
+✔ dispatch request does not acknowledge before the wake ledger barrier (0.823709ms)
+✔ wake fails closed before spawn when its durable ledger is unavailable (0.26875ms)
+✔ a probe that reports ready after the wake deadline is still a timeout (0.239791ms)
+✔ missing smoke runner fails closed instead of silently skipping the gate (0.113125ms)
+✔ smoke result is singleflight and cached for six hours (0.162416ms)
+✔ ledger replay restores wake ownership and sleep eligibility without inventing reachability (0.094041ms)
+✔ an expired restored wake normalizes to timeout instead of permanent waking (0.087666ms)
+✔ sleep eligibility is committed in memory only after its ledger event (0.15075ms)
+✔ sleep is fail-closed for confirmation, allowlist, activity, and wake evidence (0.230625ms)
+✔ sleep rechecks busy state inside the host power lock (0.137083ms)
+✔ sleep re-probes reachability while holding the power lock (0.089ms)
+✔ eligible host sleeps with fixed argv and never exposes force (0.203417ms)
+✔ successful sleep command stays successful when only the terminal ledger write fails (0.143875ms)
+✔ dispatch and sleep callers share a per-host FIFO power lock (1.6395ms)
+✔ wake polling is an awaited loop, never an interval (0.282459ms)
+ℹ tests 114
+ℹ suites 0
+ℹ pass 106
+ℹ fail 8
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2180.330625
+
+✖ failing tests:
+
+test at test/codex-host.test.mjs:1:1
+✖ test/codex-host.test.mjs (64.979708ms)
+  'test failed'
+
+test at test/fake-jobs.test.mjs:1:1
+✖ test/fake-jobs.test.mjs (56.551417ms)
+  'test failed'
+
+test at test/farm-integration.test.mjs:1:1
+✖ test/farm-integration.test.mjs (57.330958ms)
+  'test failed'
+
+test at test/fleet-hosts-route.test.mjs:1:1
+✖ test/fleet-hosts-route.test.mjs (55.805709ms)
+  'test failed'
+
+test at test/fleet.fake.test.mjs:1:1
+✖ test/fleet.fake.test.mjs (55.114625ms)
+  'test failed'
+
+test at test/local-cleanup-integration.test.mjs:1:1
+✖ test/local-cleanup-integration.test.mjs (54.009625ms)
+  'test failed'
+
+test at test/remote-cmd.test.mjs:1:1
+✖ test/remote-cmd.test.mjs (57.56725ms)
+  'test failed'
+
+test at test/trace-paging.test.mjs:1:1
+✖ test/trace-paging.test.mjs (55.353833ms)
+  'test failed'

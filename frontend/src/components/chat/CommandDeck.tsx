@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/Button';
 import { Dot } from '@/components/ui/Dot';
 import { conversationStore } from '@/stores/live';
 import { ModelSelector } from './ModelSelector';
+import { QUEUED_COUNT_COPY, QUEUE_WHILE_RUNNING_COPY } from './tool-cards';
 import { VoiceInput, type VoiceTranscriptMeta } from './VoiceInput';
 import {
   ImageAttachments,
@@ -52,6 +53,10 @@ export interface CommandDeckProps {
    * 由 ChatPage 按 fold 相位 / running 实值计算,组件自己不猜。
    */
   canContinue?: boolean;
+  /** 会话正在跑：新指令走 queue，不假装能开 swarm。 */
+  sessionRunning?: boolean;
+  /** fold 已采集的排队原文；缺席或空数组都不编造条数。 */
+  queuedTexts?: readonly string[];
 }
 
 let multimodalMessageSequence = 0;
@@ -284,15 +289,20 @@ const PermissionCapsule: React.FC<{
   );
 };
 
+/* P2 lock: composer is text + images + queue only.
+   Host has no suggestion / autocomplete channel (no mux frame, no RPC).
+   Do not locally invent ghost overlay, chip lists, or a completer.
+   Inline host suggestions wait for a real wire; do not fake one. */
 export const CommandDeck: React.FC<CommandDeckProps> = ({
   onSend,
   onAnalyzeImage,
   sessionId,
   onFocusApproval,
   canContinue = false,
+  sessionRunning = false,
+  queuedTexts = [],
 }) => {
   const [text, setText] = useState('');
-  const [swarmMode, setSwarmMode] = useState(true);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState('');
   const [imageCount, setImageCount] = useState(0);
@@ -404,15 +414,6 @@ export const CommandDeck: React.FC<CommandDeckProps> = ({
                 setSendError('');
               }}
             />
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setSwarmMode(!swarmMode)}
-              title="切换 Swarm 多智能体并发模式"
-            >
-              <Dot state={swarmMode ? 'running' : 'queued'} size={6} />
-              <span>Swarm 并发 ({swarmMode ? '开' : '关'})</span>
-            </Button>
             <ModelSelector sessionId={sessionId} />
             <PermissionCapsule sessionId={sessionId} onFocusApproval={onFocusApproval} />
           </div>
@@ -442,6 +443,12 @@ export const CommandDeck: React.FC<CommandDeckProps> = ({
           <div role="alert" className="composer-error">
             {sendError}
           </div>
+        )}
+        {sessionRunning && (
+          <p className="composer-queue" role="status">{QUEUE_WHILE_RUNNING_COPY}</p>
+        )}
+        {queuedTexts.length > 0 && (
+          <p className="composer-queue" role="status">{QUEUED_COUNT_COPY(queuedTexts.length)}</p>
         )}
       </div>
     </footer>

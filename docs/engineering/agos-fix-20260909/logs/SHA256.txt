@@ -1,0 +1,16 @@
+# 交付日志 SHA256
+# 摘要针对**处理后**的文件本身。处理口径见每份日志头部(路径前缀替换一次 + 末尾空白规范化,此外未作删改)。
+# 本文件不含自身摘要(自指无意义)。生成于 2026-09-09 17:31 CST
+#
+6a88242b40f08e8bc0cfcf9126faab38952b1fe77ede7399be291c2e9c4cf3d2  acceptance-gate.txt
+31adc6de0e942847b3fba5533340573741217c42125330501b5b8b62f4b6282f  acceptance-unit.txt
+dde8e8ff1ef0b7e40edf55ff3245d9b463f879aa2341b873b6e32a3c28288055  clean-npm-ci.txt
+494e3a09602a4defd9ecc2458423b7b38c3d6d9985b8bf25023d7c7a459bfc5d  host-integration.txt
+17fa386fa4accb6c977b2fce2be3b8f1ad9e29a85d9bc9665847da5122fb2483  mutation-meta.txt
+4729499f82625cfb61104eb8620284bc898277a839f2cd5c689520f87265e684  selftest.txt
+3092be09a14e09b7e0348146b21a68762c4a38c1ebb56f0b9a21c31c9128bbeb  suite-cn-capabilities.txt
+d70637a4e461afc9c3c857d8e7267fcf18a8ead572e7f43fb7e0476880bf2dca  suite-dsh-agos-router.txt
+33b2ef9bab7249d0525540cc800225c44a92de12ddefd9bb29a0eb6590fb0209  suite-dsh-agos.txt
+e27340ce481d6bec91308620aed2fec8971b0481b443c4598512271169ddc128  suite-dsh-fleet.txt
+1e683aded50256bf5d3607d47c46489d0e2464752fd3d84b4d8dbc16f51cf2ae  suite-dsh-mcp-bridge.txt
+db7cbd90c6baa418e1600bbeb69a6a5221443bb59977c0fb22005d02420a499e  suite-frontend.txt

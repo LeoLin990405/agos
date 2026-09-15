@@ -33,3 +33,23 @@ export function normalizeConfig(raw) {
     auditFile: typeof src.auditFile === 'string' && src.auditFile ? src.auditFile : defaultLedgerPath(homedir()),
   }
 }
+
+/**
+ * Pin the config for one dispatch at its start (auditFile drift, P2).
+ *
+ * A dispatch reads the proposal, then waits on up to three 45s model streams;
+ * only afterwards do its callbacks append/read the ledger. If every callback
+ * re-reads the live effectiveConfig(), a settings change landing mid-flight
+ * silently redirects the trial's rows — verdict, outcome, dispatch record —
+ * into a DIFFERENT ledger file. Callers must snapshot once at dispatch start
+ * and close their ledger callbacks over the frozen snapshot:
+ *
+ *   const pin = pinDispatchConfig(effectiveConfig())
+ *   ... append: (r) => appendLineAsync(pin.auditFile, r) ...
+ *
+ * The freeze is shallow+deep enough here: all values are primitives, so
+ * Object.freeze makes the snapshot immutable for the whole dispatch.
+ */
+export function pinDispatchConfig(rawConfig) {
+  return Object.freeze(normalizeConfig(rawConfig))
+}

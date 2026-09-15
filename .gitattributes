@@ -1,0 +1,2 @@
+# Preserve exact final test stdout bytes, including trailing whitespace.
+docs/engineering/agos-hardening-20260908/logs/acceptance/*.txt -whitespace

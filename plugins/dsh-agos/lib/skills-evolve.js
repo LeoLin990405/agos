@@ -15,6 +15,7 @@ import {
   posteriorMean,
 } from './allocate-kernel.js'
 import { renderSkillCatalogReminder, SKILL_RERANK_SYSTEM } from './agent-prompts.js'
+import { resolveHostTurnBind } from './turn-evidence.js'
 
 export const EVOLVE_KAPPA = ALLOCATE_KAPPA
 export const EVOLVE_UNLISTED_PRIOR = ALLOCATE_UNLISTED_PRIOR
@@ -158,6 +159,86 @@ export function trimCatalogEntries(entries, names) {
   return { ok: true, entries: next }
 }
 
+/** Host SkillSource plus console audit labels. Only user/global/console are confirmed global. */
+const PROJECT_ORIGIN_RE = /^(?:project\b|cwd$)/i
+const GLOBAL_ORIGIN_RE = /^(?:user\b|global\b|console-)/i
+
+/**
+ * Classify a runtime catalog row. Missing/unrecognized source is unknown, not global.
+ * Host published catalogs often carry only {name, description}.
+ */
+export function catalogEntryOrigin(entry) {
+  if (!entry || typeof entry !== 'object') return 'unknown'
+  const raw = [entry.source, entry.origin, entry.scope]
+    .find((value) => typeof value === 'string' && value.trim() !== '')
+  if (raw === undefined) return 'unknown'
+  const folded = String(raw).trim()
+  if (PROJECT_ORIGIN_RE.test(folded)) return 'project'
+  if (GLOBAL_ORIGIN_RE.test(folded)) return 'global'
+  return 'unknown'
+}
+
+export function candidateNamesOf(candidates) {
+  if (!Array.isArray(candidates)) return null
+  const names = new Set()
+  for (const row of candidates) {
+    if (typeof row === 'string' && row !== '') names.add(row)
+    else if (row && typeof row === 'object' && typeof row.name === 'string' && row.name !== '') names.add(row.name)
+  }
+  return names
+}
+
+/**
+ * Trim the live session catalog. Candidates rank the shortlist; rewrite keeps
+ * shortlist ∪ project-scoped ∪ origin-unknown. Empty/unreadable candidates must
+ * not empty the live catalog — caller should leave the decision untouched.
+ */
+export function trimRuntimeCatalogEntries(entries, names, candidates, options = {}) {
+  if (!Array.isArray(entries)) return { ok: false, reason: 'unknown-format' }
+  if (!Array.isArray(names) || names.length === 0) return { ok: false, reason: 'empty-shortlist' }
+  const candidateNames = candidateNamesOf(candidates)
+  if (candidateNames === null) return { ok: false, reason: 'unknown-format' }
+  if (candidateNames.size === 0) return { ok: false, reason: 'empty-candidates' }
+  const wanted = new Set(names.filter((name) => typeof name === 'string' && name !== ''))
+  if (wanted.size === 0) return { ok: false, reason: 'empty-shortlist' }
+  if (!entries.some((entry) => entry && wanted.has(entry.name))) return { ok: false, reason: 'no-overlap' }
+  // Only a complete, scoped host snapshot establishes the actual winner for a
+  // name. A console audit can contain a shadowed user copy of a project skill.
+  const winners = new Map()
+  if (options.snapshot?.complete === true && Array.isArray(options.snapshot.skills)) {
+    for (const skill of options.snapshot.skills) {
+      if (!skill || typeof skill.name !== 'string') continue
+      // Ambiguous/malformed snapshots cannot establish a winner.
+      winners.set(skill.name, winners.has(skill.name) ? null : skill)
+    }
+  }
+  const next = []
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object' || typeof entry.name !== 'string' || entry.name === '') {
+      next.push(entry)
+      continue
+    }
+    if (wanted.has(entry.name)) {
+      next.push(entry)
+      continue
+    }
+    const hasOrigin = [entry.source, entry.origin, entry.scope]
+      .some((value) => typeof value === 'string' && value.trim() !== '')
+    const winner = winners.get(entry.name)
+    // The host and this hook take separate snapshots. If a provider changed
+    // between them, a same-name row need not be the winner now in the registry.
+    // Truncated or otherwise unmatched descriptions stay conservatively unknown.
+    const matchesWinner = typeof entry.description === 'string' && typeof winner?.description === 'string'
+      && entry.description.replace(/\s+/g, ' ').trim() === winner.description.replace(/\s+/g, ' ').trim()
+    const origin = catalogEntryOrigin(hasOrigin ? entry : matchesWinner ? winner : undefined)
+    // Keep shortlist ∪ project-scoped ∪ origin-unknown. Do not add source
+    // metadata to host messages: their public entries are {name, description}.
+    if (origin !== 'global') next.push(entry)
+  }
+  if (next.length === 0) return { ok: false, reason: 'no-overlap' }
+  return { ok: true, entries: next }
+}
+
 export function lastUserQuery(messages) {
   if (!Array.isArray(messages)) return ''
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -182,7 +263,7 @@ function flattenMessageText(content) {
   }).join(' ')
 }
 
-export function rewriteCatalogDecision(decision, names) {
+export function rewriteCatalogDecision(decision, names, options = {}) {
   if (!decision || decision.kind === 'reject' || !Array.isArray(decision.messages)) return decision
   const index = decision.messages.findIndex((message) => (
     message && message.source && message.source.kind === 'skill-catalog'
@@ -190,17 +271,21 @@ export function rewriteCatalogDecision(decision, names) {
   ))
   if (index === -1) return decision
   const current = decision.messages[index]
-  const trimmed = trimCatalogEntries(current.source.entries, names)
-  if (!trimmed.ok) return decision
+  const trimmed = Array.isArray(options.candidates)
+    ? trimRuntimeCatalogEntries(current.source.entries, names, options.candidates, options)
+    : trimCatalogEntries(current.source.entries, names)
+  if (!trimmed.ok || trimmed.entries.length === current.source.entries.length) return decision
+  const rendered = renderTrimmedCatalog(trimmed.entries, current.source.update === true)
+  let content
+  if (typeof current.content === 'string') content = rendered
+  else if (Array.isArray(current.content)) {
+    const textIndex = current.content.findIndex((part) => part && typeof part === 'object' && part.type === 'text')
+    if (textIndex === -1) return decision
+    content = current.content.map((part, partIndex) => partIndex === textIndex ? { ...part, text: rendered } : part)
+  } else return decision
   const nextMessage = {
     ...current,
-    content: Array.isArray(current.content)
-      ? current.content.map((part, partIndex) => (
-        partIndex === 0 && part && typeof part === 'object'
-          ? { ...part, text: renderTrimmedCatalog(trimmed.entries, current.source.update === true) }
-          : part
-      ))
-      : current.content,
+    content,
     source: { ...current.source, entries: trimmed.entries, trimmed: true },
   }
   const messages = decision.messages.slice()
@@ -423,11 +508,18 @@ export async function applyOptionalRerank(report, rerank) {
   }
 }
 
+/**
+ * Production uses options.snapshot(event), the complete host skills snapshot
+ * scoped to this agent/cwd. It supplies both ranking candidates and the origins
+ * missing from public catalog entries. Legacy options.catalog(event) is only a
+ * ranking audit and cannot establish origins for unlabeled runtime entries.
+ */
 export function bindCatalogTrim(ctx, options = {}) {
   if (!ctx || typeof ctx.on !== 'function') return () => {}
   const home = options.home ?? homedir()
   const store = options.store ?? createSkillEvolveStore({ home })
   const catalogOf = typeof options.catalog === 'function' ? options.catalog : async () => []
+  const snapshotOf = typeof options.snapshot === 'function' ? options.snapshot : null
   const evidence = options.evidence
   const resolveId = typeof options.sessionId === 'function'
     ? options.sessionId
@@ -442,28 +534,44 @@ export function bindCatalogTrim(ctx, options = {}) {
     const trim = catalogTrimConfig(home)
     const record = (skills) => {
       if (sessionId !== '' && evidence && typeof evidence.record === 'function') {
-        evidence.record(sessionId, { skills })
+        evidence.record(sessionId, { skills }, undefined, resolveHostTurnBind(event))
       }
     }
     if (!trim.enabled) {
       record({ trimmed: false, query: null, served: null, copy: '目录裁剪未启用' })
       return decision
     }
+    let query = ''
     try {
       const messages = event && event.messages
-      const query = lastUserQuery(messages)
+      query = lastUserQuery(messages) || lastUserQuery(decision?.messages)
       if (query === '') {
         record({ trimmed: false, query: '', served: null, copy: '本跳没有可裁剪的用户问句' })
         return decision
       }
-      const catalog = await catalogOf(event)
+      const snapshot = snapshotOf ? await snapshotOf(event) : null
+      if (snapshotOf && (snapshot?.complete !== true || !Array.isArray(snapshot.skills))) {
+        record({ trimmed: false, query, served: null, copy: '运行时技能快照不可用或不完整，保留本跳目录' })
+        return decision
+      }
+      const catalog = snapshotOf
+        ? snapshot.skills.filter((skill) => skill && typeof skill.name === 'string' && skill.invocation?.modelInvocable === true)
+        : await catalogOf(event)
+      if (!Array.isArray(catalog)) {
+        record({ trimmed: false, query, served: null, copy: '候选审计格式未知，保留本跳目录' })
+        return decision
+      }
+      if (catalog.length === 0) {
+        record({ trimmed: false, query, served: null, copy: '候选审计为空，保留本跳目录' })
+        return decision
+      }
       const report = await store.propose({ query, catalog })
       const names = selectTrimNames(report.hits, trim.maxEntries)
-      const nextDecision = rewriteCatalogDecision(decision, names)
+      const nextDecision = rewriteCatalogDecision(decision, names, { candidates: catalog, snapshot })
       const catalogMessage = Array.isArray(nextDecision?.messages)
         ? nextDecision.messages.find((message) => message && message.source && message.source.kind === 'skill-catalog')
         : undefined
-      const served = catalogMessage && catalogMessage.source && catalogMessage.source.trimmed === true
+      const served = nextDecision !== decision && catalogMessage && catalogMessage.source && catalogMessage.source.trimmed === true
         && Array.isArray(catalogMessage.source.entries)
         ? catalogMessage.source.entries.map((entry) => entry.name).filter(Boolean)
         : null
@@ -471,10 +579,11 @@ export function bindCatalogTrim(ctx, options = {}) {
         trimmed: served !== null,
         query,
         served,
-        copy: served ? undefined : '本跳没有技能目录消息',
+        copy: served ? undefined : '本跳目录未发生裁剪，保留宿主目录',
       })
       return nextDecision
     } catch {
+      record({ trimmed: false, query, served: null, copy: '运行时技能快照或裁剪失败，保留本跳目录' })
       return decision
     }
   }

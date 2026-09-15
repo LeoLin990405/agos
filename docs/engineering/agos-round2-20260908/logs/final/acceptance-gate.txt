@@ -1,0 +1,36 @@
+# 脱敏说明:本日志由 `node scripts/acceptance/run-acceptance.mjs --with-frontend` 原样输出后,
+# 仅把绝对路径前缀替换为占位符
+#   <本轮 worktree 绝对路径>       → <WORKTREE>
+#   <操作者 home 绝对路径>         → <HOME>
+#   macOS 按用户生成的临时目录前缀 → <TMPDIR>
+# 只改路径前缀,闸名、计数、退出码与 ADVISORY 分通道一字未动。原始未脱敏日志未纳入交付。
+#
+# ⚠️ 本文件是重新捕获的。独立验证者(VERIFY-FINAL.md)发现三件事:
+#   阻塞项 1 —— 此前的实物是**不带** --with-frontend 的运行,却被文档说成带前端闸的输出;
+#   阻塞项 2 —— 做了脱敏却无声明,与 VERIFICATION.md 的承诺矛盾;
+#   P3-3    —— 含 /var/folders/<用户级标识>,非凭据非姓名,但属用户级标识。
+# 现按文档所述真跑一次并补齐三类替换,前端闸 frontend-verify 在下方可见。
+== AgOS 离线验收(代码闸 / 部署漂移 分离)==
+   repo: <WORKTREE>
+   node: v26.7.0   日志: <TMPDIR>/T/agos-acceptance-logs
+   语料: SESSION_MEMORY_CORPUS_DIR=<TMPDIR>/T/agos-acceptance-absent-corpus(不存在 → 私有语料测试自报 skip)
+   供应商密钥: 已从子进程环境剔除(Z_AI_API_KEY/GLM_API_KEY/OPENAI_API_KEY/ANTHROPIC_API_KEY)
+   Fleet 历史: DSH_FLEET_RUNS_FILE=<TMPDIR>/T/agos-acceptance-absent-fleet-runs.jsonl(不存在 → 不读操作者真实批次历史)
+   依赖面预检: 4 个 (插件,包) 对可解析;无缺失
+   ⚠️  依赖 ~/.dsh 绝对路径的套件(装包解决不了): dsh-agos-router/http-routes.test.mjs
+   计数下限基线: 6 个闸有下限(抓删测试;缺基线文件会 fail-closed 退 78)
+
+▸ dsh-agos: ✅ PASS exit 0 pass 172 / fail 0 / skip 2 (tests 174)  0.6s
+▸ dsh-agos-router: ✅ PASS exit 0 pass 124 / fail 0 / skip 0 (tests 124)  6.21s
+▸ dsh-mcp-bridge: ✅ PASS exit 0 pass 4 / fail 0 / skip 0 (tests 4)  0.11s
+▸ cn-capabilities: ✅ PASS exit 0 pass 114 / fail 0 / skip 0 (tests 114)  12.59s
+▸ dsh-fleet: ✅ PASS exit 0 pass 148 / fail 0 / skip 0 (tests 148)  5.32s
+▸ frontend-verify: ✅ PASS exit 0 pass 365 / fail 0 / skip 1 (tests 366)  6.81s
+▸ deploy-drift: ℹ️  ADVISORY exit 1  0.19s
+     部署漂移是环境事实,不是代码缺陷:未部署的分支必然非零。只报,不参与退出码。  ← 不参与退出码,也不被吞
+
+== 汇总 ==
+   代码闸: ✅ 绿
+   测试计数: pass 927 / fail 0 / skip 3  (tests 930)   ← skip 单列,不并入 pass
+   ADVISORY deploy-drift: exit 1 —— 已记录,不影响代码闸
+   进程退出码 = 代码闸 = 0

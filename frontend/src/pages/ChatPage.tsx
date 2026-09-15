@@ -5,6 +5,7 @@ import { Chip } from '@/components/ui/Chip';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { CommandDeck, CONTINUE_PROMPT, canEmptySubmitContinue, type CommandDeckMessage } from '@/components/chat/CommandDeck';
+import { sessionPromptMode } from '@/components/chat/tool-cards';
 import { TurnEvidenceStrip } from '@/components/chat/TurnEvidenceStrip';
 import type { ImageAttachmentDraft } from '@/components/chat/ImageAttachments';
 import { VisionArbiterCard, type VisionArbiterCardState } from '@/components/chat/VisionArbiterCard';
@@ -32,6 +33,7 @@ import {
 import { SessionTrashPanel } from '@/components/chat/SessionTrashPanel';
 import { EmptyStateHero, EmptyStateBelow } from '@/components/chat/EmptyState';
 import { NEW_SESSION_EVENT } from '@/components/layout/AppRail';
+import { consumeNewSessionRequest, requestNewSession } from '@/components/layout/new-session-intent';
 import '@/design-system/chat-empty.css';
 import '@/design-system/session-menu.css';
 import {
@@ -39,7 +41,9 @@ import {
   conversationStore,
   ensureLiveConnection,
   fleetProgressStore,
+  getEventClientId,
   liveConnectionStore,
+  loadEarlierHistory,
   openConversation,
   openHostPath,
   refreshSessions,
@@ -51,6 +55,8 @@ import {
   watchHostArchivedSessions,
   type HostArchivedSessionsSnapshot,
 } from '@/stores/live';
+import { HistoryIntegrity } from '@/components/chat/HistoryIntegrity';
+import { connectionHealthFromLive, deriveConnectionSurface } from '@/lib/connection-health';
 import { LiveTranscript, useTranscriptItemCount, type OptimisticImageMessage } from '@/pages/chat-transcript';
 import { AgosComputer } from '@/components/stage/AgosComputer';
 import { ReplayScrubber } from '@/components/stage/ReplayScrubber';
@@ -161,7 +167,7 @@ export const ChatPage: React.FC<{
     };
   }, []);
 
-  // 侧栏「新会话」按钮与 ⌘K 走同一入口:CustomEvent → 打开建会话弹窗
+  // 侧栏 / 顶栏 / rail / ⌘K 走同一入口。rail 切页时事件可能先于监听到达,所以还要消费待办标记。
   useEffect(() => {
     const open = (): void => {
       if (canCreateSessionRef.current) setIsNewSessionOpen(true);
@@ -169,6 +175,10 @@ export const ChatPage: React.FC<{
     const onKey = (e: KeyboardEvent): void => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); open(); }
     };
+    if (consumeNewSessionRequest()) {
+      if (canCreateSessionRef.current) open();
+      else requestNewSession();
+    }
     window.addEventListener(NEW_SESSION_EVENT, open);
     window.addEventListener('keydown', onKey);
     return () => {
@@ -193,9 +203,12 @@ export const ChatPage: React.FC<{
     sessionCount: liveSessions.rows.length,
     muxPhase: liveConnectionPhase,
   });
-  const disconnectedService = liveConnectionPhase === 'offline' ? 'events.mux' : 'session.list';
+  const disconnectedService = liveConnectionPhase === 'offline' ? 'remote.mux' : 'session.list';
   const liveMode = chatConnectionState === 'ready';
   canCreateSessionRef.current = chatConnectionState === 'empty' || liveMode;
+  useEffect(() => {
+    if (canCreateSessionRef.current && consumeNewSessionRequest()) setIsNewSessionOpen(true);
+  }, [chatConnectionState]);
   const hasActiveLiveSession = liveMode
     && activeSessionId !== ''
     && liveSessions.rows.some((row) => row.sessionId === activeSessionId && !deletedSessionIds.has(row.sessionId));
@@ -266,9 +279,18 @@ export const ChatPage: React.FC<{
     conversationStore.subscribe,
     useCallback(() => conversationStore.getSnapshot(activeSessionId), [activeSessionId])
   );
+  const connectionHealth = connectionHealthFromLive({
+    muxPhase: liveConnectionPhase,
+    clientId: getEventClientId(),
+    sessionId: activeSessionId || undefined,
+    followPhase: convo.phase,
+    followError: convo.error,
+  });
+  const followUnavailable = deriveConnectionSurface(connectionHealth) === 'follow-unavailable';
   const isEmptyConversation = liveMode && (
     !hasActiveLiveSession
-    || (convo.phase === 'live' && (convo.snapshot?.items.length ?? 0) === 0)
+    || (convo.phase === 'live' && !convo.historyIncomplete && !convo.historyRetryable
+      && (convo.snapshot?.items.length ?? 0) === 0)
   );
   const activeRunning = liveSessions.rows.find((row) => row.sessionId === activeSessionId)?.running === true;
   const canContinue = canEmptySubmitContinue({
@@ -280,6 +302,12 @@ export const ChatPage: React.FC<{
 
   // 回放:总项数来自 fold 快照;换会话时把回卷位置清掉,否则会把上一个会话的位置带过来
   const replayTotal = useTranscriptItemCount(activeSessionId);
+  const evidenceItem = replayValue === undefined ? undefined : convo.snapshot?.items[Math.max(0, Math.floor(replayValue)) - 1];
+  const evidencePosition = replayValue === undefined
+    ? convo.currentStep
+    : evidenceItem?.kind === 'assistant' || evidenceItem?.kind === 'tool'
+      ? { turn: evidenceItem.turn, step: evidenceItem.step }
+      : undefined;
   useEffect(() => { setReplayValue(undefined); }, [activeSessionId]);
   // 真连接就绪后自动选中最近会话并打开。
   useEffect(() => {
@@ -532,7 +560,8 @@ export const ChatPage: React.FC<{
 
   const handleSend = async (message: CommandDeckMessage) => {
     if (!liveMode || !hasActiveLiveSession) return { ok: false, error: '事件信道未就绪，请先连接并选择会话' };
-    const result = await sendPromptParts(activeSessionId, message.parts);
+    if (convo.phase !== 'live') return { ok: false, error: '本会话事件订阅未就绪，请等待恢复后发送' };
+    const result = await sendPromptParts(activeSessionId, message.parts, sessionPromptMode(activeRunning));
     if (mountedRef.current && result.ok && message.images.length > 0) {
       setOptimisticImageMessages((previous) => [...previous, {
         id: message.optimisticId ?? localId('image-message'),
@@ -713,7 +742,7 @@ export const ChatPage: React.FC<{
               className="session-new-btn"
               aria-label="新建会话"
               disabled={chatConnectionState === 'connecting' || chatConnectionState === 'disconnected'}
-              title={chatConnectionState === 'disconnected' ? 'events.mux 未连接，当前无法新建会话' : undefined}
+              title={chatConnectionState === 'disconnected' ? 'remote.mux 未连接，当前无法新建会话' : undefined}
               onClick={() => setIsNewSessionOpen(true)}
             >
               <span>+</span>
@@ -747,8 +776,8 @@ export const ChatPage: React.FC<{
           )}
           {chatConnectionState === 'disconnected' && (
             <div className="session-empty-note" role="alert">
-              {disconnectedService === 'events.mux'
-                ? 'events.mux 未连接，会话与事件暂不可读。'
+              {disconnectedService === 'remote.mux'
+                ? 'remote.mux 未连接，会话与事件暂不可读。'
                 : 'session.list 未连接，会话列表暂不可读。'}
             </div>
           )}
@@ -883,9 +912,18 @@ export const ChatPage: React.FC<{
             : undefined}
           rightActions={
             <>
-              <span className={`conn-chip ${isStreamOnline ? 'is-ok' : chatConnectionState === 'connecting' ? 'is-pending' : 'is-off'}`}>
-                {isStreamOnline ? '已连接' : chatConnectionState === 'connecting' ? '连接中' : '未连接'}
+              <span className={`conn-chip ${followUnavailable ? 'is-pending' : isStreamOnline ? 'is-ok' : chatConnectionState === 'connecting' ? 'is-pending' : 'is-off'}`}>
+                {followUnavailable ? '会话订阅中断' : isStreamOnline ? '已连接' : chatConnectionState === 'connecting' ? '连接中' : '未连接'}
               </span>
+              <TopbarAction
+                label="新会话"
+                icon={TOPBAR_ICONS.plus}
+                variant="primary"
+                collapsible={false}
+                disabled={chatConnectionState === 'connecting' || chatConnectionState === 'disconnected'}
+                title={chatConnectionState === 'disconnected' ? 'remote.mux 未连接，当前无法新建会话' : '新会话 (⌘K)'}
+                onClick={() => setIsNewSessionOpen(true)}
+              />
               <TopbarAction
                 label="AgOS 的电脑"
                 icon={TOPBAR_ICONS.console}
@@ -902,12 +940,12 @@ export const ChatPage: React.FC<{
         {/* 消息滚动流只呈现 fold 真值或明确的连接/空状态。 */}
         <div className="chat-scroll-view">
           {chatConnectionState === 'connecting' ? (
-            <div className="es-tagline" role="status">正在连接宿主事件信道 events.mux…</div>
+            <div className="es-tagline" role="status">正在连接宿主事件信道 remote.mux…</div>
           ) : chatConnectionState === 'disconnected' ? (
             <div className="es-hero" role="alert">
               <div className="es-logotype">{disconnectedService} 未连接</div>
               <div className="es-tagline">
-                {disconnectedService === 'events.mux'
+                {disconnectedService === 'remote.mux'
                   ? '宿主事件信道不可达，当前无法读取会话列表与实时事件。'
                   : '宿主会话接口未响应，当前无法确认会话列表；实时输入已停用。'}
               </div>
@@ -917,6 +955,20 @@ export const ChatPage: React.FC<{
           ) : chatConnectionState === 'empty' || isEmptyConversation ? (
             <EmptyStateHero />
           ) : (
+            <>
+            {followUnavailable && (
+              <div className="surface-status surface-status--amber" role="status">
+                事件信道在线，但本会话的 follow 暂不可用。
+              </div>
+            )}
+            <HistoryIntegrity
+              historyIncomplete={convo.historyIncomplete}
+              retryable={convo.historyRetryable}
+              loading={convo.historyLoading}
+              error={convo.historyError}
+              onLoadEarlier={() => { void loadEarlierHistory(activeSessionId); }}
+              onRetry={() => { void loadEarlierHistory(activeSessionId); }}
+            />
             <LiveTranscript
               sessionId={activeSessionId}
               optimisticImageMessages={optimisticImageMessages}
@@ -930,6 +982,7 @@ export const ChatPage: React.FC<{
                 });
               } : undefined}
             />
+            </>
           )}
           {liveMode && visionCards.filter((card) => card.sessionId === activeSessionId).map((card) => (
             <div className="message-wrap" key={card.id}>
@@ -976,19 +1029,21 @@ export const ChatPage: React.FC<{
 
         {liveMode && hasActiveLiveSession ? (
           <>
-          <TurnEvidenceStrip sessionId={activeSessionId} />
+          <TurnEvidenceStrip sessionId={activeSessionId} turn={evidencePosition?.turn} step={evidencePosition?.step} />
           <CommandDeck sessionId={activeSessionId}
             onSend={handleSend}
             onAnalyzeImage={handleAnalyzeImage}
             onFocusApproval={handleFocusApproval}
             canContinue={canContinue}
+            sessionRunning={activeRunning}
+            queuedTexts={convo.snapshot?.queuedUserTexts}
           />
           </>
         ) : (
           <div className="session-no-active" role="status">
             <span>
               {chatConnectionState === 'connecting'
-                ? '正在连接 events.mux，输入将在连接完成后可用。'
+                ? '正在连接 remote.mux，输入将在连接完成后可用。'
                 : chatConnectionState === 'disconnected'
                   ? `输入已停用：${disconnectedService} 未连接，发送内容无法安全送达宿主。`
                   : chatConnectionState === 'empty'
@@ -1070,7 +1125,13 @@ export const ChatPage: React.FC<{
         isOpen={isNewSessionOpen}
         initialPresetId={pendingPresetId}
         onClose={() => { setIsNewSessionOpen(false); setPendingPresetId(undefined); }}
-        onCreated={(sid) => { setActiveSessionId(sid); setPendingPresetId(undefined); }}
+        onCreated={(sid, title) => {
+          setActiveSessionId(sid);
+          if (title !== undefined && title !== '') {
+            setTitleOverrides((current) => ({ ...current, [sid]: title }));
+          }
+          setPendingPresetId(undefined);
+        }}
       />
     </div>
   );

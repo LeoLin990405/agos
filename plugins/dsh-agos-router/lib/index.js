@@ -6,17 +6,18 @@
  */
 import { composeSelectorSystemPrompt, createSelector, resolveCachedSelector } from './selector-llm.js'
 import { fallbackPick } from './fallback.js'
-import { appendLine, buildAnnotateRecord, buildDecisionRecord, buildOutcomeRecord, listRoutes as listRoutesFromLedger, readLedgerLines, foldLedger } from './ledger.js'
-import { shadowDecide, buildShadowLinkRecord, shadowLinks, fleetBatchRuns, backfillShadowOutcomes, attachShadowLinks, isShadowDecisionRef } from './shadow.js'
+import { appendLine, appendLineAsync, buildAnnotateRecord, buildDecisionRecord, listRoutes as listRoutesFromLedger, publicizeDecision, readLedgerLines, foldLedger, withLedgerLock, withLedgerLockAsync } from './ledger.js'
+import { shadowDecide, fleetBatchRuns, backfillShadowOutcomes, attachShadowLinks } from './shadow.js'
 import { ASSEMBLE_COPY as ASM_COPY, ASSEMBLE_EMPTY_COPY, allocationStateFromLedger, assembleLive, defaultPoolCandidates, LIVE_DISPATCH_OFF_COPY as LIVE_OFF } from './assemble.js'
 import { DISPATCH_COPY, DISPATCH_EMPTY_COPY, dispatchTeam, streamRoleText } from './dispatch.js'
 import { candidatesForRoute, semanticLabel } from './labels.js'
 import { route } from './selector.js'
 import { normalizeRole } from './roles.js'
 import { REASON_LIMIT, sanitizePreview } from './sanitize.js'
-import { normalizeConfig } from './config.js'
+import { normalizeConfig, pinDispatchConfig } from './config.js'
 import { homedir } from 'node:os'
 import { coverageGrid, deriveOutcomeRows, readOutcomeSources, readFleetRuns } from './outcomes.js'
+import { bindOrdinaryOutcome, bindShadowLink, validatedShadowLinks } from './feedback-bind.mjs'
 
 export const name = '@dsh-local/agos-router'
 export const inject = ['llm', 'settings']
@@ -124,6 +125,28 @@ export function taskCategoryOf(input) {
 }
 
 /**
+ * 出站视图:任何**写路径**的响应体都不许带任务原文或其指纹。
+ *
+ * `publicizeDecision` 原先只用在 GET 视图上,写路径(POST /routes/decide、
+ * /routes/assemble、/routes/shadow …)直接返回原始台账行 —— 于是 taskRef
+ * (任务全文的 sha256)从 POST 漏出去:GET /routes 因此成了确认预言机,
+ * 更糟的是客户端能把这个 hash 原样回灌,把一条 unverified 的手工绑定说成 verified。
+ * 绑定判定只在服务端做;落盘台账照旧记指纹,剥的只是响应。
+ *
+ * 递归是必要的:assemble / dispatch 的响应把决策行**嵌在字段里**,只剥顶层会漏掉。
+ * 数组也要走,否则 decisions[] 这类列表原样漏出去。
+ */
+function publicize(value) {
+  if (Array.isArray(value)) return value.map(publicize)
+  if (value === null || typeof value !== 'object') return value
+  const stripped = publicizeDecision(value)
+  for (const [key, inner] of Object.entries(stripped)) {
+    if (inner !== null && typeof inner === 'object') stripped[key] = publicize(inner)
+  }
+  return stripped
+}
+
+/**
  * Run one routing decision. Selector errors / missing instance → static table.
  * Always writes outcome:null. Never invents a result label.
  * rule is computed before append so the ledger and UI can see TRUST / spot-check / escalate.
@@ -131,6 +154,9 @@ export function taskCategoryOf(input) {
 export async function decide(input, deps = {}) {
   const select = deps.select
   const ledgerFile = deps.auditFile
+  // P1 异步锁:宿主可注入 appendLineAsync(HTTP 路径),等锁不 park 事件循环;
+  // 缺省保持同步 appendLine —— lib 级调用方与既有测试语义不变。
+  const append = typeof deps.append === 'function' ? deps.append : appendLine
   let decision
   let source = 'fallback'
   let fallbackReason
@@ -166,7 +192,7 @@ export async function decide(input, deps = {}) {
   if (fallbackReason) record.fallbackReason = fallbackReason
   // 选择器失败的真相(blockTypes / finish / providerCode / usage)落盘;不改 buildDecisionRecord。
   if (fallbackDetail) record.fallbackDetail = fallbackDetail
-  if (ledgerFile) appendLine(ledgerFile, record)
+  if (ledgerFile) await append(ledgerFile, record)
   return record
 }
 
@@ -232,7 +258,7 @@ export function apply(ctx, rawConfig) {
 
   async function decideLive(input) {
     const cfg = effectiveConfig()
-    return decide(input, { select: await getSelector(), auditFile: cfg.auditFile })
+    return decide(input, { select: await getSelector(), auditFile: cfg.auditFile, append: appendLineAsync })
   }
 
   /** W17 影子:一次「检查派发」= 至多一次选择器调用;候选为空不调。 */
@@ -241,42 +267,100 @@ export function apply(ctx, rawConfig) {
     const select = await getSelector()
     return shadowDecide(body ?? {}, {
       select: select ?? undefined,
-      append: (record) => appendLine(cfg.auditFile, record),
+      append: (record) => appendLineAsync(cfg.auditFile, record),
     })
   }
 
-  function shadowLink(body) {
-    const rec = buildShadowLinkRecord(body ?? {})
-    appendLine(effectiveConfig().auditFile, rec)
-    return rec
+  // HTTP 处理器持锁的超时上限。ledger-lock.js 的默认值是 30s,那是给批处理写者定的;
+  // 用在这里会变成一条故障:acquireLedgerLock 等锁走 Atomics.wait,它 park 的是**整个
+  // 单线程 host**,不是当前这一个请求。所以一个卡死的对端会让控制台全站冻住 30 秒。
+  //
+  // 而且这道风险是接线放大的:接线前 appendLine 只在「追加」那一瞬取锁,接线后临界区
+  // 变成「读 → 判定 → 追加」整段(这是事务性的代价,不能退回去)。实测读+fold 在一万行
+  // 台账上是 5.3ms、千行 0.6ms,所以 5s 已是临界区的约一千倍余量;同时它必须大于
+  // recoverStale 内部那把恢复锁的 2s,否则一次正当的陈锁回收就会吃掉整个预算。
+  //
+  // 缩短超时不会让别人抢走我正持有的锁:isStale 对「活着且 start time 匹配」的 owner
+  // 一律返回 false,timeoutMs 只决定何时启用昂贵的 PID 复用检查(见 ledger-lock.js
+  // 的窗口注释)。超时是 fail-closed 的 —— 抛 AGOS_LEDGER_LOCK_TIMEOUT,不写盘。
+  const HTTP_LOCK = { timeoutMs: 5_000 }
+  // 读路径(GET /routes 的影子回填)单独一个短得多的预算,理由是不对称的:
+  //   · 写路径等不到锁 = 一次用户可见的拒绝,值得容忍 5s;
+  //   · 回填是**幂等**的 —— 跳过这一轮,下一次 GET 会重算同一份 pending 集合,
+  //     而列表本来就把未回填的行诚实显示为 pending。
+  // 也就是说读路径花 5s 冻住整个 host,换来的是下一次轮询免费就能拿到的东西;
+  // 而控制台在轮询 GET /routes,一个持续持锁的对端会让宿主每轮冻 5s。
+  // 接线还额外放大了这条:接线前 links.size === 0 时先返回、一次锁都不取,
+  // 接线后取锁被提到最外层,于是「没有任何影子链接」这个常见情形也要取一次锁。
+  // 由接线审查者指出。
+  const BACKFILL_LOCK = { timeoutMs: 250 }
+
+  async function shadowLink(body) {
+    const cfg = effectiveConfig()
+    // 一次事务:REBOUND / BATCH_LINKED 两道检查读的是已有链接,并发的 linker 不能挤在
+    // 这次读与下面的追加之间 —— 否则两条链接都过检查,一个批次绑到两个决策上。
+    // P1 异步锁:等锁在事件循环上进行,持锁对端冻不住整个 host。
+    return withLedgerLockAsync(cfg.auditFile, async () => {
+      const rows = readLedgerLines(cfg.auditFile)
+      const bound = bindShadowLink({
+        ref: body && body.ref,
+        batchId: body && body.batchId,
+        hosts: body && body.hosts,
+        rows,
+        decisions: foldLedger(rows).decisions,
+        batches: fleetBatchRuns(readFleetRuns(homedir())),
+      })
+      if (!bound.ok) {
+        const error = new Error(bound.error)
+        error.code = bound.code
+        throw error
+      }
+      if (!bound.idempotent) await appendLineAsync(cfg.auditFile, bound.record)
+      return bound.record
+    }, HTTP_LOCK)
   }
 
   /** W17:GET 时回填影子决策的批次终态(只对 已挂 batchId + outcome 空 + fleet 批次已终态 的行追加 outcome 行)。 */
-  function backfillShadow(cfg) {
+  async function backfillShadow(cfg) {
     try {
-      const rows = readLedgerLines(cfg.auditFile)
-      const links = shadowLinks(rows)
-      if (links.size === 0) return 0
-      const { decisions } = foldLedger(rows)
-      const runs = readFleetRuns(homedir())
-      const pending = backfillShadowOutcomes({ decisions, links, batchRuns: fleetBatchRuns(runs) })
-      for (const rec of pending) appendLine(cfg.auditFile, rec)
-      return pending.length
+      // 否则两个并发 GET 会算出同一份 pending 集合,然后各写一遍。
+      // P1 异步锁:回填等锁同样不 park host;超时/失败仍走下面的分流,列表不受影响。
+      return await withLedgerLockAsync(cfg.auditFile, async () => {
+        const rows = readLedgerLines(cfg.auditFile)
+        const batches = fleetBatchRuns(readFleetRuns(homedir()))
+        const links = validatedShadowLinks(rows, batches)
+        if (links.size === 0) return 0
+        const { decisions } = foldLedger(rows)
+        const pending = backfillShadowOutcomes({ decisions, links, batchRuns: batches })
+        for (const rec of pending) await appendLineAsync(cfg.auditFile, rec)
+        return pending.length
+      }, BACKFILL_LOCK)
     } catch (err) {
-      logger.warn('影子回填失败(不影响列表)', err && err.message ? err.message : err)
+      // 锁超时与「真的出错了」必须分开说。原文案对两者都说「不影响列表」——列表本身确实
+      // 仍然诚实(未回填的行照旧显示为 pending,没有编造终态),但一次数秒的宿主冻结加一次
+      // 回填缺失,对外只表现为一条说「不影响」的 warn,把最重的后果说成无关紧要。
+      // 5s→250ms 之后超时会更常发生而不是更少,所以这条分流是配套的,不是可选的。
+      const timedOut = err && err.code === 'AGOS_LEDGER_LOCK_TIMEOUT'
+      logger.warn(
+        timedOut ? '影子回填本次跳过:台账锁被其他写者持有,下次 GET 会重算' : '影子回填失败(不影响列表)',
+        err && err.message ? err.message : err,
+      )
       if (process.env.SHADOW_DEBUG) console.error(err)
       return 0
     }
   }
 
-  function listRoutes(limit) {
-    const cfg = effectiveConfig()
-    backfillShadow(cfg)
+  async function listRoutes(limit, cfg = effectiveConfig()) {
+    await backfillShadow(cfg)
     const listed = listRoutesFromLedger(cfg.auditFile, limit)
-    const links = shadowLinks(readLedgerLines(cfg.auditFile))
-    listed.decisions = attachShadowLinks(listed.decisions, links, links.size > 0 ? fleetBatchRuns(readFleetRuns(homedir())) : new Map())
+    const batches = fleetBatchRuns(readFleetRuns(homedir()))
+    const links = validatedShadowLinks(readLedgerLines(cfg.auditFile), batches)
+    listed.decisions = attachShadowLinks(listed.decisions, links, batches)
     // 后验的分母写进载荷:真实观测条数与格子数,由台账算出。前端不得自称「后验再填三角色」而不给数(审查 P2-5)。
-    const state = allocationStateFromLedger(readLedgerLines(cfg.auditFile), { halfLifeDays: cfg.posteriorHalfLifeDays })
+    const state = allocationStateFromLedger(
+      readLedgerLines(cfg.auditFile),
+      { halfLifeDays: cfg.posteriorHalfLifeDays },
+    )
     listed.stats.posterior = {
       // 衰减开着时这是有效证据量(可为小数),关着时就是行数——口径由 halfLifeDays 一并携带。
       // 正数不许被凑成 0:0 意味着「暂无观测」,与同载荷 cells>0 会互相打脸(对抗审查 P3)。
@@ -298,17 +382,26 @@ export function apply(ctx, rawConfig) {
     return { at: Date.now(), rows: filtered, grid: coverageGrid(filtered) }
   }
 
-  function recordOutcome(body) {
-    const rec = buildOutcomeRecord(body)
+  async function recordOutcome(body) {
     const file = effectiveConfig().auditFile
-    // W17:影子行的 outcome 只来自 fleet-end 回填;手工写入会把人工胜负记到建议头上
-    if (isShadowDecisionRef(readLedgerLines(file), rec.ref)) {
-      const error = new Error('影子决策行只接受 fleet 终态回填,不接受手工胜负')
-      error.code = 'SHADOW_MANUAL_OUTCOME'
-      throw error
-    }
-    appendLine(file, rec)
-    return rec
+    // 一次事务:CONFLICTING_RESULT 是由这次读判定的,并发写者不能在读与追加之间落一个
+    // 相反结果 —— 那等于让「改判不改史」被竞争击穿,而不是被 bug 击穿。
+    // P1 异步锁:等锁在事件循环上进行;回调是 async,append 完成后锁才释放。
+    return withLedgerLockAsync(file, async () => {
+      const bound = bindOrdinaryOutcome({
+        authority: 'operator',
+        body,
+        rows: readLedgerLines(file),
+      })
+      if (!bound.ok) {
+        const error = new Error(bound.error)
+        error.code = bound.code
+        throw error
+      }
+      if (bound.idempotent) return bound.record
+      await appendLineAsync(file, bound.record)
+      return bound.record
+    }, HTTP_LOCK)
   }
 
   async function assembleLiveRequest(body) {
@@ -328,7 +421,7 @@ export function apply(ctx, rawConfig) {
     }, {
       decide: decideLive,
       readRows: () => readLedgerLines(cfg.auditFile),
-      append: (record) => appendLine(cfg.auditFile, record),
+      append: (record) => appendLineAsync(cfg.auditFile, record),
       // RSI:采样与半衰期由配置进,默认 mean/关——asm 行会如实记 ranking/decay。
       sampling: cfg.assembleSampling,
       halfLifeDays: cfg.posteriorHalfLifeDays,
@@ -336,7 +429,11 @@ export function apply(ctx, rawConfig) {
   }
 
   async function dispatchLiveRequest(body) {
-    const listed = listRoutes(50)
+    // P2:dispatch 开始即快照并钉住配置。proposal 读取后是最长 45s×3 的模型流,
+    // 期间 effectiveConfig() 可能已变 —— 所有台账回调都必须落在钉住的 pin 上,
+    // 否则 trial 的结果会被写进另一份台账。
+    const pin = pinDispatchConfig(effectiveConfig())
+    const listed = await listRoutes(50, pin)
     if (!listed.assemble) {
       const error = new Error(ASSEMBLE_EMPTY_COPY)
       error.code = 'ASSEMBLE_REQUIRED'
@@ -351,8 +448,12 @@ export function apply(ctx, rawConfig) {
       ref: body && typeof body.ref === 'string' ? body.ref : '',
       task: typeof body.task === 'string' ? body.task : '',
     }, {
-      append: (record) => appendLine(effectiveConfig().auditFile, record),
-      readRows: () => readLedgerLines(effectiveConfig().auditFile),
+      append: (record) => appendLineAsync(pin.auditFile, record),
+      readRows: () => readLedgerLines(pin.auditFile),
+      // 只有 读→检查→追加 尾段在锁内跑。前面三条模型流各自最长 45s,
+      // 把它们一起圈进跨进程锁会持锁约 135s、远超锁的 30s 超时,使其他写者全部失败。
+      // P1 异步锁:等锁在事件循环上进行,持锁对端冻不住整个 host。
+      transact: (fn) => withLedgerLockAsync(pin.auditFile, fn, HTTP_LOCK),
       streamRole: (input) => streamRoleText(input, {
         llm: ctx.llm,
         BlockAssembler,
@@ -368,9 +469,9 @@ export function apply(ctx, rawConfig) {
    * 当时「有实现、有单测、无调用方」—— W7 明文禁止的形状(2026-08-22 验收 P2)。
    * 这里就是它的调用方;删掉写入端会红掉这条路由,不再是无声的死代码。
    */
-  function recordAnnotation(body) {
+  async function recordAnnotation(body) {
     const rec = buildAnnotateRecord(body)
-    appendLine(effectiveConfig().auditFile, rec)
+    await appendLineAsync(effectiveConfig().auditFile, rec)
     return rec
   }
 
@@ -389,7 +490,7 @@ export function apply(ctx, rawConfig) {
           }
           const url = new URL(req.url, 'http://x')
           const limit = Number(url.searchParams.get('limit') || 50)
-          sendJson(res, 200, listRoutes(Number.isFinite(limit) ? limit : 50))
+          sendJson(res, 200, await listRoutes(Number.isFinite(limit) ? limit : 50))
         },
       }))
       disposers.push(ws.register({
@@ -402,7 +503,7 @@ export function apply(ctx, rawConfig) {
           }
           try {
             const body = await readBody(req)
-            sendJson(res, 200, await decideLive(body))
+            sendJson(res, 200, publicize(await decideLive(body)))
           } catch (err) {
             sendJson(res, 400, { error: String(err && err.message ? err.message : err).slice(0, 200) })
           }
@@ -431,7 +532,7 @@ export function apply(ctx, rawConfig) {
             return
           }
           try {
-            sendJson(res, 200, await shadowLive(await readBody(req)))
+            sendJson(res, 200, publicize(await shadowLive(await readBody(req))))
           } catch (err) {
             sendJson(res, 400, { error: String(err && err.message ? err.message : err).slice(0, 200) })
           }
@@ -446,7 +547,7 @@ export function apply(ctx, rawConfig) {
             return
           }
           try {
-            sendJson(res, 200, shadowLink(await readBody(req)))
+            sendJson(res, 200, publicize(await shadowLink(await readBody(req))))
           } catch (err) {
             sendJson(res, 400, { error: String(err && err.message ? err.message : err).slice(0, 200) })
           }
@@ -461,7 +562,7 @@ export function apply(ctx, rawConfig) {
             return
           }
           try {
-            sendJson(res, 200, recordAnnotation(await readBody(req)))
+            sendJson(res, 200, publicize(await recordAnnotation(await readBody(req))))
           } catch (err) {
             sendJson(res, 400, { error: String(err && err.message ? err.message : err).slice(0, 200) })
           }
@@ -472,7 +573,7 @@ export function apply(ctx, rawConfig) {
         path: '/api/agos/routes/assemble',
         handler: async (req, res) => {
           if (req.method === 'GET') {
-            const listed = listRoutes(50)
+            const listed = await listRoutes(50)
             sendJson(res, 200, {
               assemble: listed.assemble,
               dispatch: listed.dispatch,
@@ -486,7 +587,7 @@ export function apply(ctx, rawConfig) {
             return
           }
           try {
-            sendJson(res, 200, await assembleLiveRequest(await readBody(req)))
+            sendJson(res, 200, publicize(await assembleLiveRequest(await readBody(req))))
           } catch (err) {
             const status = err && err.code === 'CONFIRM_REQUIRED' ? 400 : 400
             sendJson(res, status, { error: String(err && err.message ? err.message : err).slice(0, 200), code: err && err.code })
@@ -498,7 +599,7 @@ export function apply(ctx, rawConfig) {
         path: '/api/agos/routes/assemble/dispatch',
         handler: async (req, res) => {
           if (req.method === 'GET') {
-            const listed = listRoutes(50)
+            const listed = await listRoutes(50)
             sendJson(res, 200, {
               dispatch: listed.dispatch,
               note: listed.dispatch ? DISPATCH_COPY : DISPATCH_EMPTY_COPY,
@@ -511,7 +612,7 @@ export function apply(ctx, rawConfig) {
             return
           }
           try {
-            sendJson(res, 200, await dispatchLiveRequest(await readBody(req)))
+            sendJson(res, 200, publicize(await dispatchLiveRequest(await readBody(req))))
           } catch (err) {
             const status = err && err.code === 'ASSEMBLE_MISMATCH' ? 409 : 400
             sendJson(res, status, { error: String(err && err.message ? err.message : err).slice(0, 200), code: err && err.code })
@@ -527,7 +628,7 @@ export function apply(ctx, rawConfig) {
             return
           }
           try {
-            sendJson(res, 200, recordOutcome(await readBody(req)))
+            sendJson(res, 200, publicize(await recordOutcome(await readBody(req))))
           } catch (err) {
             sendJson(res, 400, { error: String(err && err.message ? err.message : err).slice(0, 200) })
           }

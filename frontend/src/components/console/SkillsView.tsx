@@ -4,16 +4,22 @@ import { Button } from '@/components/ui/Button';
 import { fetchJsonResource, useResource } from '@/lib/useResource';
 import { conversationStore, fetchSkillList } from '@/stores/live';
 import {
+  auditFindingsEmptyCopy,
   clipDescription,
+  collectedNeverUsedCount,
   filterCatalog,
   filterSkillFindings,
   groupCatalogByCategory,
   mergeRpcCatalog,
-  neverUsedCount,
   parseSkillsPayload,
+  skillUsageKind,
+  skillsCatalogEmptyCopy,
   sortCatalog,
+  SKILL_USAGE_NEVER_COPY,
+  SKILL_USAGE_UNCOLLECTED_COPY,
   SKILLS_USAGE_READY_COPY,
   usageDenominatorReady,
+  usageSampleCopy,
   vanishedUsageSkills,
   type SkillAuditRoot,
   type SkillCatalogEntry,
@@ -67,6 +73,7 @@ function AuditRoot({ audit, query }: { audit: SkillAuditRoot; query: string }) {
 
   const findings = Array.isArray(audit.findings) ? audit.findings : undefined;
   const visible = findings === undefined ? undefined : filterSkillFindings(findings, query);
+  const emptyCopy = auditFindingsEmptyCopy(visible, query);
   const skills = typeof audit.skills === 'number' ? audit.skills : undefined;
   const errors = typeof audit.counts?.error === 'number' ? audit.counts.error : undefined;
   const warnings = typeof audit.counts?.warn === 'number' ? audit.counts.warn : undefined;
@@ -84,17 +91,13 @@ function AuditRoot({ audit, query }: { audit: SkillAuditRoot; query: string }) {
         <Badge state={warnings === undefined ? 'queued' : warnings > 0 ? 'running' : 'done'}>警告 {warnings ?? '未采集'}</Badge>
       </div>
 
-      {visible === undefined ? (
-        <p className="surface-quiet">审计未返回检查明细。</p>
-      ) : visible.length === 0 ? (
-        <p className="surface-quiet">
-          {query.trim() === '' ? '当前根没有发现问题。' : '当前筛选没有匹配项。'}
-        </p>
-      ) : (
+      {emptyCopy !== undefined ? (
+        <p className="surface-quiet">{emptyCopy}</p>
+      ) : visible !== undefined ? (
         <ul className="surface-list">
           {visible.map((finding, index) => <FindingRow key={`${finding.skill ?? ''}:${finding.check ?? ''}:${index}`} finding={finding} />)}
         </ul>
-      )}
+      ) : null}
     </section>
   );
 }
@@ -102,11 +105,13 @@ function AuditRoot({ audit, query }: { audit: SkillAuditRoot; query: string }) {
 function CatalogRow({
   row,
   usage,
+  usageReady,
 }: {
   row: SkillCatalogEntry;
   usage: { count: number; lastAt: number } | undefined;
+  usageReady: boolean;
 }) {
-  const count = usage?.count ?? 0;
+  const kind = skillUsageKind(usage, usageReady);
   const lastAt = usage?.lastAt;
   return (
     <li className="surface-row surface-row--3">
@@ -121,11 +126,13 @@ function CatalogRow({
       </div>
       <p className="surface-body">{clipDescription(row.description || '（无 description）')}</p>
       <div className="u-num surface-meta">
-        {count === 0 ? (
-          <span>从未调用</span>
+        {kind === 'uncollected' ? (
+          <span>{SKILL_USAGE_UNCOLLECTED_COPY}</span>
+        ) : kind === 'never' ? (
+          <span>{SKILL_USAGE_NEVER_COPY}</span>
         ) : (
           <>
-            <div>×{count}</div>
+            <div>×{usage?.count}</div>
             {lastAt ? <div>{new Date(lastAt).toLocaleString()}</div> : null}
           </>
         )}
@@ -190,7 +197,8 @@ export const SkillsView: React.FC<{
     fetcher: async (url, signal) => parseEvolveReport(await fetchJsonResource<unknown>(url, signal)),
   });
   const evolveHits = evolveResource.data?.hits ?? [];
-  const unused = neverUsedCount(catalogMerged, payload?.usage);
+  const unused = collectedNeverUsedCount(catalogMerged, payload?.usage, payload?.usageMeta);
+  const sampleCopy = usageSampleCopy(payload?.usageMeta);
   const vanished = useMemo(
     () => vanishedUsageSkills(catalogMerged, payload?.usage),
     [catalogMerged, payload?.usage],
@@ -311,10 +319,12 @@ export const SkillsView: React.FC<{
                 会话 / 0 次调用时,383 全是「从未调用」几乎是必然的 —— 不把分母亮出来,
                 读者会当成「这 383 个 skill 确实没人用」(2026-08-21 验收 P1)。*/}
             <Badge state="queued">
-              从未调用 {unused}
-              {payload?.usageMeta != null && (
+              {unused === undefined
+                ? SKILL_USAGE_UNCOLLECTED_COPY
+                : `${SKILL_USAGE_NEVER_COPY} ${unused}`}
+              {sampleCopy !== undefined && (
                 <span>
-                  {` · 样本 ${payload.usageMeta.files ?? 0} 会话 / ${payload.usageMeta.events ?? 0} 次调用`}
+                  {` · ${sampleCopy}`}
                 </span>
               )}
             </Badge>
@@ -548,7 +558,7 @@ export const SkillsView: React.FC<{
           )}
 
           {groups.length === 0 ? (
-            <p className="surface-quiet">没有匹配的技能。</p>
+            <p className="surface-quiet">{skillsCatalogEmptyCopy(query)}</p>
           ) : (
             groups.map((group) => (
               <section key={group.category} className="surface-section" aria-label={group.category}>
@@ -558,7 +568,7 @@ export const SkillsView: React.FC<{
                 </h3>
                 <ul className="surface-list">
                   {group.items.map((row) => (
-                    <CatalogRow key={row.name} row={row} usage={payload.usage?.[row.name]} />
+                    <CatalogRow key={row.name} row={row} usage={payload.usage?.[row.name]} usageReady={usageReady} />
                   ))}
                 </ul>
               </section>

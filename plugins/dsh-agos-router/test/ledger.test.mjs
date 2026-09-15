@@ -32,7 +32,7 @@ test('fold overlays outcome without rewriting the decision line', async () => {
   const before = await readFile(file, 'utf8')
   const decisionLine = before.trim()
   assert.ok(!decisionLine.includes('SuperSecret'))
-  const patch = buildOutcomeRecord({ ref: record.id, result: 'ok', source: 'manual' })
+  const patch = buildOutcomeRecord({ ref: record.id, result: 'ok', source: 'manual', taskRef: record.taskRef, taskUnverified: true })
   appendLine(file, patch)
   const after = await readFile(file, 'utf8')
   assert.equal(after.split('\n')[0], decisionLine)
@@ -42,7 +42,9 @@ test('fold overlays outcome without rewriting the decision line', async () => {
   assert.equal(listed.stats.filled, 1)
   assert.equal(listed.stats.total, 1)
   assert.equal(listed.decisions[0].task, undefined)
-  assert.equal(publicizeDecision({ task: 'raw', pick: 'x' }).task, undefined)
+  assert.equal(listed.decisions[0].taskRef, undefined, 'the public row must not leak the task fingerprint')
+  assert.equal(publicizeDecision({ task: 'raw', taskRef: 'f'.repeat(64), pick: 'x' }).task, undefined)
+  assert.equal(publicizeDecision({ task: 'raw', taskRef: 'f'.repeat(64), pick: 'x' }).taskRef, undefined)
 })
 
 test('caller-claimed verified:true is not TRUST (TASK-018 W4)', async () => {
@@ -110,8 +112,10 @@ test('annotate folds onto the decision without rewriting the history line', () =
 })
 
 test('annotate 有活的 HTTP 调用方，不是「有实现、有单测、无调用方」的中间态', () => {
+  // 2026-09-09:接线补丁落地后 recordAnnotation 为 async + appendLineAsync(异步锁);
+  // 补丁前是 sync + appendLine。两种形状都算「有活的落盘路径」,别退回死代码即可。
   const src = readFileSync(new URL('../lib/index.js', import.meta.url), 'utf8')
   assert.match(src, /buildAnnotateRecord/, 'index.js 没有引入写入端')
   assert.match(src, /'\/api\/agos\/routes\/annotate'/, 'annotate 没有 HTTP 入口')
-  assert.match(src, /function recordAnnotation\(body\)\s*\{[\s\S]{0,200}appendLine\(/, 'annotate 没有落盘路径')
+  assert.match(src, /(?:async )?function recordAnnotation\(body\)\s*\{[\s\S]{0,300}appendLine(?:Async)?\(/, 'annotate 没有落盘路径')
 })

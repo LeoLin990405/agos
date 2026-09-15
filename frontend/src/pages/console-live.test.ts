@@ -245,6 +245,37 @@ test('W16 deriveConsole 真排序 + 来源状态:失败 > 警告 > 在跑,同档
   assert.equal(stale.inboxSources.council, 'stale');
   assert.deepEqual(stale.inboxNotes, [`评审台账只回最近 ${COUNCIL_SERVER_WINDOW} 条,更早的被标记记录看不到`]);
 
+  const refreshStale = deriveConsole({
+    overview: { skills: { skills: 4, warn: 0, error: 0 } },
+    progress: { calls: [] },
+    at: 1,
+  }, { rows: [] }, { progressStale: true, skillsStale: true });
+  assert.equal(refreshStale.inboxSources.progress, 'stale');
+  assert.equal(refreshStale.inboxSources.skills, 'stale');
+  assert.equal(refreshStale.skills, 4);
+  assert.equal(refreshStale.progressLive, true);
+  assert.equal(inboxEmptyText(refreshStale.inboxSources), '已采集的来源里无待处理;未采集:路由台账、评审台账;沿用旧数据:谱系进度、技能审计');
+  const allPresentStale = deriveConsole({
+    overview: { skills: { skills: 4, warn: 0, error: 0 } },
+    progress: { calls: [] },
+    at: 1,
+  }, { rows: [] }, {
+    routes: { ...routesLive, stats: { ...routesLive.stats, pending: 0 } },
+    council: [],
+    progressStale: true,
+    skillsStale: true,
+  });
+  assert.deepEqual(allPresentStale.inboxSources, { progress: 'stale', routes: 'ready', skills: 'stale', council: 'ready' });
+  assert.deepEqual(allPresentStale.inbox, []);
+  assert.equal(inboxEmptyText(allPresentStale.inboxSources), '已采集的来源里无待处理;沿用旧数据:谱系进度、技能审计');
+  assert.equal(inboxBadgeState([], allPresentStale.inboxSources), 'queued');
+  const refreshReady = deriveConsole({
+    overview: { skills: { skills: 4, warn: 0, error: 0 } },
+    progress: { calls: [] },
+    at: 1,
+  }, { rows: [] });
+  assert.deepEqual(refreshReady.inboxSources, { progress: 'ready', routes: 'absent', skills: 'ready', council: 'absent' });
+
   // 旧两参调用仍可用:三个新源一律 absent,不发明条目
   const legacy = deriveConsole({ overview: {}, progress: { calls: [] }, at: 0 }, { rows: [] });
   assert.deepEqual(legacy.inbox, []);

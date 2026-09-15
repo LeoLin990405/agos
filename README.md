@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/Surfaces-12-gold?style=for-the-badge" />
   <img src="https://img.shields.io/badge/Plugins-5-crimson?style=for-the-badge" />
   <img src="https://img.shields.io/badge/HTTP%20API%20Routes-48-blue?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/Unit%20Tests-651-purple?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Tests-833%20passing-purple?style=for-the-badge" />
   <img src="https://img.shields.io/badge/Browser%20Regression-41%20checks-blueviolet?style=for-the-badge" />
   <img src="https://img.shields.io/badge/License-MIT-yellowgreen?style=for-the-badge" />
 </p>
@@ -170,7 +170,7 @@ Two deliberate coupling rules shape the design:
 |---|---|
 | **`dsh-agos`** | Console core: OS-level control panel, skills audit/studio/evolve/trim, overview, session metadata, session trash, session-memory store + inject + relevance, memory desk, turn-evidence, plugin inventory, SPA static server. |
 | **`dsh-agos-router`** | Model routing: LLM selector over CN candidates, rule fallback, route-outcome JSONL, allocation posterior feeding planner/implementer/reviewer `assemble()`, confirm-gated text-only dispatch, shadow selector. |
-| **`cn-capabilities`** | CN-model capability layer: vision tools, speech, image generation, delegation, multi-model **council** with a blind arbiter, `plan_run` store, browser/CLI tools, read-only usage metering. |
+| **`cn-capabilities`** | CN-model capability layer: **19** registered tools, vision, speech, image generation, delegation, multi-model **council** with a blind arbiter, `plan_run` store, browser/CLI tools, read-only usage metering. |
 | **`dsh-fleet`** | Homelab multi-machine concurrency: remote `dsh --profile headless` over ssh+stdin, in-process local subagents, opt-in Codex SDK host, wake-on-LAN, health probes, per-host limits, reroute, artifact retrieval, scrubbed event ledger. |
 | **`dsh-mcp-bridge`** | Minimal MCP Streamable HTTP server (protocol 2025-03-26) at `POST /mcp`, with five tools: `agos_sessions`, `agos_prompt`, `agos_result`, `agos_swarm_status`, `agos_memory_search`. Only `agos_prompt` starts real model work. |
 
@@ -208,13 +208,13 @@ Do not edit `frontend/src/fold`, `frontend/src/api-client`, `frontend/src/contra
 
 ### 4.4 The vendored host contract
 
-The SPA talks to the DSH host through a typed API contract vendored at `frontend/src/contract/api/` and pinned by `UPSTREAM.pin`. `npm run verify` includes `vendor:diff`. This tree targets DSH `0.1.2-rc.1`. Do not silently upgrade the harness.
+The SPA talks to the DSH host through a typed API contract membrane at `frontend/src/contract/api/` pinned by `UPSTREAM.pin` (`deepseek-harness @ a66e470204`, `0.1.2-rc.1`). `npm run verify` includes `vendor:diff`, which compares **that pin git object** (read-only `git show` / `git archive`) — not another checkout's live HEAD. Wire constants (`REMOTE_STREAM_MUX_PATH` = `/api/remote.mux`, `$events` endpoints) must be byte-equal to the pin; all 19 adapter contents are frozen to reviewed base blobs by `contract-baseline.sha256`. This is a regression guard, not full type-compatibility proof; the membrane is an adapter set, not a wholesale dump of later `packages/host/apiproxy/src/api`. Do not silently upgrade the harness or move the pin.
 
 ### 4.5 What the deck consumes but does not ship
 
 | Consumed source | Produced by | Used for |
 |---|---|---|
-| `/api/events.mux`, `/api/respond`, session RPCs | DSH host core | Chat transcript, approvals, session matrix |
+| `/api/remote.mux` (one route name; the client still opens one WebSocket per logical stream), `/api/$events/result`, session RPCs | DSH host core | Chat transcript, approvals, session matrix |
 | `/api/swarm/progress`, `/api/swarm/history` | swarm plugin (external) | Lineage tree and history |
 | `/api/trace/sessions` | trace plugin (external) | Trace time-share bars |
 | `/api/memory/*` (graph, search, link-suggestions) | memory plugin (external) | Memory workbench graph |
@@ -230,7 +230,7 @@ The deck runs at `http://127.0.0.1:3091/agos/`. Twelve navigable surfaces: three
 
 ### 5.1 Chat (对话流)
 
-Multimodal conversation with a session sidebar (pinned / recent / archived). Approvals are first-class UI. Permission-verdict annotations attach to tool cards. Voice input uses Web-Audio VAD and `POST /api/cn/asr`. Session delete moves to an audited trash. When `events.mux` is down, new-session disables with an explicit tooltip.
+Multimodal conversation with a session sidebar (pinned / recent / archived). Approvals are first-class UI. Permission-verdict annotations attach to tool cards. Voice input uses Web-Audio VAD and `POST /api/cn/asr`. Session delete moves to an audited trash. When `/api/remote.mux` is down, new-session disables with an explicit tooltip. The on-screen ReplayScrubber only slices the already-folded snapshot; it is not event replay.
 
 Each turn can show a **turn-evidence strip**: memory inject impressions and skill-catalog trim for *this* turn only. Lanes are replaced, not deep-merged. Absence of a pre-step is “not collected”, not a fake zero. The strip does not invent the first useful / mis-recall row.
 
@@ -461,15 +461,15 @@ Four blocks, scored separately: RPC-channel user sentences, bare-source rows, kn
 
 Counted on 2026-09-08 against this tree. Zero model calls.
 
-| Package | Tests | Runner |
-|---|---|---|
-| `frontend/` | 306 | `node:test` via tsx (`npm run verify` = typecheck + tests + build + contract zero-drift) |
-| `plugins/dsh-agos` | 121 | `node --test` |
-| `plugins/dsh-agos-router` | 78 | `node --test` |
-| `plugins/dsh-fleet` | 113 passing / 114 listed | `node --test`. `fleet.fake.test.mjs` has a known post-test ledger-rename flake; it is not treated as a product regression here |
-| `plugins/cn-capabilities` | 29 | `node --test` |
-| `plugins/dsh-mcp-bridge` | 4 | `node --test` |
-| **Total passing** | **651** | `scripts/test-all.sh` |
+| Package | Pass / Fail / Skip | Verification scope |
+|---|---:|---|
+| `frontend/` | 365 / 0 / 1 | `npm run verify`: version, types, tests, build, pin and adapter-content guard |
+| `plugins/dsh-agos` | 154 / 0 / 2 | `node --test test/*.mjs`, includes three scaling checks |
+| `plugins/dsh-agos-router` | 91 / 0 / 0 | HTTP, feedback and shadow binding |
+| `plugins/dsh-fleet` | 137 / 0 / 0 | Full suite, real multiprocess locks and cleanup lifecycle |
+| `plugins/cn-capabilities` | 82 / 0 / 0 | Plans, isolated verification and real macOS sandbox |
+| `plugins/dsh-mcp-bridge` | 4 / 0 / 0 | Fake MCP |
+| **Total** | **833 / 0 / 3** | Three private-corpus checks explicitly skipped; six additional browser component checks |
 
 ### 10.2 Static locks
 
@@ -481,11 +481,11 @@ Counted on 2026-09-08 against this tree. Zero model calls.
 | Inbox single-source ban | Overview may not carry a hard-coded data-source claim |
 | Council divergence lock | Divergence marks come from the arbiter's collected array |
 | DispatchModal shadow source lock | Exactly one shadow call site; signature dedup pinned |
-| Vendor contract zero-drift | `diff -r` of vendored contract vs installed harness |
+| Vendor contract vs **pin object** | `vendor:diff` loads `a66e470204` from the harness git repo; live HEAD is not the baseline. Wire consts are BYTE_EQUAL; `src/contract/api/*` is a frozen adapter set |
 
 ### 10.3 Browser regression
 
-`regression/opencli-regression.sh` drives a real Chrome through an OpenCLI bridge against the live deck — read-only, zero model calls. The latest full run reports 41/41. Anchors must be texts that turn red on a 404.
+`regression/opencli-regression.sh` drives a real Chrome through an OpenCLI bridge against the live deck — read-only, zero model calls. That historical live-host run was not repeated here. This round ran six real-Chrome component-fixture checks with synthetic data. Full commands, logs and limitations are in [final verification](docs/engineering/agos-hardening-20260908/VERIFICATION.md); deployment dry-run still reports expected undeployed drift.
 
 ---
 
@@ -556,7 +556,7 @@ scripts/dev-links.sh   # once: gitignored node_modules links for in-repo plugin 
 scripts/test-all.sh    # frontend verify + 5 plugin suites + deploy drift check
 ```
 
-`test-all.sh` makes zero model calls. The memory-ruler suite auto-skips when its locally generated corpus is not present.
+`test-all.sh` makes zero model calls and keeps the real exit code of `npm run verify` and each plugin `node --test` (grep is display-only). Private corpus tests read only an explicit `SESSION_MEMORY_CORPUS_DIR`; they were skipped this round. `mine.mjs` also requires an explicit input path. `npm run replay` needs `AGOS_CORPUS` (historical default: 392 trash sessions). Missing corpus is environment-unsatisfied, not a pass; do not copy a past “392 sessions passed” as this run’s result. There is no tracked `.github/workflows`.
 
 ### 12.2 Why plugins deploy as copies
 
@@ -585,14 +585,14 @@ Stated plainly, in the spirit of the thing:
 6. **Allocation does not dispatch.** The posterior sorts assemble proposals and shortlists. It does not pick the live session model.
 7. **Ledger scale is homelab scale.** Fold-on-read over JSONL is fast for thousands of rows, not millions.
 8. **CN-model tooling assumes CN providers.** Adapting to other providers means editing `cn-capabilities`.
-9. **`dsh-fleet`'s fake suite** can report a file-level fail from a post-test ledger rename after the assertions passed. That teardown race is a known test-harness flake, not a claim about live dispatch.
+9. **Fleet lifecycle validation.** The observed post-test ledger rename race was fixed and the complete 137-test Fleet suite passed this round. Real deployed dispatch remains outside that acceptance scope.
 
 ---
 
 ## License & Credits
 
 - [MIT](LICENSE).
-- The API contract under `frontend/src/contract/` is vendored from [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) (MIT, © DeepSeek) and kept drift-free by `npm run vendor:diff`.
+- The API contract under `frontend/src/contract/` is an AgOS membrane aligned to [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) (MIT, © DeepSeek) pin `a66e470204`. `npm run vendor:diff` checks that pin object, not an arbitrary checkout HEAD.
 - Built to run on the DeepSeek Harness plugin runtime (`cordis`); host packages (`@deepseek-ai/*`) are provided by your DSH installation.
 - The browser regression is driven through [OpenCLI](https://github.com/jackwener/opencli)'s browser bridge.
 - Published from this tree as [`LeoLin990405/agos`](https://github.com/LeoLin990405/agos).

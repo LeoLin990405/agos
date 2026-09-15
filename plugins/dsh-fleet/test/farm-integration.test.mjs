@@ -260,7 +260,44 @@ exit 0
   assert.equal(stored.filter((event) => event.ev === 'detach' && event.runId === 'r-offline').at(-1).cancelPending, true)
 })
 
-test('early ssh exit with a 100KB prompt is detached without an unhandled stdin EPIPE', async (t) => {
+test('fleet_run rejects a 100KB item instead of sending it to ssh', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'fleet-reject-large-'))
+  const oldLedger = process.env.DSH_FLEET_LEDGER_PATH
+  const oldState = process.env.DSH_FLEET_SSH_STATE_DIR
+  process.env.DSH_FLEET_LEDGER_PATH = join(root, 'runs.jsonl')
+  process.env.DSH_FLEET_SSH_STATE_DIR = join(root, 'ssh-state')
+  t.after(() => {
+    if (oldLedger === undefined) delete process.env.DSH_FLEET_LEDGER_PATH
+    else process.env.DSH_FLEET_LEDGER_PATH = oldLedger
+    if (oldState === undefined) delete process.env.DSH_FLEET_SSH_STATE_DIR
+    else process.env.DSH_FLEET_SSH_STATE_DIR = oldState
+    rmSync(root, { recursive: true, force: true })
+  })
+  const tools = new Map()
+  const ctx = {
+    tools: { register(tool) { tools.set(tool.name, tool); return () => tools.delete(tool.name) } },
+    commands: { register: () => () => {} }, systemPrompt: { section: () => () => {} },
+    subagents: { registerProvider() {}, list: () => [] },
+    get() { return undefined }, inject: () => {},
+  }
+  const dispose = apply(ctx, Config({
+    hosts: [{ name: 'worker', kind: 'remote', ssh: 'worker', enabled: true, maxConcurrency: 1, workspace: '~/work' }],
+    powerNodes: {},
+  }))
+  try {
+    await assert.rejects(
+      () => tools.get('fleet_run').execute(
+        { items: ['x'.repeat(100 * 1024)] },
+        { agent: { id: 'agent', session: { id: 'session' } }, signal: new AbortController().signal, callId: 'too-big' },
+      ),
+      /items\[0\] exceeds 8000 characters/,
+    )
+  } finally {
+    await dispose()
+  }
+})
+
+test('early ssh exit with a max-legal prompt is detached without an unhandled stdin EPIPE', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'dsh-fleet-epipe-'))
   const ledger = join(root, 'runs.jsonl')
   const stubSsh = join(root, 'ssh')
@@ -293,7 +330,14 @@ exit 0
     hosts: [{ name: 'worker', kind: 'remote', ssh: 'worker', enabled: true, maxConcurrency: 1, workspace: '~/work' }],
     powerNodes: {},
   }))
+  // execute() keeps ssh/preflight in flight; delete the stub only after that
+  // promise settles. Formal-gate file parallelism can delay the 255→detach
+  // ledger write past a 2s poll, and a mid-flight rmSync surfaces as
+  // unhandledRejection on the leftover preflight.
+  let run = Promise.resolve()
   t.after(async () => {
+    try { hooks?.cancel() } catch { /* already settled */ }
+    try { await run } catch { /* assertion already observed the outcome */ }
     await dispose()
     process.env.PATH = oldPath
     delete process.env.DSH_FLEET_LEDGER_PATH
@@ -301,13 +345,13 @@ exit 0
     rmSync(root, { recursive: true, force: true })
   })
 
-  const run = tools.get('fleet_run').execute(
-    { items: ['x'.repeat(100 * 1024)] },
+  run = tools.get('fleet_run').execute(
+    { items: ['x'.repeat(8000)] },
     { agent: { id: 'agent', session: { id: 'session' } }, signal: new AbortController().signal, callId: 'epipe' },
   )
   await waitUntil(() => {
     try { return readFileSync(ledger, 'utf8').includes('"ev":"detach"') } catch { return false }
-  }, 'transport exit 255 was not recorded as detached')
+  }, 'transport exit 255 was not recorded as detached', 10000)
   hooks.cancel()
   assert.match(await run, /outcome="failed"/)
   const stored = readFileSync(ledger, 'utf8').trim().split('\n').map(JSON.parse)
@@ -350,7 +394,10 @@ exit 0
     hosts: [{ name: 'worker', kind: 'remote', ssh: 'worker', enabled: true, maxConcurrency: 1, workspace: '~/work' }],
     powerNodes: {}, taskTimeoutMs: 25,
   }))
+  let run = Promise.resolve()
   t.after(async () => {
+    try { hooks?.cancel() } catch { /* already settled */ }
+    try { await run } catch { /* assertion already observed the outcome */ }
     await dispose()
     process.env.PATH = oldPath
     delete process.env.DSH_FLEET_LEDGER_PATH
@@ -358,13 +405,13 @@ exit 0
     rmSync(root, { recursive: true, force: true })
   })
 
-  const run = tools.get('fleet_run').execute(
+  run = tools.get('fleet_run').execute(
     { items: ['timeout prompt'] },
     { agent: { id: 'agent', session: { id: 'session' } }, signal: new AbortController().signal, callId: 'timeout' },
   )
   await waitUntil(() => {
     try { return readFileSync(ledger, 'utf8').includes('timeout remote kill failed') } catch { return false }
-  }, 'failed timeout kill did not become detached')
+  }, 'failed timeout kill did not become detached', 10000)
   let stored = readFileSync(ledger, 'utf8').trim().split('\n').map(JSON.parse)
   assert.equal(stored.some((event) => event.ev === 'end' && event.error === 'TIMEOUT'), false)
   assert.equal(readFileSync(killLog, 'utf8').trim().split('\n').length, 1)

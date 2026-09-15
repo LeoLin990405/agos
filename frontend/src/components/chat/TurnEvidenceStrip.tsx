@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Chip } from '@/components/ui/Chip';
 import { postMemoryRelevance } from '@/components/stage/session-memory-relevance-api';
@@ -11,54 +11,99 @@ import {
   IMPRESSION_WHY_COPY,
   turnEvidenceChips,
   turnEvidenceFeedbackTargets,
+  turnEvidenceId,
   turnEvidenceImpressionLabels,
   turnEvidenceUnrecordableCopy,
   type TurnEvidence,
+  type TurnEvidenceId,
 } from './turn-evidence';
 
-export const TurnEvidenceStrip: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
+export interface TurnEvidenceStripProps {
+  sessionId?: string;
+  turn?: TurnEvidenceId | null;
+  step?: TurnEvidenceId | null;
+}
+
+export const TurnEvidenceStrip: React.FC<TurnEvidenceStripProps> = ({ sessionId, turn, step }) => {
+  const id = sessionId?.trim() ?? '';
+  const turnId = turnEvidenceId(turn);
+  const stepId = turnEvidenceId(step);
+  if (id === '' || turnId === null || stepId === null) {
+    return <div className="turn-evidence" aria-label="本跳证据"><Chip>本跳编号未采集</Chip></div>;
+  }
+  // A new binding gets new state immediately, before effects can run: previous
+  // evidence and its feedback controls must never render under the new session.
+  return <BoundTurnEvidenceStrip key={JSON.stringify([id, turnId, stepId])} sessionId={id} turn={turnId} step={stepId} />;
+};
+
+const BoundTurnEvidenceStrip: React.FC<{ sessionId: string; turn: string; step: string }> = ({ sessionId, turn, step }) => {
   const [evidence, setEvidence] = useState<TurnEvidence>();
   const [error, setError] = useState<string>();
   const [confirm, setConfirm] = useState(false);
   const [notice, setNotice] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const mounted = useRef(false);
 
   useEffect(() => {
+    mounted.current = true;
     let cancelled = false;
-    let timer: ReturnType<typeof setInterval> | undefined;
-    const load = (): void => {
-      void fetchTurnEvidence(sessionId).then(
-        (next) => {
-          if (!cancelled) {
-            setEvidence(next);
-            setError(undefined);
-          }
-        },
-        (reason) => {
-          if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
-        },
-      );
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = async (): Promise<void> => {
+      try {
+        const next = await fetchTurnEvidence(sessionId, controller.signal, { turn, step });
+        if (!cancelled) {
+          setEvidence(next);
+          setError(undefined);
+        }
+      } catch (reason) {
+        if (!cancelled) {
+          setEvidence(undefined);
+          setError(reason instanceof Error ? reason.message : String(reason));
+        }
+      } finally {
+        // Schedule after settlement so slower reads cannot overwrite newer reads.
+        if (!cancelled) timer = setTimeout(() => { void load(); }, 4_000);
+      }
     };
-    load();
-    timer = setInterval(load, 4_000);
+    void load();
     return () => {
       cancelled = true;
-      if (timer !== undefined) clearInterval(timer);
+      mounted.current = false;
+      controller.abort();
+      if (timer !== undefined) clearTimeout(timer);
     };
-  }, [sessionId]);
+  }, [sessionId, turn, step]);
 
   useEffect(() => {
     setConfirm(false);
     setNotice(undefined);
-  }, [sessionId]);
+  }, [evidence?.at]);
+
+  const recordFeedback = async (itemId: string, result: 'ok' | 'fail'): Promise<void> => {
+    if (!confirm || busy || evidence === undefined || !evidence.observed) return;
+    setBusy(true);
+    try {
+      const posted = await postMemoryRelevance({ sessionId, itemId, result, query: evidence.memory.query ?? undefined });
+      if (mounted.current) setNotice(posted.ok ? `已记录 ${itemId.slice(0, 8)} / ${result}` : posted.error);
+    } catch (reason) {
+      if (mounted.current) setNotice(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      if (mounted.current) {
+        setBusy(false);
+        setConfirm(false);
+      }
+    }
+  };
 
   const chips = evidence === undefined ? ['本跳证据未采集'] : turnEvidenceChips(evidence);
-  const targets = evidence === undefined ? [] : turnEvidenceFeedbackTargets(evidence);
+  const targets = evidence?.observed === true ? turnEvidenceFeedbackTargets(evidence) : [];
   const unrecordable = evidence === undefined ? undefined : turnEvidenceUnrecordableCopy(evidence);
   const labels = evidence === undefined ? [] : turnEvidenceImpressionLabels(evidence);
   return (
     <div className="turn-evidence" aria-label="本跳证据">
       <div className="surface-instrument" style={{ marginTop: 0 }}>
+        <span className="u-microlabel">轮次 {turn} · 步骤 {step}</span>
         {chips.map((copy) => (
           <Chip key={copy}>{copy}</Chip>
         ))}
@@ -73,6 +118,12 @@ export const TurnEvidenceStrip: React.FC<{ sessionId?: string }> = ({ sessionId 
         )}
         {error !== undefined && (
           <span className="surface-alert" role="alert">本跳证据未采集：{error}</span>
+        )}
+        {evidence?.observed === true && evidence.persisted === false && (
+          <span className="u-microlabel">本跳证据未持久化{evidence.persistError === null ? '' : `：${evidence.persistError}`}</span>
+        )}
+        {evidence?.observed === true && evidence.persisted === null && (
+          <span className="u-microlabel">本跳证据持久化状态未采集</span>
         )}
       </div>
       {targets.length > 0 && (
@@ -96,42 +147,16 @@ export const TurnEvidenceStrip: React.FC<{ sessionId?: string }> = ({ sessionId 
               <Button
                 size="sm"
                 variant="ghost"
-                disabled={!confirm || busy || sessionId === undefined || sessionId.trim() === ''}
-                onClick={() => {
-                  if (sessionId === undefined || sessionId.trim() === '') return;
-                  setBusy(true);
-                  void postMemoryRelevance({
-                    sessionId,
-                    itemId: row.id,
-                    result: 'ok',
-                    query: evidence?.memory.query ?? undefined,
-                  }).then((posted) => {
-                    setBusy(false);
-                    setConfirm(false);
-                    setNotice(posted.ok ? `已记录 ${row.id.slice(0, 8)} / ok` : posted.error);
-                  });
-                }}
+                disabled={!confirm || busy}
+                onClick={() => { void recordFeedback(row.id, 'ok'); }}
               >
                 记有用
               </Button>
               <Button
                 size="sm"
                 variant="ghost"
-                disabled={!confirm || busy || sessionId === undefined || sessionId.trim() === ''}
-                onClick={() => {
-                  if (sessionId === undefined || sessionId.trim() === '') return;
-                  setBusy(true);
-                  void postMemoryRelevance({
-                    sessionId,
-                    itemId: row.id,
-                    result: 'fail',
-                    query: evidence?.memory.query ?? undefined,
-                  }).then((posted) => {
-                    setBusy(false);
-                    setConfirm(false);
-                    setNotice(posted.ok ? `已记录 ${row.id.slice(0, 8)} / fail` : posted.error);
-                  });
-                }}
+                disabled={!confirm || busy}
+                onClick={() => { void recordFeedback(row.id, 'fail'); }}
               >
                 记误召回
               </Button>

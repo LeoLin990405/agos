@@ -1,0 +1,37 @@
+{
+  "schema": "agos-acceptance/host-integrations@1",
+  "$comment": [
+    "宿主环境集成清单 —— 声明「这个说明符在干净依赖树里解析不到属预期」。",
+    "",
+    "这份清单是给人 review 的,不是给检查器放行用的。加一条进来必须能回答:",
+    "  · 为什么它不能是普通包依赖(why,一句实测理由,不是「装不上」这种结论)",
+    "  · 缺席时优雅降级在哪(degradation.file + degradation.export)",
+    "",
+    "检查器不信任本文件的任何一句话,每条都会被独立核验:",
+    "  1. degradation.file 必须存在且真的导出 degradation.export,否则这条声明作废;",
+    "  2. consumers 里列的文件必须存在;",
+    "  3. **安全阀** —— 说明符在源码里如果是加载期导入形态(静态 import / export from /",
+    "     判不准的 require),照旧非零退出。宿主集成只在动态可选形态下成立;",
+    "  4. 说明符会被独立探测解析结果,不依赖它有没有出现在静态导入图里。",
+    "",
+    "不在本清单里的说明符解析不到 → 行为完全不变,照旧非零退出。",
+    "本文件缺失 / JSON 坏 / 条目缺必填字段 → fail-closed 硬失败,不会被当成空清单。"
+  ],
+  "integrations": [
+    {
+      "specifier": "dsh-kimicode-swarm",
+      "why": "registry 上 0.1.0/0.1.1/0.1.2 逐版 npm pack 实测:公开导出只有 Config、SWARM_GUIDANCE、SWARM_SETTINGS_NAMESPACE、apply、inject、renderSwarmResults 六项,AgOS 需要的 publishProgress/parseResultsXml/escapeXml/textOf/runNormalizedBatch/PROGRESS 一个都不导出;且三版的 lib/index.js:2 都 import { installSettingsSection } from '@deepseek-ai/dsh-settings',该导出只存在于 dsh-settings 0.1.0-rc.6 及更早,ESM 具名导入缺失是加载期 SyntaxError,会把整棵树的 settings 拖回与其余包 ^0.1.2-rc.1 冲突的 rc.6 —— 这是上一轮 npm ci 装不出可用树的根因。真实宿主上能用的是各 profile 下 plugins/kimicode-swarm-aligned 的对齐构建产物,该目录只有 lib/、无 src/、无 .git,补丁不可得,故不 vendor 进仓。swarm 在真实宿主上本来就是同级插件(已核实 ~/.dsh/profiles/{desktop,web} 均有 node_modules/dsh-kimicode-swarm)。",
+      "degradation": {
+        "file": "plugins/dsh-agos/lib/swarm-host-integration.mjs",
+        "export": "resolveSwarmModule"
+      },
+      "optInEnv": "AGOS_SWARM_MODULE",
+      "consumers": [
+        "plugins/dsh-fleet/lib/fleet-swarm-compat.mjs",
+        "plugins/cn-capabilities/lib/index.js",
+        "plugins/dsh-agos/lib/index.js"
+      ],
+      "degradedBehaviour": "resolveSwarmModule() 返回 { available:false, reason }。fleet 的 publishProgress 显式记不可用(不假装发布过);cn-capabilities 的 loadSwarm() 抛可读错误,只影响 plan_run 执行阶段,其余 21 个工具不受影响;dsh-agos 的 overviewLineage() 返回 undefined(概览缺这一节),不伪造零值。"
+    }
+  ]
+}

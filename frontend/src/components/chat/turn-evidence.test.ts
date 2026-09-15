@@ -5,7 +5,9 @@ import {
   parseTurnEvidence,
   turnEvidenceChips,
   turnEvidenceFeedbackTargets,
+  turnEvidenceId,
   turnEvidenceImpressionLabels,
+  turnEvidenceMatches,
   turnEvidenceUnrecordableCopy,
 } from './turn-evidence';
 
@@ -61,4 +63,33 @@ test('turn evidence parse keeps absence as uncollected', () => {
   assert.deepEqual(turnEvidenceFeedbackTargets(parsed), []);
   assert.equal(turnEvidenceUnrecordableCopy(parsed), undefined);
   assert.throws(() => parseTurnEvidence(null));
+});
+
+test('turn evidence retains host binding and persistence facts without inventing identifiers', () => {
+  const evidence = parseTurnEvidence({
+    sessionId: 'session-a', turn: 4, step: 0,
+    observed: true, collected: false, persisted: false, durable: false, persistError: 'EACCES',
+  });
+  assert.equal(evidence.turn, '4');
+  assert.equal(evidence.step, '0');
+  assert.equal(evidence.observed, true);
+  assert.equal(evidence.collected, false);
+  assert.equal(evidence.persisted, false);
+  assert.equal(evidence.durable, false);
+  assert.equal(evidence.persistError, 'EACCES');
+  assert.equal(turnEvidenceMatches(evidence, 'session-a', { turn: '4', step: 0 }), true);
+  assert.equal(turnEvidenceMatches(evidence, 'session-b', { turn: 4, step: 0 }), false);
+  assert.equal(turnEvidenceMatches(evidence, 'session-a', { turn: 5, step: 0 }), false);
+  assert.equal(turnEvidenceMatches(evidence, 'session-a', { turn: 4, step: 1 }), false);
+  const unbound = parseTurnEvidence({ sessionId: 'session-a', collected: true });
+  assert.equal(unbound.turn, null);
+  assert.equal(unbound.step, null);
+  assert.equal(unbound.observed, false);
+  assert.equal(unbound.persisted, null);
+  assert.equal(unbound.durable, null);
+  assert.equal(turnEvidenceMatches(unbound, 'session-a', { turn: 0, step: 0 }), false);
+  for (const invalid of [undefined, null, '', '  ', Number.NaN, Infinity, 0.5, {}]) {
+    assert.equal(turnEvidenceId(invalid), null);
+  }
+  assert.equal(turnEvidenceId('host-turn-id'), 'host-turn-id');
 });

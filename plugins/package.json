@@ -1,0 +1,14 @@
+{
+  "name": "agos-plugin-host-deps",
+  "version": "0.0.0",
+  "private": true,
+  "description": "宿主包的可复现隔离依赖树。插件源码的裸 import 由 Node 从 plugins/<name>/lib 向上走到 plugins/node_modules 解析,取代 scripts/dev-links.sh 指向 ~/.dsh/profiles 的软链。这份清单**可以**由 `npm ci` 从公开 registry 复现出可用的树:六个包全部 registry 可得、版本钉死、无 range、无 latest,不使用 --force / --legacy-peer-deps,实测 npm ci exit 0(31 包)、`npm ls --depth=0` 退出码 0 且无非 optional 的 UNMET/invalid(仅余其他平台的 codex 二进制等 OPTIONAL 项,属正常)。这六个说明符由 scripts/acceptance/prepare-host-modules.mjs --check 按**完整导入图**(82 个入口 → 136 个文件)核验,不是照顶层 dependencies 抄的。⚠️ 只匹配静态 `from '...'` 会漏三处:fleet-codex.mjs:114 对 @openai/codex-sdk 是**动态** import;@deepseek-ai/dsh-timeout 在 dsh-agos-router/lib/index.js:216 与 :413 也是动态 import(上一轮它靠 dsh-llm/dsh-tools 的传递依赖才解析到,未显式声明,一次锁刷新就可能消失,本轮补上);react 在 dsh-agos/lib/client.js:7 与 dsh-fleet/lib/client.js:7 是 CommonJS require('react')(插件的前端 client 包)。这三处都是本轮被完整导入图扫描抓出来的。@deepseek-ai/dsh-agent 不在这一层,装在唯一消费者 plugins/dsh-mcp-bridge/,复刻真实宿主的两层 node_modules 分隔。schemastery 取 3.18.1,与 cn-capabilities / dsh-fleet 各自 package.json 的声明一致(上一轮取 3.18.2 是因为当时 @deepseek-ai/dsh-settings@0.1.2-rc.1 的 peer 要求 ^3.18.2;该依赖已于本轮拆除,那条约束随之消失,故回到与插件声明一致的 3.18.1 以消除漂移。真实 profile 两个版本都在用:web 是 3.18.2、desktop 是 3.18.1,宿主侧本无统一版本,且 dsh-tools / dsh-llm 都不 peer-require schemastery)。校正记录:上一轮此处曾声明 dsh-kimicode-swarm@0.1.0 与 @deepseek-ai/dsh-settings / dsh-commands / dsh-host-webserver / dsh-session / dsh-subagent / react 共七个包,并注明该清单无法由 npm ci 复现 —— 因为 registry 的 swarm(0.1.0/0.1.1/0.1.2)都不导出 dsh-fleet 需要的四个符号(本轮 npm pack 逐版本实测确认),可用的只有操作者本机构建产物;且三个 registry 版本自身都 import installSettingsSection,该导出只存在于 dsh-settings 0.1.0-rc.6 及更早,逼迫整棵树降级并与其余包的 ^0.1.2-rc.1 peer 冲突。本轮把 Fleet 对 swarm 的唯一一行 import 拆成 plugins/dsh-fleet/lib/fleet-swarm-compat.mjs(三个纯函数内联 + publishProgress 降级为运行时可选集成),那六个包本就只为满足 swarm 的 peer 而存在,随之全部移除。详见 docs/engineering/agos-fix-20260909/DEPENDENCIES.md。",
+  "dependencies": {
+    "@deepseek-ai/dsh-llm": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-timeout": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-tools": "0.1.2-rc.1",
+    "@deepseek-ai/schemastery": "3.18.1",
+    "@openai/codex-sdk": "0.147.0",
+    "react": "18.3.1"
+  }
+}

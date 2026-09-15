@@ -58,15 +58,92 @@ export function normalizeDisagreementItems(raw) {
   return out
 }
 
+/**
+ * 缺数组 ≠ 空数组。空数组只在「仲裁真的给了 disagreements:[]」时才表示一致;
+ * 缺席/非数组必须当成 unknown,否则 {} 会被派生成 consensus=true
+ * (2026-09-08 hardening I / 分析 P2「空仲裁 JSON 假一致」)。
+ *
+ * 历史台账行若根本没有这个键,读侧应保持 uncollected,不要在这里补 [].
+ * 落盘形状仍由 buildCouncilReviewRecord 写 disagreements:[] —— 那是「本条有这个字段」,
+ * 不是「各家一致」。
+ */
 export function disagreementsFromParsed(parsed) {
-  if (!parsed || !Array.isArray(parsed.disagreements)) return []
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
+  if (!Array.isArray(parsed.disagreements)) return undefined
   return normalizeDisagreementItems(parsed.disagreements)
 }
 
-export function councilReviewVerdict({ arbOk, arbError, arbText, parsed, consensus, flagged }) {
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
+
+const REVIEW_FIELD_CHECKS = {
+  disagreements: Array.isArray,
+  suspect: Array.isArray,
+  reason: (v) => typeof v === 'string',
+  conclusion: (v) => typeof v === 'string',
+  consensus: (v) => typeof v === 'boolean',
+}
+
+const VISION_FIELD_CHECKS = {
+  description: (v) => typeof v === 'string' && v.trim() !== '',
+  disagreements: Array.isArray,
+  suspect: Array.isArray,
+}
+
+export function resolveCouncilKind(parsed, kind) {
+  if (kind === 'vision' || kind === 'review') return kind
+  if (isPlainObject(parsed) && Object.hasOwn(parsed, 'description') && !Object.hasOwn(parsed, 'conclusion')) {
+    return 'vision'
+  }
+  return 'review'
+}
+
+/**
+ * 只验字段在不在、类型对不对。不读自报 consensus,不派生结论。
+ * 老记录缺字段 → ok:false,不回填假值。
+ */
+export function validateCouncilFields(parsed, kind) {
+  if (!isPlainObject(parsed)) {
+    return { ok: false, reason: 'not_object', kind: kind === 'vision' ? 'vision' : 'review', missing: [], wrong: [] }
+  }
+  const resolved = resolveCouncilKind(parsed, kind)
+  const checks = resolved === 'vision' ? VISION_FIELD_CHECKS : REVIEW_FIELD_CHECKS
+  const missing = []
+  const wrong = []
+  for (const [key, check] of Object.entries(checks)) {
+    if (!Object.hasOwn(parsed, key)) { missing.push(key); continue }
+    if (!check(parsed[key])) wrong.push(key)
+  }
+  if (missing.length) return { ok: false, reason: 'missing_fields', kind: resolved, missing, wrong }
+  if (wrong.length) return { ok: false, reason: 'wrong_types', kind: resolved, missing, wrong }
+  return { ok: true, reason: undefined, kind: resolved, missing, wrong }
+}
+
+/**
+ * 历史行上的失败原因:缺席就是未采集,绝不编一个 'unknown' 填进去。
+ */
+export function collectedStructureReason(record) {
+  if (!isPlainObject(record)) return undefined
+  return typeof record.structureReason === 'string' && record.structureReason
+    ? record.structureReason
+    : undefined
+}
+
+export function councilReviewVerdict({
+  arbOk,
+  arbError,
+  arbText,
+  parsed,
+  consensus,
+  flagged,
+  parsedOk,
+  structureReason,
+}) {
   if (!arbOk) return '仲裁失败: ' + arbError
-  if (!parsed) {
-    return '⚠️ 仲裁未按 JSON 格式返回,以下为原文(本次不计入台账判定):\n' + arbText
+  const fields = validateCouncilFields(parsed)
+  const structureInvalid = !parsed || parsedOk === false || !fields.ok
+  if (structureInvalid) {
+    const why = structureReason || fields.reason || 'parse_failure'
+    return '⚠️ 仲裁未按完整 JSON 结构返回(' + why + '),以下为原文(本次不计入台账判定):\n' + String(arbText ?? '')
   }
   const suspects = Array.isArray(flagged) ? flagged : []
   return (consensus ? '各家一致。' : '存在分歧。') +
@@ -87,8 +164,9 @@ export function buildCouncilReviewRecord({
   disagreements,
   flagged,
   time,
+  structureReason,
 }) {
-  return {
+  const row = {
     kind: 'review',
     parsedOk: !!parsedOk,
     time: time || new Date().toISOString(),
@@ -103,4 +181,7 @@ export function buildCouncilReviewRecord({
     disagreements: Array.isArray(disagreements) ? disagreements : [],
     flagged,
   }
+  // 只在本次真有原因时落键。老记录没有这个键 = 未采集,不要写成 ''.
+  if (typeof structureReason === 'string' && structureReason) row.structureReason = structureReason
+  return row
 }

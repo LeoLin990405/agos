@@ -10,6 +10,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -19,21 +20,27 @@ import { extractSessionMemory } from '../lib/session-memory.mjs'
 const here = dirname(fileURLToPath(import.meta.url))
 const CORPUS = join(here, 'fixtures', 'session-memory-corpus')
 // 2026-08-24 开源:rpc/bare/assistant 三块是 Leo 真实会话原句(含 homelab 拓扑),不进公开仓——
-// 本机放在 ~/.dsh/agos-private/session-memory-corpus/(或 SESSION_MEMORY_CORPUS_DIR)。
+// 只有显式 SESSION_MEMORY_CORPUS_DIR 才授权读取私有语料；普通测试不探测用户目录。
 // known-misreports(8 句探针文本)与 baseline.json 留在仓里;语料缺席时本套测试整体跳过,
 // 公开仓的克隆者据此知道:尺存在、读数可复核口径,但语料是私有数据。
-const PRIVATE_CORPUS = process.env.SESSION_MEMORY_CORPUS_DIR
-  ?? join(process.env.HOME ?? '', '.dsh', 'agos-private', 'session-memory-corpus')
+export function configuredCorpusDir(env = process.env) {
+  const directory = env.SESSION_MEMORY_CORPUS_DIR
+  return typeof directory === 'string' && directory.trim() !== '' ? directory.trim() : null
+}
+const PRIVATE_CORPUS = configuredCorpusDir()
 const BASELINE = join(CORPUS, 'baseline.json')
 export const BLOCKS = ['rpc', 'bare', 'known-misreports', 'assistant']
 
 function blockPath(name) {
   const inRepo = join(CORPUS, name)
   if (existsSync(inRepo)) return inRepo
-  return join(PRIVATE_CORPUS, name)
+  return PRIVATE_CORPUS === null ? null : join(PRIVATE_CORPUS, name)
 }
 export function corpusAvailable() {
-  return BLOCKS.every((b) => existsSync(blockPath(`${b}.jsonl`)))
+  return PRIVATE_CORPUS !== null && BLOCKS.every((b) => {
+    const path = blockPath(`${b}.jsonl`)
+    return path !== null && existsSync(path)
+  })
 }
 
 function readJsonl(name) {
@@ -111,7 +118,20 @@ function corpusSha() {
 const fmt = (s) => `${s.pass}/${s.total}`
 const pr = (v) => `P=${v.precision === null ? '-' : v.precision.toFixed(2)} R=${v.recall === null ? '-' : v.recall.toFixed(2)}`
 
-test('W20 尺:四个块各自可评分,并把指标打印出来(只看不进门)', { skip: corpusAvailable() ? false : '私有语料不在本机(见 fixtures/session-memory-corpus/README.md),跳过' }, () => {
+test('private corpus requires its explicit dedicated path, never HOME discovery', () => {
+  assert.equal(configuredCorpusDir({}), null)
+  assert.equal(configuredCorpusDir({ HOME: '/synthetic-user', SESSION_MEMORY_CORPUS_DIR: ' ' }), null)
+  assert.equal(configuredCorpusDir({ SESSION_MEMORY_CORPUS_DIR: '/synthetic-fixture' }), '/synthetic-fixture')
+})
+
+test('corpus miner refuses to discover an archive root without an explicit argument', () => {
+  const result = spawnSync(process.execPath, [join(CORPUS, 'mine.mjs')], { encoding: 'utf8' })
+  assert.equal(result.status, 2)
+  assert.equal(result.stdout, '')
+  assert.match(result.stderr, /explicit archive root is required/)
+})
+
+test('W20 尺:四个块各自可评分,并把指标打印出来(只看不进门)', { skip: corpusAvailable() ? false : '未显式指定完整 SESSION_MEMORY_CORPUS_DIR，跳过私有语料' }, () => {
   const all = scoreAll()
   for (const [name, s] of Object.entries(all)) {
     const prf = Object.entries(s.prf).filter(([, v]) => v.tp + v.fp + v.fn > 0).map(([k, v]) => `${k} ${pr(v)}`).join(' · ')
@@ -120,7 +140,7 @@ test('W20 尺:四个块各自可评分,并把指标打印出来(只看不进门)
   for (const b of BLOCKS) assert.ok(all[b].total > 0, b)
 })
 
-test('W20 acceptEdit 门:语料没动;每条原来通过的样本不得变失败;有提升须显式接受新基线', { skip: corpusAvailable() ? false : '私有语料不在本机,跳过' }, () => {
+test('W20 acceptEdit 门:语料没动;每条原来通过的样本不得变失败;有提升须显式接受新基线', { skip: corpusAvailable() ? false : '未显式指定完整 SESSION_MEMORY_CORPUS_DIR，跳过私有语料' }, () => {
   const sha = corpusSha()
   const now = scoreAll()
   const current = {

@@ -1,0 +1,12 @@
+✔ initialize is emitted as one MCP SSE protocol frame (14.558333ms)
+✔ tools/list exposes the five bounded tools and warns that prompt burns quota (4.548875ms)
+✔ tools/call agos_sessions reads a fixture projcache through /mcp (3.168791ms)
+✔ prompt is intercepted and memory search goes through /api/memory/search (BM25), stripping non-contract fields (3.144125ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 85.639916

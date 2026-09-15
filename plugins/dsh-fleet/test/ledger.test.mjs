@@ -7,6 +7,9 @@ import { join } from 'node:path'
 
 import {
   createFleetLedger,
+  createFleetLock,
+  FleetLockError,
+  lockPathFor,
   scrubSecrets,
   selectCompactedEvents,
 } from '../lib/fleet-ledger.mjs'
@@ -118,4 +121,169 @@ test('appendMany publishes all dispatches or leaves the previous ledger intact',
   ]), /disk full/)
   assert.equal(await readFile(path, 'utf8'), before)
   assert.equal((await readdir(directory)).some((name) => name.startsWith('.runs-append.')), false)
+})
+
+test('exclusive lockfile recovers a dead owner and refuses to steal a live one', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'fleet-lock-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const path = lockPathFor(join(directory, 'runs.jsonl'))
+
+  const stale = createFleetLock({
+    path,
+    timeoutMs: 500,
+    pid: 1,
+    startTime: 'old-start',
+    isAlive: () => false,
+    readStartTime: () => null,
+  })
+  const held = await stale.acquire()
+  await stale.release(held)
+
+  await writeFile(path, `${JSON.stringify({
+    pid: 1, startTime: 'old-start', token: 'dead', acquiredAt: 1, timeoutMs: 500,
+  })}\n`, { mode: 0o600 })
+  const recovered = createFleetLock({
+    path,
+    timeoutMs: 1000,
+    pid: process.pid,
+    startTime: 'self',
+    isAlive: (pid) => pid === process.pid,
+    readStartTime: (pid) => (pid === process.pid ? 'self' : 'old-start'),
+  })
+  const next = await recovered.acquire()
+  assert.equal(next.owner.pid, process.pid)
+  await recovered.release(next)
+
+  const live = createFleetLock({
+    path,
+    timeoutMs: 800,
+    pid: 4242,
+    startTime: 'live-start',
+    isAlive: (pid) => pid === 4242,
+    readStartTime: (pid) => (pid === 4242 ? 'live-start' : null),
+  })
+  const liveHeld = await live.acquire()
+  const token = liveHeld.owner.token
+  const thief = createFleetLock({
+    path,
+    timeoutMs: 120,
+    retryMs: 15,
+    pid: process.pid,
+    startTime: 'thief',
+    isAlive: (pid) => pid === 4242 || pid === process.pid,
+    readStartTime: (pid) => (pid === 4242 ? 'live-start' : 'thief'),
+  })
+  await assert.rejects(() => thief.acquire(), (error) => {
+    assert.ok(error instanceof FleetLockError)
+    assert.equal(error.code, 'FLEET_LOCK_TIMEOUT')
+    return true
+  })
+  assert.equal(JSON.parse(await readFile(path, 'utf8')).token, token)
+  await live.release(liveHeld)
+
+  await writeFile(path, `${JSON.stringify({
+    pid: 7, startTime: 'reused-old', token: 'old', acquiredAt: 1, timeoutMs: 500, identityFormat: 'ps-lstart-utc-c-v1',
+  })}\n`)
+  const reuse = createFleetLock({
+    path,
+    timeoutMs: 500,
+    isAlive: () => true,
+    readStartTime: () => 'reused-new',
+  })
+  const reused = await reuse.acquire()
+  assert.notEqual(reused.owner.token, 'old')
+  await reuse.release(reused)
+})
+
+test('two in-process ledgers keep every dispatch/run/ref across appendMany plus append', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'fleet-two-ledger-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const path = join(directory, 'runs.jsonl')
+  const left = createFleetLedger({ path, autoCompact: false, lockTimeoutMs: 5000 })
+  const right = createFleetLedger({ path, autoCompact: false, lockTimeoutMs: 5000 })
+  const leftInputs = Array.from({ length: 8 }, (_, index) => ({
+    ev: 'dispatch', runId: `L-run-${index}`, ref: `L-ref-${index}`, batchId: 'L', prompt: `L${index}`,
+  }))
+  await Promise.all([
+    left.appendMany(leftInputs),
+    ...Array.from({ length: 8 }, (_, index) => right.append({
+      ev: 'dispatch', runId: `R-run-${index}`, ref: `R-ref-${index}`, batchId: 'R', prompt: `R${index}`,
+    })),
+  ])
+  const events = await left.load()
+  const refs = new Set(events.map((event) => event.ref))
+  const runs = new Set(events.map((event) => event.runId))
+  for (let index = 0; index < 8; index++) {
+    assert.ok(refs.has(`L-ref-${index}`), `missing L-ref-${index}`)
+    assert.ok(refs.has(`R-ref-${index}`), `missing R-ref-${index}`)
+    assert.ok(runs.has(`L-run-${index}`), `missing L-run-${index}`)
+    assert.ok(runs.has(`R-run-${index}`), `missing R-run-${index}`)
+  }
+  await Promise.all([left.close(), right.close()])
+})
+
+test('dispatch fingerprint uses complete raw input and cannot be supplied for a preview', async (t) => {
+  const { taskFingerprint } = await import('../../dsh-agos-router/lib/task-fingerprint.mjs')
+  const directory = await mkdtemp(join(tmpdir(), 'fleet-fingerprint-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const ledger = createFleetLedger({ path: join(directory, 'runs.jsonl'), autoCompact: false })
+  const prompt = '  ' + 'x'.repeat(450) + ' actual task tail  '
+  const stored = await ledger.append({ ev: 'dispatch', runId: 'raw', prompt, taskFingerprint: 'forged' })
+  assert.equal(stored.prompt.length, 400)
+  assert.equal(stored.taskFingerprint, taskFingerprint(prompt))
+  assert.notEqual(stored.taskFingerprint, taskFingerprint(stored.prompt))
+  const [other] = await ledger.appendMany([{ ev: 'dispatch', runId: 'other', prompt: prompt + 'different' }])
+  assert.notEqual(stored.taskFingerprint, other.taskFingerprint)
+  const preview = await ledger.append({ ev: 'dispatch', runId: 'preview', prompt: stored.prompt, promptTruncated: true, taskFingerprint: stored.taskFingerprint })
+  assert.equal(preview.taskFingerprint, null)
+  await ledger.close()
+})
+
+test('stale reapers cannot remove a replacement live lock, including after reaper death', async (t) => {
+  const fs = await import('node:fs/promises')
+  const directory = await mkdtemp(join(tmpdir(), 'fleet-reaper-race-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const path = join(directory, 'runs.lock')
+  const dead = { pid: 7, startTime: 'dead', token: 'dead-owner' }
+  await writeFile(path, JSON.stringify(dead))
+  await writeFile(path + '.recover-dead-owner', JSON.stringify({ ...dead, token: 'dead-reaper' }))
+  let unblock, reached
+  const waiting = new Promise((resolve) => { reached = resolve })
+  const gate = new Promise((resolve) => { unblock = resolve })
+  let deletes = 0
+  const guardedFs = { ...fs, async unlink(candidate) {
+    if (candidate === path && deletes++ === 0) { reached(); await gate }
+    return fs.unlink(candidate)
+  } }
+  const options = { path, fs: guardedFs, timeoutMs: 3000, isAlive: (pid) => pid !== 7, readStartTime: () => null }
+  const left = createFleetLock(options), right = createFleetLock(options)
+  let active = 0, entries = 0
+  const critical = async () => {
+    assert.equal(active++, 0, 'two owners must never enter together')
+    entries++
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    active--
+  }
+  const first = left.withLock(critical)
+  await waiting
+  const second = right.withLock(critical)
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  assert.equal(deletes, 1, 'second stale reaper must wait before target unlink')
+  unblock()
+  await Promise.all([first, second])
+  assert.equal(entries, 2)
+  assert.deepEqual(await readdir(directory), [], 'owned lock and recovery files must be released')
+})
+
+test('a malformed lock and an unverifiable live start time fail closed', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'fleet-invalid-owner-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const path = join(directory, 'runs.lock')
+  await writeFile(path, '')
+  const options = { path, timeoutMs: 40, retryMs: 5, ownerWriteGraceMs: 0, isAlive: () => true, readStartTime: () => 'observed-start' }
+  await assert.rejects(createFleetLock(options).acquire(), { code: 'FLEET_LOCK_TIMEOUT' })
+  const owner = JSON.stringify({ pid: 7, token: 'live', startTime: 'pid:7' })
+  await writeFile(path, owner)
+  await assert.rejects(createFleetLock(options).acquire(), { code: 'FLEET_LOCK_TIMEOUT' })
+  assert.equal(await readFile(path, 'utf8'), owner)
 })

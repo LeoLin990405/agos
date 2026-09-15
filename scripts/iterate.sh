@@ -9,7 +9,37 @@
 #       scripts/iterate.sh --no-build # 跳过前端构建(只动了插件时)
 #       scripts/iterate.sh --test     # 先跑全闸(test-all.sh),红了就不部署
 set -u
+setopt PIPE_FAIL
 ROOT="${0:A:h:h}"
+
+# Run command (optional AGOS_CMD_CWD); print FILTER matches; return the command's exit.
+# Old `npm run build | grep` treated grep's status as the build's — a failing
+# build that still printed "error" looked green. The producer wins.
+agos_keep_exit() {
+	local filter="$1"
+	shift
+	local tmp rc=0
+	tmp="$(mktemp "${TMPDIR:-/tmp}/agos-keep-exit.XXXXXX")" || return 2
+	if [[ -n "${AGOS_CMD_CWD:-}" ]]; then
+		( cd "$AGOS_CMD_CWD" || exit 1; "$@" ) >"$tmp" 2>&1 || rc=$?
+	else
+		"$@" >"$tmp" 2>&1 || rc=$?
+	fi
+	if (( rc != 0 )); then
+		cat "$tmp"
+	elif [[ -n "$filter" ]]; then
+		/usr/bin/grep -E -- "$filter" "$tmp" || true
+	else
+		cat "$tmp"
+	fi
+	rm -f "$tmp"
+	return $rc
+}
+
+if [[ "${AGOS_ITERATE_HELPERS_ONLY:-}" == 1 ]]; then
+	return 0 2>/dev/null || exit 0
+fi
+
 PORT=3091
 LOG="$HOME/.dsh/logs/web-3091.log"
 force_restart=0; do_build=1; do_test=0
@@ -27,7 +57,7 @@ fi
 
 if (( do_build )); then
 	print "▸ 前端构建(改前端不用重启:serveSpa 每请求读盘,build 完刷新即可)"
-	(cd "$ROOT/frontend" && npm run build 2>&1 | /usr/bin/grep -E 'built in|error') || { print "❌ 前端构建失败"; exit 1 }
+	AGOS_CMD_CWD="$ROOT/frontend" agos_keep_exit 'built in|error' npm run build || { print "❌ 前端构建失败"; exit 1 }
 fi
 
 print "▸ 部署插件(仓 → desktop → web)"

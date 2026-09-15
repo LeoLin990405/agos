@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "checks": [
+    "click waits, prevents duplicate submission, and does not claim authorization",
+    "accepted HTTP state still waits for host evidence",
+    "failed approval retries and resolved evidence renders terminal state",
+    "remote read-only approval stays disabled",
+    "incomplete history remains visible; failed page can retry",
+    "completed history removes incomplete banner"
+  ],
+  "browser": "152.0.7977.82",
+  "scope": "real browser component fixture; no production host"
+}

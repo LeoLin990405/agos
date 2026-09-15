@@ -1,15 +1,18 @@
 // W20 尺的挖矿器:从归档语料挖「候选句 + 说话人来源」,供人工标注。不是测试(node --test 不匹配本文件)。
-// 用法:node test/fixtures/session-memory-corpus/mine.mjs [归档根] > pool.jsonl
+// 用法:node test/fixtures/session-memory-corpus/mine.mjs <显式归档根> > pool.jsonl
 // 每行:{ text, role:'user'|'assistant', channel:'rpc'|'bare'|'model', depth, origin, n(出现次数), sample(sessionId 前 8) }
 // 来源判定与 extractSessionMemory 同口径:user/message 的 data.source.kind==='user';rpcId 在 = 浏览器/RPC 通道。
 // 切分与敏感过滤直接复用 session-memory.mjs 导出的同一实现,保证「语料里的句」就是「规则看到的句」。
 import { execFileSync } from 'node:child_process'
 import { readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { homedir } from 'node:os'
 import { isSensitiveMemoryText, splitCandidatesForCorpus } from '../../../lib/session-memory.mjs'
 
-const root = process.argv[2] || join(homedir(), '.dsh', 'sessions-trash-20260820')
+const root = process.argv[2]
+if (typeof root !== 'string' || root.trim() === '') {
+  process.stderr.write('An explicit archive root is required; user session directories are never discovered automatically.\n')
+  process.exit(2)
+}
 const files = []
 function walk(d) {
   for (const n of readdirSync(d)) {

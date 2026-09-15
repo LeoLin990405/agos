@@ -1,0 +1,311 @@
+{
+  "dsh-agos": {
+    "command": [
+      "node",
+      "--test",
+      "test/agent-kernel.test.mjs",
+      "test/input-limits.test.mjs",
+      "test/memory-desk.test.mjs",
+      "test/plugins-inventory.test.mjs",
+      "test/secrets-gate-bench.mjs",
+      "test/secrets-gate.test.mjs",
+      "test/session-management.test.mjs",
+      "test/session-memory-inject.test.mjs",
+      "test/session-memory-rank.test.mjs",
+      "test/session-memory-rules.test.mjs",
+      "test/session-memory.test.mjs",
+      "test/session-trash.test.mjs",
+      "test/skills-console.test.mjs",
+      "test/skills-evolve.test.mjs",
+      "test/skills-studio.test.mjs",
+      "test/turn-evidence.test.mjs",
+      "test/yolo-decisions.test.mjs"
+    ],
+    "cwd": "plugins/dsh-agos",
+    "exitCode": 0,
+    "durationSeconds": 2.73,
+    "counts": {
+      "tests": 156,
+      "pass": 154,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 2
+    },
+    "summary": [
+      "ℹ tests 156",
+      "ℹ pass 154",
+      "ℹ fail 0",
+      "ℹ cancelled 0",
+      "ℹ skipped 2"
+    ],
+    "log": "docs/engineering/agos-hardening-20260908/logs/acceptance/dsh-agos.txt",
+    "logSha256": "e3493972b1685730a3d3b771f2943ec728e7985c3eeb2e457f1ead88e71cae43"
+  },
+  "dsh-agos-router": {
+    "command": [
+      "node",
+      "--test",
+      "test/allocation-score.test.mjs",
+      "test/assemble.test.mjs",
+      "test/dispatch.test.mjs",
+      "test/feedback-bind.test.mjs",
+      "test/feedback-routes.test.mjs",
+      "test/gate.test.mjs",
+      "test/http-routes.test.mjs",
+      "test/labels.test.mjs",
+      "test/ledger.test.mjs",
+      "test/outcomes.test.mjs",
+      "test/roles.test.mjs",
+      "test/rsi.test.mjs",
+      "test/selector-llm.test.mjs",
+      "test/selector.test.mjs",
+      "test/settings-012.test.mjs",
+      "test/shadow.test.mjs"
+    ],
+    "cwd": "plugins/dsh-agos-router",
+    "exitCode": 0,
+    "durationSeconds": 0.47,
+    "counts": {
+      "tests": 91,
+      "pass": 91,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "summary": [
+      "✔ caller-claimed verified:true is not TRUST (TASK-018 W4) (0.709084ms)",
+      "ℹ tests 91",
+      "ℹ pass 91",
+      "ℹ fail 0",
+      "ℹ cancelled 0",
+      "ℹ skipped 0"
+    ],
+    "log": "docs/engineering/agos-hardening-20260908/logs/acceptance/dsh-agos-router.txt",
+    "logSha256": "0daa74a851601606a720c2e4b04b96389d135189e99e0d76e9344370841d8e94"
+  },
+  "dsh-fleet": {
+    "command": [
+      "node",
+      "--test",
+      "test/artifact-path.test.mjs",
+      "test/codex-host.test.mjs",
+      "test/dispatch-route.test.mjs",
+      "test/fake-jobs.test.mjs",
+      "test/farm-integration.test.mjs",
+      "test/fleet-hosts-route.test.mjs",
+      "test/fleet.fake.test.mjs",
+      "test/ledger-multiprocess.test.mjs",
+      "test/ledger.test.mjs",
+      "test/local-cleanup-integration.test.mjs",
+      "test/local-lifecycle.test.mjs",
+      "test/reattach.test.mjs",
+      "test/remote-cmd.test.mjs",
+      "test/safe-rel-path.test.mjs",
+      "test/trace-paging.test.mjs",
+      "test/wake.test.mjs"
+    ],
+    "cwd": "plugins/dsh-fleet",
+    "exitCode": 0,
+    "durationSeconds": 5.91,
+    "counts": {
+      "tests": 137,
+      "pass": 137,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "summary": [
+      "ℹ tests 137",
+      "ℹ pass 137",
+      "ℹ fail 0",
+      "ℹ cancelled 0",
+      "ℹ skipped 0"
+    ],
+    "log": "docs/engineering/agos-hardening-20260908/logs/acceptance/dsh-fleet.txt",
+    "logSha256": "af4eddd01dc9620fe6f9c9ced51fe181eab278fa0908fd8d4ab64bbc673fb01a"
+  },
+  "dsh-mcp-bridge": {
+    "command": [
+      "node",
+      "--test",
+      "test/mcp.test.mjs"
+    ],
+    "cwd": "plugins/dsh-mcp-bridge",
+    "exitCode": 0,
+    "durationSeconds": 0.41,
+    "counts": {
+      "tests": 4,
+      "pass": 4,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "summary": [
+      "ℹ tests 4",
+      "ℹ pass 4",
+      "ℹ fail 0",
+      "ℹ cancelled 0",
+      "ℹ skipped 0"
+    ],
+    "log": "docs/engineering/agos-hardening-20260908/logs/acceptance/dsh-mcp-bridge.txt",
+    "logSha256": "dcb6c332bc163290d84b7d2fbf6437f4519ba55c3c053b7a818d9652948e27e0"
+  },
+  "scripts-selftest": {
+    "command": [
+      "zsh",
+      "scripts/test-all-selftest.sh"
+    ],
+    "cwd": ".",
+    "exitCode": 0,
+    "durationSeconds": 2.41,
+    "counts": {},
+    "summary": [
+      "PASS: zsh -n test-all.sh",
+      "PASS: zsh -n iterate.sh",
+      "PASS: sh -n vendor-diff.sh",
+      "PASS: sh -n upgrade-dsh.sh",
+      "PASS: test-all helpers sourced",
+      "PASS: test-all preserves exit 7 and failure diagnostics",
+      "PASS: test-all unmatched filter preserves success",
+      "PASS: iterate helpers sourced",
+      "PASS: old pipe+grep masks exit 7 as 0",
+      "PASS: agos_keep_exit preserves producer exit 7",
+      "PASS: empty grep does not fail a successful producer",
+      "PASS: missing pin object → exit 2 + explains pin SHA",
+      "PASS: missing harness dir → exit 2",
+      "== pin wire constants + reviewed adapter baseline verified: a66e470204 (0.1.2-rc.1) ==",
+      "PASS: pin-scoped vendor-diff exit 0",
+      "upgrade-dsh: pin 0.1.2-rc.1 matches host 0.1.2-rc.1",
+      "PASS: upgrade-dsh --check",
+      "PASS: changed adapter contents fail the gate",
+      "PASS: rsync failure is a failed check, never zero drift"
+    ],
+    "log": "docs/engineering/agos-hardening-20260908/logs/acceptance/scripts-selftest.txt",
+    "logSha256": "dda548befb5cfd54a3a7c1d7da3af40547d2d8e5513428005fc85496b71419ac"
+  },
+  "secrets-benchmark": {
+    "command": [
+      "node",
+      "test/secrets-gate-bench.mjs"
+    ],
+    "cwd": "plugins/dsh-agos",
+    "exitCode": 0,
+    "durationSeconds": 0.47,
+    "counts": {
+      "tests": 3,
+      "pass": 3,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "summary": [
+      "ℹ tests 3",
+      "ℹ pass 3",
+      "ℹ fail 0",
+      "ℹ cancelled 0",
+      "ℹ skipped 0"
+    ],
+    "log": "docs/engineering/agos-hardening-20260908/logs/acceptance/secrets-benchmark.txt",
+    "logSha256": "0b04237e1a350f7130d95a57c38acea95cb2008bc239f6880f06e78582ff2549"
+  },
+  "frontend-verify": {
+    "command": [
+      "npm",
+      "run",
+      "verify"
+    ],
+    "cwd": "frontend",
+    "exitCode": 0,
+    "durationSeconds": 7.04,
+    "counts": {
+      "tests": 366,
+      "pass": 365,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 1
+    },
+    "summary": [
+      "upgrade-dsh: pin 0.1.2-rc.1 matches host 0.1.2-rc.1",
+      "ℹ tests 366",
+      "ℹ pass 365",
+      "ℹ fail 0",
+      "ℹ cancelled 0",
+      "ℹ skipped 1",
+      "✓ built in 644ms",
+      "== pin wire constants + reviewed adapter baseline verified: a66e470204 (0.1.2-rc.1) =="
+    ],
+    "log": "docs/engineering/agos-hardening-20260908/logs/acceptance/frontend-verify.txt",
+    "logSha256": "b7ac262162ae1f39e1373b448e2e3c32280c15dfba1938fdf08d32134c0ba5d4"
+  },
+  "browser-fixture": {
+    "command": [
+      "node",
+      "scripts/hardening-ui-smoke.mjs"
+    ],
+    "cwd": "frontend",
+    "exitCode": 0,
+    "durationSeconds": 2.03,
+    "counts": {},
+    "summary": [],
+    "log": "docs/engineering/agos-hardening-20260908/logs/acceptance/browser-fixture.txt",
+    "logSha256": "ebf1e9abc200e0aaee1b5b46db148d27e74143e056f8a1d06dc5f9cc89a788cd"
+  },
+  "deploy-check": {
+    "command": [
+      "zsh",
+      "scripts/deploy-plugins.sh",
+      "--check"
+    ],
+    "cwd": ".",
+    "exitCode": 1,
+    "durationSeconds": 0.24,
+    "counts": {},
+    "summary": [
+      "⚠️  dsh-agos ↔ ~/.dsh/profiles/desktop/plugins/dsh-agos/ 漂移 15 项",
+      "⚠️  dsh-agos ↔ ~/.dsh/profiles/web/plugins/dsh-agos/ 漂移 15 项",
+      "⚠️  dsh-agos-router ↔ ~/.dsh/profiles/desktop/plugins/dsh-agos-router/ 漂移 9 项",
+      "⚠️  dsh-agos-router ↔ ~/.dsh/profiles/web/plugins/dsh-agos-router/ 漂移 9 项",
+      "✅ dsh-mcp-bridge ↔ ~/.dsh/profiles/desktop/plugins/dsh-mcp-bridge/ 零漂移",
+      "✅ dsh-mcp-bridge ↔ ~/.dsh/profiles/web/plugins/dsh-mcp-bridge/ 零漂移",
+      "⚠️  cn-capabilities ↔ ~/.dsh/profiles/desktop/plugins/cn-capabilities/ 漂移 13 项",
+      "⚠️  cn-capabilities ↔ ~/.dsh/profiles/web/plugins/cn-capabilities/ 漂移 13 项",
+      "⚠️  dsh-fleet ↔ ~/.dsh/profiles/desktop/plugins/dsh-fleet/ 漂移 13 项",
+      "⚠️  dsh-fleet ↔ ~/.dsh/profiles/web/plugins/dsh-fleet/ 漂移 13 项"
+    ],
+    "log": "docs/engineering/agos-hardening-20260908/logs/acceptance/deploy-check.txt",
+    "logSha256": "957fd08da8fb9f12aea98bb6f2c3ae61737b8e407d5534e2637a61a7fc3a5692"
+  },
+  "cn-capabilities": {
+    "command": [
+      "node",
+      "--test",
+      "test/autoresearch-workspace.test.mjs",
+      "test/council-parse.test.mjs",
+      "test/council-record.test.mjs",
+      "test/media.test.mjs",
+      "test/plan-approval.test.mjs",
+      "test/plan-path.test.mjs",
+      "test/plan-run.fake.test.mjs",
+      "test/usage.test.mjs"
+    ],
+    "cwd": "plugins/cn-capabilities",
+    "exitCode": 0,
+    "durationSeconds": 9.46,
+    "counts": {
+      "tests": 82,
+      "pass": 82,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "summary": [
+      "ℹ tests 82",
+      "ℹ pass 82",
+      "ℹ fail 0",
+      "ℹ cancelled 0",
+      "ℹ skipped 0"
+    ],
+    "log": "docs/engineering/agos-hardening-20260908/logs/acceptance/cn-capabilities.txt",
+    "logSha256": "a9514a91c54985fb20b5cb0d76429d4c59be5d68b3f34cc95f4a7309d80f8156"
+  }
+}

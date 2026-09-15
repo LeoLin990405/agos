@@ -30,6 +30,7 @@ export interface RpcMethodMap {
   'skills/list': SkillsApi['list']
   'settings/describe': SettingsApi['describe']
   'settings/openSettingsDocument': SettingsApi['openSettingsDocument']
+  'settings/mutate': SettingsApi['mutate']
   'credentials/describe': CredentialsApi['describe']
   'llm/listProviders': LlmApi['listProviders']
   'llm/listConfigurableProviders': LlmApi['listConfigurableProviders']

@@ -18,7 +18,10 @@ import { HostPowerBadge } from '@/components/fleet/HostPowerBadge';
 import { RemoteRunView } from '@/components/fleet/RemoteRunView';
 import {
   executeFleetCostConfirmation,
+  FLEET_FARM_HEADING,
+  fleetFarmSource,
   fleetHostVisualState,
+  fleetUncollectedCopy,
   type FleetCostConfirmation,
 } from './fleet-model';
 import './FleetView.css';
@@ -258,13 +261,15 @@ export const FleetView: React.FC<FleetViewProps> = ({ selectedBatchId, onSelectB
     <section className="fleet-view surface-page" aria-labelledby="fleet-view-title">
       <header className="fleet-view__header">
         <div>
-          <h2 id="fleet-view-title" className="fleet-view__heading">Homelab 执行农场</h2>
+          <h2 id="fleet-view-title" className="fleet-view__heading">{FLEET_FARM_HEADING}</h2>
           <p className="fleet-view__source">
-            {hasHostData
-              ? `已配置 ${hostsState.hosts.length} · 可达 ${reachableCount}`
-              : hostsProbeStalled
-                ? 'SSH 探测未返回，机架配置尚未采集'
-                : '等待 SSH 探测结果'}
+            {fleetFarmSource({
+              hasHostData,
+              hostCount: hostsState.hosts.length,
+              reachableCount,
+              stalled: hostsProbeStalled,
+              error: hostsState.error,
+            })}
           </p>
         </div>
         <div className="fleet-view__header-actions">
@@ -316,7 +321,7 @@ export const FleetView: React.FC<FleetViewProps> = ({ selectedBatchId, onSelectB
           )}
           {hostsState.phase === 'error' && !hasHostData && (
             <div className="fleet-view__empty" role="alert">
-              <span>{hostsState.error || '机器数据暂不可用。'}</span>
+              <span>{fleetUncollectedCopy(hostsState.error)}</span>
               <Button size="sm" variant="ghost" onClick={() => fleetHostsStore.refresh()}>重试</Button>
             </div>
           )}
@@ -348,7 +353,7 @@ export const FleetView: React.FC<FleetViewProps> = ({ selectedBatchId, onSelectB
             <div className="fleet-view__empty" role="status">正在读取 Fleet 批次…</div>
           ) : batchesState.phase === 'error' && batchesState.at === 0 ? (
             <div className="fleet-view__empty" role="alert">
-              <span>{batchesState.error || '批次数据暂不可用。'}</span>
+              <span>{fleetUncollectedCopy(batchesState.error)}</span>
               <Button size="sm" variant="ghost" onClick={() => fleetBatchesStore.refresh()}>重试</Button>
             </div>
           ) : (

@@ -26,5 +26,5 @@
       "@deepseek-ai/dsh-user-questions/types": ["./src/contract/shims/user-questions-types.ts"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "scripts/**/*.ts", "vite.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "scripts/**/*.ts", "scripts/**/*.tsx", "vite.config.ts"]
 }

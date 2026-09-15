@@ -8,8 +8,20 @@ import {
   formatSettingValue,
   loadSettingsSnapshot,
   type SettingRow,
+  type SettingsNamespaceView,
   type SettingsReadSnapshot,
 } from './settings-data.ts'
+import {
+  AGENT_DEFAULT_MODEL_NS,
+  callSettingsMutate,
+  namespaceOf,
+  parseDefaultModel,
+  parsePermissionDefault,
+  PERMISSION_SETTINGS_NS,
+  prepareDefaultModelMutate,
+  preparePermissionMutate,
+  replaceNamespaceView,
+} from './settings-write.ts'
 import { currentProcessCopy, parsePluginsInventory, pluginDriftCopy, type PluginsInventory } from './plugins-inventory.ts'
 
 type PageState =
@@ -42,6 +54,167 @@ const SettingValue: React.FC<{ row: SettingRow }> = ({ row }) => {
     )
   }
   return <span className="surface-strong">{formatted}</span>
+}
+
+const SessionDefaultsSection: React.FC<{
+  snapshot: SettingsReadSnapshot
+  onReplaceNamespace: (view: SettingsNamespaceView) => void
+}> = ({ snapshot, onReplaceNamespace }) => {
+  const writable = snapshot.writable
+  const permissionView = namespaceOf(snapshot.namespaces, PERMISSION_SETTINGS_NS)
+  const permission = parsePermissionDefault(permissionView)
+  const modelView = namespaceOf(snapshot.namespaces, AGENT_DEFAULT_MODEL_NS)
+  const model = parseDefaultModel(modelView)
+  const [draft, setDraft] = useState({
+    provider: model?.provider ?? '',
+    model: model?.model ?? '',
+    reasoningEffort: model?.reasoningEffort ?? '',
+  })
+  const [draftRevision, setDraftRevision] = useState(modelView?.revision)
+  const [pendingPreset, setPendingPreset] = useState<string>()
+  const [saving, setSaving] = useState<'permission' | 'model'>()
+  const [writeError, setWriteError] = useState<string>()
+
+  useEffect(() => {
+    if (modelView === undefined) return
+    if (draftRevision === modelView.revision) return
+    setDraft({
+      provider: model?.provider ?? '',
+      model: model?.model ?? '',
+      reasoningEffort: model?.reasoningEffort ?? '',
+    })
+    setDraftRevision(modelView.revision)
+  }, [model, modelView, draftRevision])
+
+  const writeContext = { writable, namespaces: snapshot.namespaces }
+
+  const writePermission = async (preset: string) => {
+    if (permission !== undefined && preset === permission.currentValue) return
+    const prepared = preparePermissionMutate(writeContext, preset)
+    if (!prepared.ok) return
+    setPendingPreset(preset)
+    setSaving('permission')
+    setWriteError(undefined)
+    try {
+      const result = await callSettingsMutate(agos, prepared.payload)
+      if (!result.ok) {
+        setWriteError(result.message)
+        return
+      }
+      onReplaceNamespace(result.view)
+    } catch (error) {
+      setWriteError(messageOf(error))
+    } finally {
+      setPendingPreset(undefined)
+      setSaving(undefined)
+    }
+  }
+
+  const writeDefaultModel = async () => {
+    const prepared = prepareDefaultModelMutate(writeContext, draft)
+    if (!prepared.ok) return
+    setSaving('model')
+    setWriteError(undefined)
+    try {
+      const result = await callSettingsMutate(agos, prepared.payload)
+      if (!result.ok) {
+        setWriteError(result.message)
+        return
+      }
+      onReplaceNamespace(result.view)
+    } catch (error) {
+      setWriteError(messageOf(error))
+    } finally {
+      setSaving(undefined)
+    }
+  }
+
+  const modelReady = prepareDefaultModelMutate(writeContext, draft).ok
+
+  return (
+    <section className="settings-section">
+      <div className="surface-header is-baseline">
+        <div>
+          <h2 className="settings-heading">新会话默认</h2>
+          <p className="surface-quiet">只影响之后新建的会话；当前会话模型仍在对话输入区切换</p>
+        </div>
+        <Chip variant={writable ? 'default' : 'amber'} active={writable}>{writable ? '可写' : '只读层遮蔽'}</Chip>
+      </div>
+
+      <div className="settings-write">
+        <div className="form-group">
+          <label className="form-label" htmlFor="settings-permission-preset">权限默认预设</label>
+          {permission === undefined ? (
+            <p className="surface-quiet">未采集</p>
+          ) : (
+            <select
+              id="settings-permission-preset"
+              className="form-input"
+              disabled={!writable || saving !== undefined}
+              value={pendingPreset ?? permission.currentValue}
+              onChange={(event) => { void writePermission(event.target.value) }}
+            >
+              {permission.options.map((option) => (
+                <option key={option.id} value={option.id}>{option.label}</option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        <div className="form-group">
+          <div className="form-label">默认模型</div>
+          {modelView === undefined ? (
+            <p className="surface-quiet">未采集</p>
+          ) : (
+            <div className="settings-write-row">
+              <label className="form-group">
+                <span className="form-label">提供商</span>
+                <input
+                  className="form-input"
+                  aria-label="默认模型提供商"
+                  value={draft.provider}
+                  disabled={!writable || saving !== undefined}
+                  onChange={(event) => setDraft((current) => ({ ...current, provider: event.target.value }))}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </label>
+              <label className="form-group">
+                <span className="form-label">模型</span>
+                <input
+                  className="form-input"
+                  aria-label="默认模型"
+                  value={draft.model}
+                  disabled={!writable || saving !== undefined}
+                  onChange={(event) => setDraft((current) => ({ ...current, model: event.target.value }))}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </label>
+              <label className="form-group">
+                <span className="form-label">推理力度</span>
+                <input
+                  className="form-input"
+                  aria-label="默认推理力度"
+                  value={draft.reasoningEffort}
+                  disabled={!writable || saving !== undefined}
+                  placeholder="可选"
+                  onChange={(event) => setDraft((current) => ({ ...current, reasoningEffort: event.target.value }))}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </label>
+              <Button size="sm" disabled={!modelReady || saving !== undefined} onClick={() => { void writeDefaultModel() }}>
+                {saving === 'model' ? '正在写入…' : '写入默认模型'}
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {writeError !== undefined && <p role="alert" className="surface-quiet surface-alert">{writeError}</p>}
+      </div>
+    </section>
+  )
 }
 
 const SettingRows: React.FC<{ rows: SettingRow[] }> = ({ rows }) => {
@@ -124,7 +297,7 @@ export const SettingsPage: React.FC = () => {
       <main className="app-stage">
         <AppTopbar
           title="设置"
-          badge={<Chip>只读配置视图</Chip>}
+          badge={<Chip>{snapshot?.writable === true ? '配置视图' : '只读配置视图'}</Chip>}
           runningState={false}
           rightActions={snapshot?.hasDocument === true ? (
             <Button variant="ghost" size="sm" disabled={openState === 'opening'} onClick={() => { void openDocument() }}>
@@ -152,11 +325,22 @@ export const SettingsPage: React.FC = () => {
               <section className="settings-section is-first">
                 <h2 className="settings-heading">读取边界</h2>
                 <p className="surface-quiet">
-                  所有字段均来自宿主的脱敏描述。本页不读取或保存凭据值，也不提供模型发现与配置写入。
-                  {snapshot.writable ? '宿主配置层可写，但本视图仍保持只读。' : '宿主当前有只读配置层遮蔽，可写操作不可用。'}
+                  所有字段均来自宿主的脱敏描述。本页不读取或保存凭据值，也不提供模型发现。凭据与密钥槽位仍不可在此输入。
+                  {snapshot.writable ? '新会话默认可以写入宿主配置层。' : '宿主当前有只读配置层遮蔽，可写操作不可用。'}
                 </p>
                 {openError !== undefined && <p role="alert" className="surface-quiet surface-alert">打开文档失败：{openError}</p>}
               </section>
+
+              <SessionDefaultsSection
+                snapshot={snapshot}
+                onReplaceNamespace={(view) => {
+                  setState((current) => (
+                    current.phase === 'ready'
+                      ? { phase: 'ready', snapshot: replaceNamespaceView(current.snapshot, view) }
+                      : current
+                  ))
+                }}
+              />
 
               {nothingExposed && (
                 <section className="settings-section">
