@@ -1,0 +1,181 @@
+:root {
+  color-scheme: dark;
+  --bg: #16130f;
+  --panel: #221c16;
+  --ink: #f4efe6;
+  --muted: #b7ab9b;
+  --line: #3a3128;
+  --amber: #e2a23a;
+  --rec: #d4533c;
+  --english: #f7f1e6;
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Songti SC", "Noto Serif SC", serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(1200px 500px at 10% -10%, #3a2a18 0%, transparent 55%),
+    var(--bg);
+  color: var(--ink);
+}
+
+.top, main {
+  width: min(1100px, calc(100% - 32px));
+  margin: 0 auto;
+}
+
+.top {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: end;
+  padding: 28px 0 18px;
+}
+
+.eyebrow {
+  margin: 0;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  font-size: 12px;
+  color: var(--amber);
+}
+
+h1 {
+  margin: 6px 0 0;
+  font-size: 34px;
+  font-weight: 600;
+}
+
+.providers, .status, .track-label {
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+}
+
+.providers, .status {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.stage-wrap {
+  position: relative;
+  background: #0c0b09;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+#stage {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #0c0b09;
+}
+
+#camera {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.record-flag {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  margin: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--rec);
+  color: white;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  letter-spacing: 0.12em;
+  font-size: 13px;
+}
+
+.captions {
+  margin-top: 18px;
+  padding: 8px 4px 0;
+}
+
+.track-label {
+  margin: 12px 0 4px;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+
+.mandarin {
+  margin: 0;
+  min-height: 1.4em;
+  font-size: 22px;
+  color: #ddd2c3;
+}
+
+.english {
+  margin: 0;
+  min-height: 1.3em;
+  font-size: 30px;
+  line-height: 1.35;
+  color: var(--english);
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 18px;
+}
+
+button, #download {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 10px 16px;
+  font: 15px/1 "Avenir Next", "Segoe UI", sans-serif;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+button[aria-pressed="true"], #record.is-recording {
+  background: var(--amber);
+  color: #1b140c;
+  border-color: transparent;
+}
+
+#record.is-recording {
+  background: var(--rec);
+  color: white;
+}
+
+.duck {
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.after {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+#playback {
+  width: 100%;
+  border-radius: 12px;
+  background: black;
+}
+
+.status { min-height: 1.4em; padding-bottom: 28px; }
+
+@media (max-width: 720px) {
+  h1 { font-size: 26px; }
+  .english { font-size: 24px; }
+  .top { flex-direction: column; align-items: start; }
+}
