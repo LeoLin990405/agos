@@ -54,8 +54,10 @@ test('speaking, live English, and a captioned recording', async () => {
 
     await page.waitForFunction(() => /[A-Za-z]{3,}/.test(document.querySelector('#english').textContent || ''), null, { timeout: 20000 })
     const englishDuring = await page.locator('#english').innerText()
+    const mandarinDuring = await page.locator('#mandarin').innerText()
     assert.match(englishDuring, /[A-Za-z]{3,}/)
-    assert.equal(/[\u4e00-\u9fff]/.test(englishDuring) && !/[A-Za-z]/.test(englishDuring), false)
+    assert.equal((mandarinDuring.match(/各位好/g) || []).length, 1)
+    assert.ok((englishDuring.match(/Lin Zhongyue/g) || []).length <= 1)
 
     await page.waitForFunction(() => (window.__trace || []).some((item) => item.kind === 'spoken'), null, { timeout: 20000 })
     await page.waitForTimeout(1600)

@@ -23,6 +23,21 @@ test('a clause is ready for interpretation before the utterance finishes', () =>
   assert.equal(state.clauses.length, 2)
 })
 
+test('a cumulative hypothesis does not repeat earlier clauses', () => {
+  const sample = '各位好，我是林中岳。今天演示同声传译。我说中文，英文会同时出来，然后我们录像。'
+  const state = createSession()
+  for (let i = 1; i <= sample.length; i += 1) ingest(state, { partial: sample.slice(0, i) })
+  commitPartial(state)
+  assert.deepEqual(state.clauses.map((clause) => clause.source), [
+    '各位好，',
+    '我是林中岳。',
+    '今天演示同声传译。',
+    '我说中文，',
+    '英文会同时出来，',
+    '然后我们录像。',
+  ])
+})
+
 test('final results do not duplicate clauses already taken from interim text', () => {
   const state = createSession()
   ingest(state, { partial: '各位好，我是林中岳。' })

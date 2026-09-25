@@ -50,48 +50,53 @@ export function englishCaption(state) {
   return locked.join(' ').replace(/\s+/g, ' ').trim()
 }
 
-function replayed(state, text, before) {
-  const sources = state.clauses.slice(0, before).map((clause) => clause.source)
-  for (let i = 0; i < sources.length; i += 1) {
-    if (sources.slice(i).join('') === text) return true
-  }
-  return false
-}
-
-function pushClause(state, source, before) {
+function pushClause(state, source) {
   const norm = source.replace(/\s+/g, ' ').trim()
-  if (!norm || replayed(state, norm, before)) return null
+  if (!norm) return null
   const clause = { id: state.nextId++, source: norm, english: '', spoken: false, provisional: false }
   state.clauses.push(clause)
   return clause
 }
 
-/**
- * @param {{ finals?: string[], partial?: string }} update
- * finals are newly finalized chunks only. partial is the current interim hypothesis.
- */
-export function ingest(state, update = {}) {
-  const before = state.clauses.length
-  const stable = []
-  for (const chunk of update.finals ?? []) {
-    const trimmed = chunk.trim()
-    if (!trimmed || replayed(state, trimmed, before)) continue
-    const { stable: parts, tail } = splitClauses(trimmed)
-    const pieces = [...parts]
-    if (tail) pieces.push(tail)
-    if (pieces.length === 0) pieces.push(trimmed)
-    for (const piece of pieces) {
-      const clause = pushClause(state, piece, before)
-      if (clause) stable.push(clause)
-    }
-  }
+/** Drop text the session has already committed, including a cumulative hypothesis. */
+function unmatched(state, text) {
+  const trimmed = text.trim()
+  if (!trimmed) return ''
+  const committed = committedMandarin(state)
+  if (!committed) return trimmed
+  if (trimmed.startsWith(committed)) return trimmed.slice(committed.length).trim()
+  let index = 0
+  const limit = Math.min(committed.length, trimmed.length)
+  while (index < limit && committed[index] === trimmed[index]) index += 1
+  return trimmed.slice(index).trim()
+}
 
-  const split = splitClauses(update.partial ?? '')
-  for (const piece of split.stable) {
-    const clause = pushClause(state, piece, before)
+function absorb(state, text, commitTail, stable) {
+  const fresh = unmatched(state, text)
+  if (!fresh) return ''
+  const { stable: parts, tail } = splitClauses(fresh)
+  for (const piece of parts) {
+    const clause = pushClause(state, piece)
     if (clause) stable.push(clause)
   }
-  state.partial = split.tail
+  if (commitTail && tail) {
+    const clause = pushClause(state, tail)
+    if (clause) stable.push(clause)
+    return ''
+  }
+  return tail
+}
+
+/**
+ * @param {{ finals?: string[], partial?: string }} update
+ * finals are newly finalized chunks only. partial is the current interim hypothesis
+ * and may repeat text that was already committed.
+ */
+export function ingest(state, update = {}) {
+  const stable = []
+  for (const chunk of update.finals ?? []) absorb(state, chunk, true, stable)
+  const tail = absorb(state, update.partial ?? '', false, stable)
+  state.partial = tail
   if (state.provisionalSource !== state.partial) {
     state.provisionalSource = ''
     state.provisionalEnglish = ''
@@ -107,7 +112,7 @@ export function commitPartial(state) {
   state.provisionalSource = ''
   state.provisionalEnglish = ''
   if (!tail) return []
-  const clause = pushClause(state, tail, state.clauses.length)
+  const clause = pushClause(state, tail)
   if (!clause) return []
   if (carried) clause.english = carried
   return [clause]
