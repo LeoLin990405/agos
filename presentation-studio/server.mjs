@@ -2,9 +2,10 @@ import { createServer } from 'node:http'
 import { existsSync, readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { extname, join, normalize } from 'node:path'
+import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname } from 'node:path'
-import { loadEnvFile, publicConfig, resolveTranslationProvider, translateText } from './lib/providers.mjs'
+import { activeTranslationProvider, assembleEnv, publicConfig, translateText } from './lib/providers.mjs'
 import { audioKind, synthesizeSpeech, warmMinimax } from './lib/tts.mjs'
 
 const ROOT = dirname(fileURLToPath(import.meta.url))
@@ -19,10 +20,20 @@ const TYPES = {
 
 const cache = new Map()
 
+function readIfPresent(path) {
+  if (!path || !existsSync(path)) return ''
+  return readFileSync(path, 'utf8')
+}
+
 function envFromDisk() {
-  const path = join(ROOT, '.env')
-  if (!existsSync(path)) return { ...process.env }
-  return loadEnvFile(readFileSync(path, 'utf8'), { ...process.env })
+  const secretsPath = process.env.CC_MODEL_SECRETS || join(homedir(), '.config', 'cc-model-secrets.env')
+  const settingsPath = process.env.DSH_SETTINGS || join(homedir(), '.dsh', 'settings.yaml')
+  return assembleEnv({
+    processEnv: process.env,
+    studioText: readIfPresent(join(ROOT, '.env')),
+    secretsText: readIfPresent(secretsPath),
+    settingsText: readIfPresent(settingsPath),
+  })
 }
 
 function remember(text, english) {
@@ -32,7 +43,7 @@ function remember(text, english) {
 }
 
 function cacheKey(text, env, context) {
-  const provider = resolveTranslationProvider(env)
+  const provider = activeTranslationProvider(env)
   const previous = context?.source ? `${context.source}\n${context.english || ''}\n${context.fragment ? 1 : 0}` : ''
   return `${provider}\n${previous}\n${text.trim()}`
 }

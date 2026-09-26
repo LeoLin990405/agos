@@ -26,26 +26,30 @@ Copy `.env.example` to `.env` if you want a private model. Real keys stay in the
 
 | Variable | Role |
 |---|---|
-| `INTERPRET_PROVIDER` | `auto` (default), `minimax`, `libretranslate`, `mymemory`, or `off` |
-| `LIBRETRANSLATE_URL` | Self-hosted LibreTranslate |
-| `MINIMAX_API_KEY` | English speech and, when set, MiniMax-M3 translation. Never put it in the page |
+| `INTERPRET_PROVIDER` | `auto` (default), `qwen-minimax`, `doubao`, `minimax`, `libretranslate`, `mymemory`, or `off` |
+| `QWEN_TOKEN_PLAN_API_KEY` | Primary translation. Model `qwen3.8-max`. Read from the environment or `~/.config/cc-model-secrets.env` |
+| `ARK_API_KEY` | Doubao fallback, model `doubao-seed-evolving`, when Qwen is missing or the call fails |
+| `LIBRETRANSLATE_URL` | Self-hosted LibreTranslate, only when no domestic key is set |
+| `MINIMAX_API_KEY` | English speech, the MiniMax-M3 rewrite of Qwen's English, and the MiniMax-only fallback |
 | `MINIMAX_CHAT_MODEL` | Optional. Defaults to `MiniMax-M3`, the `minimax-cn` model agos already routes |
 | `MINIMAX_API_HOST` | `https://api.minimaxi.com` (China token plan) or `https://api.minimax.io` |
 | `MINIMAX_VOICE_ID` | Default `female-shaonv`, the voice id the agos `speak` tool uses for MiniMax. Set this to a cloned voice id to hear that voice |
 | `MINIMAX_CLONE_AUDIO` | Optional mp3, m4a, or wav sample. Uploaded once at startup, then registered as `MINIMAX_VOICE_ID`. An id that already exists is used as-is |
 | `DSH_CN_VISION_DIR` | Used only when `MINIMAX_API_KEY` is empty and this directory contains `speech.py`. The script is called with `--provider minimax --voice`, never `--clone` |
 
-`auto` translation uses MiniMax-M3 on `POST /v1/chat/completions` when `MINIMAX_API_KEY` is set, then LibreTranslate, then the public [MyMemory](https://mymemory.translated.net/) service. MyMemory needs no key and is rate limited; the Mandarin you speak is sent to that service. The page says so when it is the active provider.
+`auto` translation asks Qwen `qwen3.8-max` (`QWEN_TOKEN_PLAN_API_KEY`) for the clause, then MiniMax-M3 rewrites that English into one speakable line (`MINIMAX_API_KEY`). If Qwen has no key or the call fails, Doubao `doubao-seed-evolving` (`ARK_API_KEY`) translates once. If that is also missing or fails, MiniMax-M3 translates alone. With no domestic key, the studio uses LibreTranslate when `LIBRETRANSLATE_URL` is set, otherwise the public [MyMemory](https://mymemory.translated.net/) service. MyMemory needs no key and is rate limited; the Mandarin you speak is sent to that service. The page says so when it is the active provider.
+
+The server reads keys from the process environment, then `presentation-studio/.env`, then `~/.config/cc-model-secrets.env`. A blank line in `.env` does not erase a key from the secrets file. Hosts left unset are taken from `~/.dsh/settings.yaml` when that file pairs `baseURL` with `QWEN_TOKEN_PLAN_API_KEY` or `ARK_API_KEY`. Nothing in the repo should contain a real key.
 
 English speech is MiniMax HTTP (`POST /v1/t2a_v2`) whenever `MINIMAX_API_KEY` is set, including when `speech.py` is installed. Without a key, the browser can still read the English aloud, but that voice is not in the recording. A MiniMax error is shown as a dub failure; only a missing key uses the browser voice.
 
-Chrome's on-device translator is used only when the server provider is public MyMemory. A MiniMax key stays on `/api/interpret` and speaks with the same key.
+Chrome's on-device translator is used only when the server provider is public MyMemory. A Qwen, Doubao, or MiniMax key stays on `/api/interpret`.
 
 ## Limits
 
 - Speech recognition is Chrome's Web Speech API (`zh-CN`). It needs a microphone and Google's recognition service. Safari and Firefox will not start the mic path; rehearsal still runs.
 - Interpretation is clause-by-clause, not a word-level phoneme stream. The first English usually appears at the first pause or punctuation mark.
-- MyMemory quality and quota are those of a public anonymous endpoint. `MINIMAX_API_KEY` is the private path, using MiniMax-M3 for the words and MiniMax speech for the voice.
+- MyMemory quality and quota are those of a public anonymous endpoint. The private path is Qwen `qwen3.8-max` rewritten by MiniMax-M3, with Doubao then MiniMax-M3 alone behind it. MiniMax speech uses the same `MINIMAX_API_KEY`.
 - MiniMax is a synthetic voice. `female-shaonv` is the built-in default, not a clone of your voice. A cloned id comes from the MiniMax console, or from `MINIMAX_CLONE_AUDIO` plus your own `MINIMAX_VOICE_ID`.
 - The agos `speak` tool's `--clone` sample path is documented for Xiaomi MiMo, not for MiniMax. MiniMax cloning in this studio uses MiniMax `/v1/voice_clone`.
 - There is no "drop in a finished Chinese video and get a fully dubbed English video" path. The hackathon `speak` tool only turns text into a wav. Dubbing a finished video would still need offline transcription of that file, translation of the whole track, MiniMax synthesis, and an ffmpeg mux. The studio records a live take instead.

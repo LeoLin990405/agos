@@ -195,7 +195,7 @@ async function fetchTranslation(text, context, onDelta) {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ text, previous: context }),
-    signal: AbortSignal.timeout(12000),
+    signal: AbortSignal.timeout(20000),
   })
   if (!response.ok) {
     const message = (await response.text()).trim()
@@ -804,6 +804,8 @@ rehearseButton.addEventListener('click', async () => {
 
 function providerCopy(next) {
   const translation = {
+    'qwen-minimax': `翻译走 Qwen ${next.qwenModel || 'qwen3.8-max'}，再由 MiniMax ${next.chatModel || 'MiniMax-M3'} 改成能说的一句`,
+    doubao: `翻译走豆包 ${next.doubaoModel || 'doubao-seed-evolving'}`,
     minimax: `翻译走 MiniMax ${next.chatModel || 'MiniMax-M3'}（同一把 MINIMAX_API_KEY）`,
     libretranslate: '翻译走 LibreTranslate',
     mymemory: '翻译走公开的 MyMemory，说的话会离开这台机器',
