@@ -1,0 +1,29 @@
+/* Demo notice: a quiet strip fixed to the bottom edge; never animated.
+   Uses existing tokens only (no new colours). */
+.agos-demo-banner {
+  position: fixed;
+  left: 56px;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 16px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  background: var(--bg-layer-1);
+  border-top: 1px solid var(--border-bold);
+}
+.agos-demo-banner strong {
+  color: var(--text-primary);
+  border: 1px solid var(--border-bold);
+  border-radius: 4px;
+  padding: 0 6px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+html[data-agos-demo='1'] .app-container { padding-bottom: 30px; box-sizing: border-box; }
