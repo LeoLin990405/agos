@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Presentation Studio · 同声传译</title>
+  <link rel="stylesheet" href="/web/styles.css">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="eyebrow">Presentation Studio</p>
+      <h1>说中文，同时听到英文</h1>
+    </div>
+    <p id="providers" class="providers">正在检查翻译和语音…</p>
+  </header>
+
+  <main>
+    <section class="stage-wrap">
+      <canvas id="stage" width="1280" height="720" aria-label="录像画面"></canvas>
+      <video id="camera" playsinline muted></video>
+      <p id="record-flag" class="record-flag" hidden>REC</p>
+    </section>
+
+    <section class="captions" aria-live="polite">
+      <p class="track-label">中文</p>
+      <p id="mandarin" class="mandarin">等待开口。</p>
+      <p class="track-label">English</p>
+      <p id="english" class="english">English will appear while you are still speaking.</p>
+    </section>
+
+    <ol class="steps">
+      <li>1 说中文</li>
+      <li>2 看英文</li>
+      <li>3 录像</li>
+    </ol>
+    <section class="controls">
+      <button id="speak" type="button">开始说中文</button>
+      <button id="camera-btn" type="button">打开相机</button>
+      <button id="record" type="button">开始录像</button>
+      <button id="rehearse" type="button">排练一句</button>
+      <label class="duck"><input id="duck" type="checkbox" checked> 录像里压低原声。若系统再问一次麦克风，允许即可；若被拒绝，取消勾选，英文字幕和配音仍会留下。</label>
+    </section>
+    <div id="record-guard" class="guard" hidden>
+      <p>还没有听到中文，也没有英文。这样录出来只有演播画面。</p>
+      <button id="record-anyway" type="button">仍要录像</button>
+      <button id="record-cancel" type="button">先去说</button>
+    </div>
+
+    <section class="after" id="after" hidden>
+      <h2 id="saved-title" class="saved-title">录像好了</h2>
+      <video id="playback" controls playsinline tabindex="-1"></video>
+      <a id="download" download="presentation-studio.webm">下载录像</a>
+    </section>
+    <p id="status" class="status" role="status"></p>
+  </main>
+  <script type="module" src="/web/app.js"></script>
+</body>
+</html>

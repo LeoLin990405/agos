@@ -1,0 +1,14 @@
+{
+  "name": "presentation-studio",
+  "private": true,
+  "type": "module",
+  "description": "Speak Mandarin, hear simultaneous English, then record a captioned and dubbed video.",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test/session.test.mjs test/providers.test.mjs test/minimax.test.mjs test/http.test.mjs",
+    "test:browser": "node --test test/flow.browser.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "1.62.1"
+  }
+}
