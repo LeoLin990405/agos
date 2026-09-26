@@ -804,8 +804,7 @@ rehearseButton.addEventListener('click', async () => {
 
 function providerCopy(next) {
   const translation = {
-    deepseek: '翻译走 DeepSeek（使用你的 DEEPSEEK_API_KEY）',
-    openai: '翻译走 OpenAI（使用你的 OPENAI_API_KEY）',
+    minimax: `翻译走 MiniMax ${next.chatModel || 'MiniMax-M3'}（同一把 MINIMAX_API_KEY）`,
     libretranslate: '翻译走 LibreTranslate',
     mymemory: '翻译走公开的 MyMemory，说的话会离开这台机器',
     off: '服务器翻译已关闭',

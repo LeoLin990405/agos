@@ -4,6 +4,7 @@ import { ReadableStream } from 'node:stream/web'
 import {
   decodeEntities,
   INTERPRETER_PROMPT,
+  MINIMAX_CHAT_MODEL,
   loadEnvFile,
   memoryQuery,
   publicConfig,
@@ -15,25 +16,25 @@ import {
 } from '../lib/providers.mjs'
 
 test('environment values win over the env file', () => {
-  const env = loadEnvFile('DEEPSEEK_API_KEY=from-file\nOPENAI_API_KEY=\nPORT=4173\n', {
-    DEEPSEEK_API_KEY: 'from-env',
-    OPENAI_API_KEY: '',
+  const env = loadEnvFile('MINIMAX_API_KEY=from-file\nLIBRETRANSLATE_URL=\nPORT=4173\n', {
+    MINIMAX_API_KEY: 'from-env',
+    LIBRETRANSLATE_URL: '',
   })
-  assert.equal(env.DEEPSEEK_API_KEY, 'from-env')
-  assert.equal(env.OPENAI_API_KEY, '')
+  assert.equal(env.MINIMAX_API_KEY, 'from-env')
+  assert.equal(env.LIBRETRANSLATE_URL, '')
   assert.equal(env.PORT, '4173')
 })
 
-test('auto translation prefers a configured key, otherwise public MyMemory', () => {
+test('auto translation uses MiniMax when the key is set, otherwise public MyMemory', () => {
   assert.equal(resolveTranslationProvider({}), 'mymemory')
-  assert.equal(resolveTranslationProvider({ DEEPSEEK_API_KEY: 'x' }), 'deepseek')
-  assert.equal(resolveTranslationProvider({ OPENAI_API_KEY: 'x' }), 'openai')
-  assert.equal(resolveTranslationProvider({ INTERPRET_PROVIDER: 'off', DEEPSEEK_API_KEY: 'x' }), 'off')
+  assert.equal(resolveTranslationProvider({ MINIMAX_API_KEY: 'x' }), 'minimax')
+  assert.equal(resolveTranslationProvider({ LIBRETRANSLATE_URL: 'http://127.0.0.1:5000' }), 'libretranslate')
+  assert.equal(resolveTranslationProvider({ INTERPRET_PROVIDER: 'off', MINIMAX_API_KEY: 'x' }), 'off')
 })
 
-test('English speech is MiniMax, not espeak or OpenAI', () => {
+test('English speech stays on MiniMax', () => {
   assert.equal(resolveTtsProvider(), 'minimax')
-  assert.equal(resolveTtsProvider({ TTS_PROVIDER: 'espeak', OPENAI_API_KEY: 'x' }), 'minimax')
+  assert.equal(resolveTtsProvider({ TTS_PROVIDER: 'espeak' }), 'minimax')
 })
 
 test('MyMemory payloads become plain English', () => {
@@ -104,25 +105,28 @@ test('a fragment is translated together with the unfinished clause', async () =>
   assert.match(decodeURIComponent(seen), /准确率达到百分之三十五/)
 })
 
-test('chat translation keeps prior English and does not return the upstream body', async () => {
-  let body
-  const fetchImpl = async (_url, options) => {
-    body = JSON.parse(options.body)
+test('chat translation uses MiniMax-M3 on the speech key and does not return the upstream body', async () => {
+  let seen
+  const fetchImpl = async (url, options) => {
+    seen = { url: String(url), body: JSON.parse(options.body), authorization: options.headers.authorization }
     return new Response('nope', { status: 500 })
   }
   await assert.rejects(
     () => translateText('三十五', {
-      INTERPRET_PROVIDER: 'deepseek',
-      DEEPSEEK_API_KEY: 'deepseek-secret',
+      MINIMAX_API_KEY: 'mm-secret',
+      MINIMAX_API_HOST: 'https://api.minimaxi.com',
     }, fetchImpl, {
       context: { source: '准确率达到百分之', english: 'The accuracy reached', fragment: true },
     }),
-    (error) => error.message === 'deepseek HTTP 500' && !/deepseek-secret/.test(error.message),
+    (error) => error.message === 'minimax HTTP 500' && !/mm-secret/.test(error.message),
   )
-  assert.match(body.messages[0].content, /pinyin/)
-  assert.equal(body.messages[0].content, INTERPRETER_PROMPT)
-  assert.match(body.messages[1].content, /The accuracy reached/)
-  assert.match(body.messages[1].content, /三十五/)
+  assert.equal(seen.url, 'https://api.minimaxi.com/v1/chat/completions')
+  assert.equal(seen.authorization, 'Bearer mm-secret')
+  assert.equal(seen.body.model, MINIMAX_CHAT_MODEL)
+  assert.match(seen.body.messages[0].content, /pinyin/)
+  assert.equal(seen.body.messages[0].content, INTERPRETER_PROMPT)
+  assert.match(seen.body.messages[1].content, /The accuracy reached/)
+  assert.match(seen.body.messages[1].content, /三十五/)
 })
 
 test('memory query stays on the fragment when the previous clause was already spoken as a full line', () => {
@@ -131,11 +135,11 @@ test('memory query stays on the fragment when the previous clause was already sp
 
 test('public config names MiniMax and never echoes secrets', () => {
   const config = publicConfig({
-    DEEPSEEK_API_KEY: 'secret-value',
     MINIMAX_API_KEY: 'mm-secret',
     MINIMAX_VOICE_ID: 'LinEnglish01',
   })
-  assert.equal(config.translationProvider, 'deepseek')
+  assert.equal(config.translationProvider, 'minimax')
+  assert.equal(config.chatModel, 'MiniMax-M3')
   assert.equal(config.ttsProvider, 'minimax')
   assert.equal(config.minimaxVoice, 'LinEnglish01')
   assert.equal(config.minimaxKey, true)

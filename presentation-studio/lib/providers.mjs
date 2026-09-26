@@ -2,12 +2,10 @@
  * Translation providers. English speech is MiniMax; see lib/tts.mjs.
  */
 import { isFillerOnly, normalizeMandarin } from './session.mjs'
-import { minimaxVoiceId, speechPyPath } from './tts.mjs'
+import { minimaxHost, minimaxVoiceId, speechPyPath } from './tts.mjs'
 
-const DEFAULT_DEEPSEEK_BASE = 'https://api.deepseek.com'
-const DEFAULT_OPENAI_BASE = 'https://api.openai.com/v1'
-const DEFAULT_DEEPSEEK_MODEL = 'deepseek-chat'
-const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini'
+/** Same text model agos routes as `minimax-cn` / MiniMax-M3. */
+export const MINIMAX_CHAT_MODEL = 'MiniMax-M3'
 
 export function loadEnvFile(text, into = {}) {
   const env = { ...into }
@@ -29,8 +27,7 @@ export function loadEnvFile(text, into = {}) {
 export function resolveTranslationProvider(env) {
   const explicit = (env.INTERPRET_PROVIDER || 'auto').trim().toLowerCase()
   if (explicit !== 'auto') return explicit
-  if (env.DEEPSEEK_API_KEY) return 'deepseek'
-  if (env.OPENAI_API_KEY) return 'openai'
+  if (env.MINIMAX_API_KEY) return 'minimax'
   if (env.LIBRETRANSLATE_URL) return 'libretranslate'
   return 'mymemory'
 }
@@ -94,9 +91,7 @@ export async function translateText(text, env, fetchImpl = globalThis.fetch, opt
   if (provider === 'off') {
     throw new Error('Server translation is off. Use Chrome\'s built-in translator or set INTERPRET_PROVIDER.')
   }
-  if (provider === 'deepseek' || provider === 'openai') {
-    return translateWithChat(source, env, provider, fetchImpl, options)
-  }
+  if (provider === 'minimax') return translateWithMinimax(source, env, fetchImpl, options)
   if (provider === 'libretranslate') return translateWithLibre(source, env, fetchImpl)
   if (provider === 'mymemory') return translateWithMyMemory(memoryQuery(source, options.context), env, fetchImpl)
   throw new Error(`Unknown INTERPRET_PROVIDER "${provider}"`)
@@ -133,20 +128,12 @@ async function translateWithLibre(text, env, fetchImpl) {
   return translated.trim()
 }
 
-function chatConfig(env, provider) {
-  if (provider === 'deepseek') {
-    return {
-      key: env.DEEPSEEK_API_KEY,
-      base: (env.DEEPSEEK_BASE_URL || DEFAULT_DEEPSEEK_BASE).replace(/\/$/, ''),
-      model: env.DEEPSEEK_MODEL || DEFAULT_DEEPSEEK_MODEL,
-      path: '/chat/completions',
-    }
-  }
+function chatConfig(env) {
   return {
-    key: env.OPENAI_API_KEY,
-    base: (env.OPENAI_BASE_URL || DEFAULT_OPENAI_BASE).replace(/\/$/, ''),
-    model: env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL,
-    path: '/chat/completions',
+    key: env.MINIMAX_API_KEY,
+    base: minimaxHost(env),
+    model: env.MINIMAX_CHAT_MODEL || MINIMAX_CHAT_MODEL,
+    path: '/v1/chat/completions',
   }
 }
 
@@ -159,9 +146,9 @@ function chatUserContent(text, context) {
   ].join('\n')
 }
 
-async function translateWithChat(text, env, provider, fetchImpl, options = {}) {
-  const config = chatConfig(env, provider)
-  if (!config.key) throw new Error(`${provider} is selected but no API key is set`)
+async function translateWithMinimax(text, env, fetchImpl, options = {}) {
+  const config = chatConfig(env)
+  if (!config.key) throw new Error('minimax is selected but MINIMAX_API_KEY is not set')
   const response = await fetchImpl(`${config.base}${config.path}`, {
     method: 'POST',
     headers: {
@@ -179,7 +166,7 @@ async function translateWithChat(text, env, provider, fetchImpl, options = {}) {
     }),
   })
   if (!response.ok) {
-    throw new Error(`${provider} HTTP ${response.status}`)
+    throw new Error(`minimax HTTP ${response.status}`)
   }
   return readChatStream(response, options.onDelta)
 }
@@ -238,6 +225,7 @@ export function publicConfig(env) {
     minimaxClone: Boolean(env.MINIMAX_CLONE_AUDIO),
     minimaxKey: Boolean(env.MINIMAX_API_KEY),
     speechPy: Boolean(speechPyPath(env)),
-    thirdPartyTranslation: ['mymemory', 'libretranslate', 'deepseek', 'openai'].includes(resolveTranslationProvider(env)),
+    chatModel: env.MINIMAX_API_KEY ? (env.MINIMAX_CHAT_MODEL || MINIMAX_CHAT_MODEL) : '',
+    thirdPartyTranslation: ['mymemory', 'libretranslate', 'minimax'].includes(resolveTranslationProvider(env)),
   }
 }
