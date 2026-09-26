@@ -11,7 +11,6 @@ import {
   resolveTtsProvider,
   translateText,
 } from '../lib/providers.mjs'
-import { synthesizeEspeak } from '../lib/tts.mjs'
 
 test('environment values win over the env file', () => {
   const env = loadEnvFile('DEEPSEEK_API_KEY=from-file\nOPENAI_API_KEY=\nPORT=4173\n', {
@@ -30,10 +29,9 @@ test('auto translation prefers a configured key, otherwise public MyMemory', () 
   assert.equal(resolveTranslationProvider({ INTERPRET_PROVIDER: 'off', DEEPSEEK_API_KEY: 'x' }), 'off')
 })
 
-test('auto speech uses espeak when the binary exists', () => {
-  assert.equal(resolveTtsProvider({}, true), 'espeak')
-  assert.equal(resolveTtsProvider({ OPENAI_API_KEY: 'x' }, false), 'openai')
-  assert.equal(resolveTtsProvider({}, false), 'browser')
+test('English speech is MiniMax, not espeak or OpenAI', () => {
+  assert.equal(resolveTtsProvider(), 'minimax')
+  assert.equal(resolveTtsProvider({ TTS_PROVIDER: 'espeak', OPENAI_API_KEY: 'x' }), 'minimax')
 })
 
 test('MyMemory payloads become plain English', () => {
@@ -78,15 +76,17 @@ test('translateText posts Mandarin and does not put the key in the URL', async (
   assert.equal(seen.options?.headers?.authorization, undefined)
 })
 
-test('public config names providers and never echoes secrets', () => {
-  const config = publicConfig({ DEEPSEEK_API_KEY: 'secret-value', TTS_PROVIDER: 'espeak' }, true)
+test('public config names MiniMax and never echoes secrets', () => {
+  const config = publicConfig({
+    DEEPSEEK_API_KEY: 'secret-value',
+    MINIMAX_API_KEY: 'mm-secret',
+    MINIMAX_VOICE_ID: 'LinEnglish01',
+  })
   assert.equal(config.translationProvider, 'deepseek')
-  assert.equal(config.ttsProvider, 'espeak')
-  assert.equal(JSON.stringify(config).includes('secret-value'), false)
-})
-
-test('espeak-ng writes a wav for an English clause', async () => {
-  const wav = await synthesizeEspeak('Hello everyone')
-  assert.equal(wav.subarray(0, 4).toString(), 'RIFF')
-  assert.ok(wav.length > 1000)
+  assert.equal(config.ttsProvider, 'minimax')
+  assert.equal(config.minimaxVoice, 'LinEnglish01')
+  assert.equal(config.minimaxKey, true)
+  const dumped = JSON.stringify(config)
+  assert.equal(dumped.includes('secret-value'), false)
+  assert.equal(dumped.includes('mm-secret'), false)
 })

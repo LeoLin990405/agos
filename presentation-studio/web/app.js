@@ -182,7 +182,7 @@ async function speakClause(clause, gen) {
   await speakWithSynthesis(clause.english)
   clause.spoken = true
   mark('spoken-browser', { english: clause.english })
-  setStatus('浏览器在朗读英文。这段声音不会混进录像，除非本机 espeak-ng 或 OPENAI_API_KEY 可用。')
+  setStatus('浏览器在朗读英文。这段声音不会混进录像。要混进成片，设置 MINIMAX_API_KEY。')
 }
 
 function playBuffer(bytes) {
@@ -455,12 +455,12 @@ function providerCopy(config) {
     mymemory: '翻译走公开的 MyMemory，说的话会离开这台机器',
     off: '服务器翻译已关闭',
   }[config.translationProvider] || `翻译：${config.translationProvider}`
-  const speech = {
-    espeak: '英文语音由本机 espeak-ng 合成，可以混进录像',
-    openai: '英文语音走 OpenAI，可以混进录像',
-    browser: '英文语音由浏览器朗读，不会混进录像',
-  }[config.ttsProvider] || `语音：${config.ttsProvider}`
-  return `${translation}。${speech}。`
+  const voice = config.minimaxVoice || 'female-shaonv'
+  const clone = config.minimaxClone ? '，并用 MINIMAX_CLONE_AUDIO 复刻你的声音' : ''
+  const ready = config.minimaxKey || config.speechPy
+    ? '可以混进录像'
+    : '还没设置 MINIMAX_API_KEY，这路声音进不了录像'
+  return `${translation}。英文语音走 MiniMax，音色 ${voice}${clone}。${ready}。`
 }
 
 async function prepareTranslator() {

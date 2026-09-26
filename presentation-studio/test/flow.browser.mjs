@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -9,14 +10,69 @@ import { startServer } from '../server.mjs'
 
 const require = createRequire(new URL('../package.json', import.meta.url))
 
+function toneWav() {
+  const rate = 8000
+  const count = rate
+  const data = Buffer.alloc(count * 2)
+  for (let i = 0; i < count; i += 1) {
+    data.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 440 * i) / rate) * 12000), i * 2)
+  }
+  const header = Buffer.alloc(44)
+  header.write('RIFF', 0)
+  header.writeUInt32LE(36 + data.length, 4)
+  header.write('WAVE', 8)
+  header.write('fmt ', 12)
+  header.writeUInt32LE(16, 16)
+  header.writeUInt16LE(1, 20)
+  header.writeUInt16LE(1, 22)
+  header.writeUInt32LE(rate, 24)
+  header.writeUInt32LE(rate * 2, 28)
+  header.writeUInt16LE(2, 32)
+  header.writeUInt16LE(16, 34)
+  header.write('data', 36)
+  header.writeUInt32LE(data.length, 40)
+  return Buffer.concat([header, data])
+}
+
+function startMinimax() {
+  const requests = []
+  const wav = toneWav()
+  const server = createServer(async (req, res) => {
+    const chunks = []
+    for await (const chunk of req) chunks.push(chunk)
+    const raw = Buffer.concat(chunks).toString('utf8')
+    requests.push({
+      url: req.url,
+      authorization: req.headers.authorization,
+      body: raw ? JSON.parse(raw) : {},
+    })
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ base_resp: { status_code: 0 }, data: { audio: wav.toString('hex') } }))
+  })
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address()
+      resolve({
+        url: `http://127.0.0.1:${port}`,
+        requests,
+        close: () => new Promise((done, fail) => server.close((error) => error ? fail(error) : done())),
+      })
+    })
+  })
+}
+
 test('speaking, live English, and a captioned recording', async () => {
   const { chromium } = require('playwright-core')
+  const minimax = await startMinimax()
   const running = await startServer({
     env: {
       ...process.env,
       INTERPRET_PROVIDER: 'mymemory',
-      TTS_PROVIDER: 'espeak',
-      ESPEAK_BIN: 'espeak-ng',
+      MINIMAX_API_KEY: 'mm-browser-test',
+      MINIMAX_API_HOST: minimax.url,
+      MINIMAX_VOICE_ID: '',
+      MINIMAX_CLONE_AUDIO: '',
+      DSH_CN_VISION_DIR: '/no/such/vision',
       HOST: '127.0.0.1',
     },
     host: '127.0.0.1',
@@ -39,7 +95,10 @@ test('speaking, live English, and a captioned recording', async () => {
     const pageErrors = []
     page.on('pageerror', (error) => pageErrors.push(String(error)))
     await page.goto(running.url, { waitUntil: 'domcontentloaded' })
-    await page.waitForFunction(() => document.querySelector('#providers')?.textContent?.includes('MyMemory'))
+    await page.waitForFunction(() => {
+      const text = document.querySelector('#providers')?.textContent || ''
+      return text.includes('MyMemory') && text.includes('MiniMax') && text.includes('female-shaonv')
+    })
 
     await page.click('#record')
     await page.waitForFunction(() => document.querySelector('#record-flag') && !document.querySelector('#record-flag').hidden)
@@ -90,10 +149,15 @@ test('speaking, live English, and a captioned recording', async () => {
     assert.ok(mean, volume.stderr)
     assert.ok(Number(mean[1]) > -45, `recording audio was silent (${mean[1]} dB)`)
 
+    const spoken = minimax.requests.filter((request) => request.url === '/v1/t2a_v2')
+    assert.ok(spoken.length > 0)
+    assert.equal(spoken[0].authorization, 'Bearer mm-browser-test')
+    assert.equal(spoken[0].body.voice_setting.voice_id, 'female-shaonv')
     assert.deepEqual(pageErrors, [])
   } finally {
     await browser.close()
     await running.close()
+    await minimax.close()
     await rm(dir, { recursive: true, force: true })
   }
 })

@@ -1,6 +1,7 @@
 /**
- * Translation and speech providers. Keys come from the environment only.
+ * Translation providers. English speech is MiniMax; see lib/tts.mjs.
  */
+import { minimaxVoiceId, speechPyPath } from './tts.mjs'
 
 const DEFAULT_DEEPSEEK_BASE = 'https://api.deepseek.com'
 const DEFAULT_OPENAI_BASE = 'https://api.openai.com/v1'
@@ -33,12 +34,8 @@ export function resolveTranslationProvider(env) {
   return 'mymemory'
 }
 
-export function resolveTtsProvider(env, espeakExists = false) {
-  const explicit = (env.TTS_PROVIDER || 'auto').trim().toLowerCase()
-  if (explicit !== 'auto') return explicit
-  if (espeakExists) return 'espeak'
-  if (env.OPENAI_API_KEY) return 'openai'
-  return 'browser'
+export function resolveTtsProvider() {
+  return 'minimax'
 }
 
 export function decodeEntities(text) {
@@ -197,10 +194,14 @@ export async function readChatStream(response) {
   return cleaned
 }
 
-export function publicConfig(env, espeakExists) {
+export function publicConfig(env) {
   return {
     translationProvider: resolveTranslationProvider(env),
-    ttsProvider: resolveTtsProvider(env, espeakExists),
+    ttsProvider: resolveTtsProvider(),
+    minimaxVoice: minimaxVoiceId(env),
+    minimaxClone: Boolean(env.MINIMAX_CLONE_AUDIO),
+    minimaxKey: Boolean(env.MINIMAX_API_KEY),
+    speechPy: Boolean(speechPyPath(env)),
     thirdPartyTranslation: ['mymemory', 'libretranslate', 'deepseek', 'openai'].includes(resolveTranslationProvider(env)),
   }
 }

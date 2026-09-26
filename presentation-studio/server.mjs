@@ -4,8 +4,8 @@ import { readFile } from 'node:fs/promises'
 import { extname, join, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { dirname } from 'node:path'
-import { loadEnvFile, publicConfig, resolveTtsProvider, translateText } from './lib/providers.mjs'
-import { synthesizeEspeak, synthesizeOpenAI } from './lib/tts.mjs'
+import { loadEnvFile, publicConfig, translateText } from './lib/providers.mjs'
+import { synthesizeSpeech } from './lib/tts.mjs'
 
 const ROOT = dirname(fileURLToPath(import.meta.url))
 const TYPES = {
@@ -25,13 +25,6 @@ function envFromDisk() {
   return loadEnvFile(readFileSync(path, 'utf8'), { ...process.env })
 }
 
-function espeakBinExists(env) {
-  const bin = env.ESPEAK_BIN || 'espeak-ng'
-  if (bin.includes('/')) return existsSync(bin)
-  const path = env.PATH || process.env.PATH || ''
-  return path.split(':').some((dir) => dir && existsSync(join(dir, bin)))
-}
-
 function remember(text, english) {
   cache.set(text, english)
   if (cache.size > 200) cache.delete(cache.keys().next().value)
@@ -46,14 +39,7 @@ async function interpret(text, env) {
 }
 
 async function speak(text, env) {
-  const provider = resolveTtsProvider(env, espeakBinExists(env))
-  if (provider === 'espeak') {
-    return synthesizeEspeak(text, { bin: env.ESPEAK_BIN || 'espeak-ng', voice: env.ESPEAK_VOICE || 'en-us' })
-  }
-  if (provider === 'openai') return synthesizeOpenAI(text, env)
-  const error = new Error('No server TTS binary or OPENAI_API_KEY. The browser will use speechSynthesis, which is not mixed into the recording.')
-  error.status = 503
-  throw error
+  return synthesizeSpeech(text, env)
 }
 
 function send(res, status, body, type = 'text/plain; charset=utf-8') {
@@ -95,7 +81,7 @@ export function startServer({ env = envFromDisk(), host = env.HOST || '127.0.0.1
     try {
       const url = new URL(req.url || '/', 'http://127.0.0.1')
       if (req.method === 'GET' && url.pathname === '/api/config') {
-        send(res, 200, JSON.stringify(publicConfig(env, espeakBinExists(env))), 'application/json; charset=utf-8')
+        send(res, 200, JSON.stringify(publicConfig(env)), 'application/json; charset=utf-8')
         return
       }
       if (req.method === 'POST' && url.pathname === '/api/interpret') {

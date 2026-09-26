@@ -28,14 +28,17 @@ Copy `.env.example` to `.env` if you want a private model. Real keys stay in the
 |---|---|
 | `INTERPRET_PROVIDER` | `auto` (default), `deepseek`, `openai`, `libretranslate`, `mymemory`, or `off` |
 | `DEEPSEEK_API_KEY` | Preferred chat translator. `DEEPSEEK_BASE_URL` defaults to `https://api.deepseek.com` |
-| `OPENAI_API_KEY` | Chat translation and, if selected, TTS |
+| `OPENAI_API_KEY` | Chat translation when that provider is selected |
 | `LIBRETRANSLATE_URL` | Self-hosted LibreTranslate |
-| `TTS_PROVIDER` | `auto`, `espeak`, `openai`, or `browser` |
-| `ESPEAK_BIN` | Default `espeak-ng`. `auto` uses it when the binary is on `PATH` |
+| `MINIMAX_API_KEY` | Required for English speech. Never put it in the page |
+| `MINIMAX_API_HOST` | `https://api.minimaxi.com` (China token plan) or `https://api.minimax.io` |
+| `MINIMAX_VOICE_ID` | Default `female-shaonv`, the voice id the agos `speak` tool uses for MiniMax. Set this to a cloned voice id to hear that voice |
+| `MINIMAX_CLONE_AUDIO` | Optional mp3/wav sample. Uploaded once, then registered as `MINIMAX_VOICE_ID` |
+| `DSH_CN_VISION_DIR` | If this directory contains `speech.py`, the studio calls that script with `--provider minimax` instead of HTTP |
 
 `auto` translation uses DeepSeek, then OpenAI, then LibreTranslate, then the public [MyMemory](https://mymemory.translated.net/) service. MyMemory needs no key and is rate limited; the Mandarin you speak is sent to that service. The page says so when it is the active provider.
 
-`auto` speech uses `espeak-ng` when installed (`apt install espeak-ng` or `brew install espeak-ng`). That audio is mixed into the recording. Without it, Chrome's `speechSynthesis` still reads the English aloud, but that voice is not part of the file. Set `TTS_PROVIDER=openai` to dub with OpenAI speech instead.
+English speech is MiniMax. The request is `POST /v1/t2a_v2` with `voice_setting.voice_id`. When `speech.py` from dsh-vision is installed, the studio uses the same command as the agos `speak` tool: `speech.py speak TEXT --out wav --provider minimax --voice <id>`. Without `MINIMAX_API_KEY`, the browser can still read the English aloud, but that voice is not in the recording.
 
 If Chrome already has its on-device translator downloaded (`Translator.availability === "available"`), the page uses that model before the server.
 
@@ -44,5 +47,7 @@ If Chrome already has its on-device translator downloaded (`Translator.availabil
 - Speech recognition is Chrome's Web Speech API (`zh-CN`). It needs a microphone and Google's recognition service. Safari and Firefox will not start the mic path; rehearsal still runs.
 - Interpretation is clause-by-clause, not a word-level phoneme stream. The first English usually appears at the first pause or punctuation mark.
 - MyMemory quality and quota are those of a public anonymous endpoint. A DeepSeek or OpenAI key is the private path.
-- espeak-ng is intelligible and clearly synthetic. It is not a broadcast voice.
-- The recording is WebM (VP8 + Opus). Camera permission is required for your picture; without it the file still contains the studio frame, captions, and dub.
+- MiniMax is a synthetic voice. `female-shaonv` is the built-in default, not a clone of your voice. A cloned id comes from the MiniMax console, or from `MINIMAX_CLONE_AUDIO` plus your own `MINIMAX_VOICE_ID`.
+- The agos `speak` tool's `--clone` sample path is documented for Xiaomi MiMo, not for MiniMax. MiniMax cloning in this studio uses MiniMax `/v1/voice_clone`.
+- There is no "drop in a finished Chinese video and get a fully dubbed English video" path. The hackathon `speak` tool only turns text into a wav. Dubbing a finished video would still need offline transcription of that file, translation of the whole track, MiniMax synthesis, and an ffmpeg mux. The studio records a live take instead.
+- The recording is WebM (VP8 + Opus). Camera permission is required for your picture; without it the file still contains the studio frame, captions, and the MiniMax dub.
