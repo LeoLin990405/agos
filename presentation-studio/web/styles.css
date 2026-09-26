@@ -154,10 +154,42 @@ button[aria-pressed="true"], #record.is-recording {
   color: white;
 }
 
+.steps {
+  display: flex;
+  gap: 18px;
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  font-size: 14px;
+}
+
 .duck {
   font-family: "Avenir Next", "Segoe UI", sans-serif;
   font-size: 14px;
   color: var(--muted);
+  max-width: 42rem;
+}
+
+.guard {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+}
+
+.guard[hidden] { display: none; }
+
+.guard p { margin: 0; }
+
+.saved-title {
+  margin: 0;
+  font-size: 28px;
 }
 
 .after {

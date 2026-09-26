@@ -1,6 +1,7 @@
 /**
  * Translation providers. English speech is MiniMax; see lib/tts.mjs.
  */
+import { isFillerOnly, normalizeMandarin } from './session.mjs'
 import { minimaxVoiceId, speechPyPath } from './tts.mjs'
 
 const DEFAULT_DEEPSEEK_BASE = 'https://api.deepseek.com'
@@ -62,16 +63,42 @@ export function readMyMemory(payload) {
   return decodeEntities(text).trim()
 }
 
-export async function translateText(text, env, fetchImpl = globalThis.fetch) {
-  const source = text.trim()
-  if (!source) return ''
+export function stripWrappingQuotes(text) {
+  const value = String(text || '').trim()
+  if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith('“') && value.endsWith('”')))) {
+    return value.slice(1, -1).trim()
+  }
+  return value
+}
+
+export function memoryQuery(text, context) {
+  const source = String(text || '').trim()
+  if (!context?.source || !context.fragment) return source
+  if (context.spoken && !context.fragment) return source
+  if (source.startsWith(context.source)) return source
+  return `${context.source}${source}`
+}
+
+export const INTERPRETER_PROMPT = [
+  'You are a simultaneous interpreter. Translate Mandarin Chinese into natural spoken English.',
+  'Continue from the previous English when one is given. Do not repeat it.',
+  'Write names in pinyin. Read numbers as they were said, such as three point one four or thirty-five percent.',
+  'Skip fillers. Never leave a dangling copula. The input may be a partial clause.',
+  'Return spoken English only, with no wrapping quotes.',
+].join(' ')
+
+export async function translateText(text, env, fetchImpl = globalThis.fetch, options = {}) {
+  const source = normalizeMandarin(text)
+  if (!source || isFillerOnly(source)) return ''
   const provider = resolveTranslationProvider(env)
   if (provider === 'off') {
     throw new Error('Server translation is off. Use Chrome\'s built-in translator or set INTERPRET_PROVIDER.')
   }
-  if (provider === 'deepseek' || provider === 'openai') return translateWithChat(source, env, provider, fetchImpl)
+  if (provider === 'deepseek' || provider === 'openai') {
+    return translateWithChat(source, env, provider, fetchImpl, options)
+  }
   if (provider === 'libretranslate') return translateWithLibre(source, env, fetchImpl)
-  if (provider === 'mymemory') return translateWithMyMemory(source, env, fetchImpl)
+  if (provider === 'mymemory') return translateWithMyMemory(memoryQuery(source, options.context), env, fetchImpl)
   throw new Error(`Unknown INTERPRET_PROVIDER "${provider}"`)
 }
 
@@ -123,7 +150,16 @@ function chatConfig(env, provider) {
   }
 }
 
-async function translateWithChat(text, env, provider, fetchImpl) {
+function chatUserContent(text, context) {
+  if (!context?.source) return text
+  return [
+    `Previous Mandarin: ${context.source}`,
+    `Previous English: ${context.english || ''}`,
+    `Current Mandarin: ${text}`,
+  ].join('\n')
+}
+
+async function translateWithChat(text, env, provider, fetchImpl, options = {}) {
   const config = chatConfig(env, provider)
   if (!config.key) throw new Error(`${provider} is selected but no API key is set`)
   const response = await fetchImpl(`${config.base}${config.path}`, {
@@ -137,19 +173,15 @@ async function translateWithChat(text, env, provider, fetchImpl) {
       temperature: 0.2,
       stream: true,
       messages: [
-        {
-          role: 'system',
-          content: 'You are a simultaneous interpreter. Translate Mandarin Chinese into natural spoken English. The input may be a partial clause. Translate only what is present, do not invent an ending, and return English only.',
-        },
-        { role: 'user', content: text },
+        { role: 'system', content: INTERPRETER_PROMPT },
+        { role: 'user', content: chatUserContent(text, options.context) },
       ],
     }),
   })
   if (!response.ok) {
-    const detail = await response.text()
-    throw new Error(`${provider} HTTP ${response.status}: ${detail.slice(0, 240)}`)
+    throw new Error(`${provider} HTTP ${response.status}`)
   }
-  return readChatStream(response)
+  return readChatStream(response, options.onDelta)
 }
 
 function takeSseContent(line) {
@@ -162,23 +194,27 @@ function takeSseContent(line) {
   return typeof delta === 'string' ? delta : ''
 }
 
-export async function readChatStream(response) {
+export async function readChatStream(response, onDelta) {
   const reader = response.body?.getReader?.()
   if (!reader) {
     const payload = await response.json()
     const content = payload.choices?.[0]?.message?.content
     if (typeof content !== 'string' || !content.trim()) throw new Error('Chat model returned no text')
-    return content.trim()
+    return stripWrappingQuotes(content)
   }
   const decoder = new TextDecoder()
   let buffer = ''
   let english = ''
   const consume = (line) => {
+    let piece = ''
     try {
-      english += takeSseContent(line)
+      piece = takeSseContent(line)
     } catch {
-      // A broken frame is skipped; callers still get any text that parsed.
+      return
     }
+    if (!piece) return
+    english += piece
+    onDelta?.(piece)
   }
   while (true) {
     const { value, done } = await reader.read()
@@ -189,7 +225,7 @@ export async function readChatStream(response) {
     for (const line of lines) consume(line)
   }
   if (buffer.trim()) consume(buffer)
-  const cleaned = english.trim()
+  const cleaned = stripWrappingQuotes(english)
   if (!cleaned) throw new Error('Chat model returned no text')
   return cleaned
 }

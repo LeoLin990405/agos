@@ -13,7 +13,7 @@ node server.mjs
 
 Open http://127.0.0.1:4173/
 
-1. **开始说中文** — Chrome listens with `zh-CN` interim results. A clause is translated at the first comma or full stop, and also if you pause, instead of waiting until you finish.
+1. **开始说中文** — Chrome listens with `zh-CN` interim results. A finished clause is translated at a full stop, at a comma that is not a fragment, and when you pause on a complete tail.
 2. English shows on the live caption line and is spoken.
 3. **打开相机**, then **开始录像**. The take is the stage you see: camera (or a studio card), Mandarin, English, and the English audio when server TTS is available.
 4. Stop to preview and download the WebM.
@@ -33,14 +33,14 @@ Copy `.env.example` to `.env` if you want a private model. Real keys stay in the
 | `MINIMAX_API_KEY` | Required for English speech. Never put it in the page |
 | `MINIMAX_API_HOST` | `https://api.minimaxi.com` (China token plan) or `https://api.minimax.io` |
 | `MINIMAX_VOICE_ID` | Default `female-shaonv`, the voice id the agos `speak` tool uses for MiniMax. Set this to a cloned voice id to hear that voice |
-| `MINIMAX_CLONE_AUDIO` | Optional mp3/wav sample. Uploaded once, then registered as `MINIMAX_VOICE_ID` |
-| `DSH_CN_VISION_DIR` | If this directory contains `speech.py`, the studio calls that script with `--provider minimax` instead of HTTP |
+| `MINIMAX_CLONE_AUDIO` | Optional mp3, m4a, or wav sample. Uploaded once at startup, then registered as `MINIMAX_VOICE_ID`. An id that already exists is used as-is |
+| `DSH_CN_VISION_DIR` | Used only when `MINIMAX_API_KEY` is empty and this directory contains `speech.py`. The script is called with `--provider minimax --voice`, never `--clone` |
 
 `auto` translation uses DeepSeek, then OpenAI, then LibreTranslate, then the public [MyMemory](https://mymemory.translated.net/) service. MyMemory needs no key and is rate limited; the Mandarin you speak is sent to that service. The page says so when it is the active provider.
 
-English speech is MiniMax. The request is `POST /v1/t2a_v2` with `voice_setting.voice_id`. When `speech.py` from dsh-vision is installed, the studio uses the same command as the agos `speak` tool: `speech.py speak TEXT --out wav --provider minimax --voice <id>`. Without `MINIMAX_API_KEY`, the browser can still read the English aloud, but that voice is not in the recording.
+English speech is MiniMax HTTP (`POST /v1/t2a_v2`) whenever `MINIMAX_API_KEY` is set, including when `speech.py` is installed. Without a key, the browser can still read the English aloud, but that voice is not in the recording. A MiniMax error is shown as a dub failure; only a missing key uses the browser voice.
 
-If Chrome already has its on-device translator downloaded (`Translator.availability === "available"`), the page uses that model before the server.
+Chrome's on-device translator is used only when the server provider is public MyMemory. A DeepSeek or OpenAI key stays on `/api/interpret`.
 
 ## Limits
 

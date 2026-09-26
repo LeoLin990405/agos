@@ -3,13 +3,24 @@ import {
   createSession,
   englishCaption,
   ingest,
+  isFillerOnly,
+  isHold,
+  isSpeakableEnglish,
   mandarinCaption,
+  normalizeMandarin,
   readRecognitionResults,
   setClauseEnglish,
   setProvisional,
 } from '/lib/session.mjs'
 
 const SAMPLE = '各位好，我是林中岳。今天演示同声传译。我说中文，英文会同时出来，然后我们录像。'
+const FLUSH_MS = 12000
+const MIC_ERRORS = {
+  'not-allowed': '麦克风被拒绝。在 Chrome 地址栏允许麦克风，或用本机 http://127.0.0.1 打开。也可以点「排练一句」。',
+  'service-not-allowed': '浏览器禁止了语音识别。请用 Chrome，并允许麦克风。也可以点「排练一句」。',
+  'audio-capture': '没有可用的麦克风。检查系统输入设备，或点「排练一句」。',
+  network: '语音识别连不上。检查网络，或点「排练一句」。',
+}
 
 const speakButton = document.querySelector('#speak')
 const cameraButton = document.querySelector('#camera-btn')
@@ -26,8 +37,14 @@ const recordFlag = document.querySelector('#record-flag')
 const after = document.querySelector('#after')
 const playback = document.querySelector('#playback')
 const download = document.querySelector('#download')
+const recordGuard = document.querySelector('#record-guard')
+const recordAnyway = document.querySelector('#record-anyway')
+const recordCancel = document.querySelector('#record-cancel')
 
 const trace = []
+const translationJobs = new Map()
+const ttsJobs = new Map()
+const activeSources = new Set()
 let state = createSession()
 let generation = 0
 let listening = false
@@ -39,23 +56,32 @@ let provisionalTimer = 0
 let provisionalToken = 0
 let cameraStream = null
 let micStream = null
+let micForTake = null
 let audioCtx = null
 let recordDest = null
-let recorder = null
-let chunks = []
 let recording = false
-let speakChain = Promise.resolve()
+let starting = false
+let takeId = 0
+let activeTake = null
+let playbackChain = Promise.resolve()
+let config = {
+  translationProvider: 'mymemory',
+  minimaxVoice: 'female-shaonv',
+  minimaxKey: false,
+}
 
 window.__trace = trace
+window.__takes = []
 window.__studio = {
   feed,
   sample: SAMPLE,
   caption: () => ({ mandarin: mandarinCaption(state), english: englishCaption(state) }),
   revealed: () => revealedCount,
+  generation: () => generation,
 }
 
 function mark(kind, extra = {}) {
-  trace.push({ kind, t: performance.now(), revealed: revealedCount, ...extra })
+  trace.push({ kind, t: performance.now(), revealed: revealedCount, gen: generation, ...extra })
 }
 
 function setStatus(text) {
@@ -77,10 +103,24 @@ function render() {
   stage.dataset.english = english
 }
 
+function abortSpeech() {
+  for (const job of ttsJobs.values()) {
+    try { job.ctrl.abort() } catch { /* already finished */ }
+  }
+  ttsJobs.clear()
+  for (const source of activeSources) {
+    try { source.stop() } catch { /* already stopped */ }
+  }
+  activeSources.clear()
+  playbackChain = Promise.resolve()
+}
+
 function resetSession() {
   generation += 1
   window.clearTimeout(silenceTimer)
   window.clearTimeout(provisionalTimer)
+  abortSpeech()
+  translationJobs.clear()
   state = createSession()
   render()
 }
@@ -114,28 +154,97 @@ function scheduleProvisional(source, gen) {
   }, 220)
 }
 
-async function requestTranslation(text) {
+function stripQuotes(text) {
+  const value = String(text || '').trim()
+  if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith('“') && value.endsWith('”')))) {
+    return value.slice(1, -1).trim()
+  }
+  return value
+}
+
+function previousClause(clause) {
+  const index = state.clauses.findIndex((item) => item.id === clause.id)
+  for (let i = index - 1; i >= 0; i -= 1) {
+    if (!state.clauses[i].provisional) return state.clauses[i]
+  }
+  return null
+}
+
+function contextFor(clause) {
+  const prev = clause.context || previousClause(clause)
+  if (!prev?.source) return undefined
+  const fragment = Boolean(clause.context?.fragment) || isHold(clause.source)
+  if (config.translationProvider === 'mymemory' && !fragment) return undefined
+  return {
+    source: prev.source,
+    english: prev.english || '',
+    spoken: Boolean(prev.spoken),
+    fragment,
+  }
+}
+
+async function fetchTranslation(text, context, onDelta) {
   mark('interpret-start', { source: text })
-  if (window.__translator) {
-    const english = String(await window.__translator.translate(text)).trim()
+  if (window.__translator && config.translationProvider === 'mymemory') {
+    const english = stripQuotes(String(await window.__translator.translate(text)).trim())
+    onDelta?.(english)
     mark('interpret-done', { source: text, english })
     return english
   }
   const response = await fetch('/api/interpret', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, previous: context }),
     signal: AbortSignal.timeout(12000),
   })
-  const english = (await response.text()).trim()
-  if (!response.ok) throw new Error(english || 'Translation failed')
+  if (!response.ok) {
+    const message = (await response.text()).trim()
+    if (response.status >= 500 && window.__translator) {
+      const english = stripQuotes(String(await window.__translator.translate(text)).trim())
+      mark('interpret-done', { source: text, english })
+      return english
+    }
+    throw new Error(message || 'Translation failed')
+  }
+  const reader = response.body?.getReader?.()
+  if (!reader) {
+    const english = stripQuotes((await response.text()).trim())
+    onDelta?.(english)
+    mark('interpret-done', { source: text, english })
+    return english
+  }
+  const decoder = new TextDecoder()
+  let english = ''
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    english += decoder.decode(value, { stream: true })
+    onDelta?.(english.trim())
+  }
+  english = stripQuotes(english.trim())
   mark('interpret-done', { source: text, english })
   return english
 }
 
+function requestTranslation(text, context, onDelta) {
+  const key = `${context?.source || ''}|${context?.fragment ? 1 : 0}|${text}`
+  const existing = translationJobs.get(key)
+  if (existing) return existing
+  const job = fetchTranslation(text, context, onDelta).catch((error) => {
+    translationJobs.delete(key)
+    throw error
+  })
+  translationJobs.set(key, job)
+  return job
+}
+
 async function translateProvisional(source, token) {
+  if (isFillerOnly(source) || isHold(source)) return
   try {
-    const english = await requestTranslation(source)
+    const english = await requestTranslation(normalizeMandarin(source), undefined, (partial) => {
+      if (token !== provisionalToken) return
+      if (setProvisional(state, source, partial)) render()
+    })
     if (token !== provisionalToken) return
     if (setProvisional(state, source, english)) render()
   } catch (error) {
@@ -144,12 +253,30 @@ async function translateProvisional(source, token) {
 }
 
 async function translateClause(clause, gen) {
+  const source = clause.source
+  if (isFillerOnly(source)) {
+    clause.skipped = true
+    return
+  }
   try {
     if (!clause.english) {
-      const english = await requestTranslation(clause.source)
-      if (gen !== generation) return
+      const english = await requestTranslation(normalizeMandarin(source), contextFor(clause), (partial) => {
+        if (gen !== generation || clause.source !== source) return
+        setClauseEnglish(state, clause.id, partial)
+        render()
+      })
+      if (gen !== generation || clause.source !== source) return
       setClauseEnglish(state, clause.id, english)
       render()
+      if (!english || !isSpeakableEnglish(english)) {
+        clause.skipped = true
+        setStatus('这句英文不可用，已跳过配音。')
+        return
+      }
+    } else if (!isSpeakableEnglish(clause.english)) {
+      clause.skipped = true
+      setStatus('这句英文不可用，已跳过配音。')
+      return
     }
     enqueueSpeak(clause, gen)
   } catch (error) {
@@ -158,43 +285,170 @@ async function translateClause(clause, gen) {
 }
 
 function enqueueSpeak(clause, gen) {
-  speakChain = speakChain
-    .then(() => speakClause(clause, gen))
-    .catch((error) => setStatus(error.message))
-}
-
-async function speakClause(clause, gen) {
-  if (gen !== generation || clause.spoken || !clause.english) return
-  const response = await fetch('/api/tts', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ text: clause.english }),
-    signal: AbortSignal.timeout(15000),
-  })
-  if (response.ok) {
-    const bytes = await response.arrayBuffer()
-    await playBuffer(bytes)
-    clause.spoken = true
-    mark('spoken', { english: clause.english })
-    setStatus('英文正在播出。')
+  if (gen !== generation || clause.spoken || clause.skipped || !clause.english) return
+  if (!isSpeakableEnglish(clause.english)) {
+    clause.skipped = true
+    setStatus('这句英文不可用，已跳过配音。')
     return
   }
-  await speakWithSynthesis(clause.english)
-  clause.spoken = true
-  mark('spoken-browser', { english: clause.english })
-  setStatus('浏览器在朗读英文。这段声音不会混进录像。要混进成片，设置 MINIMAX_API_KEY。')
+  const source = clause.source
+  const english = clause.english
+  const token = `${clause.id}:${source}:${english}`
+  if (!ttsJobs.has(token)) ttsJobs.set(token, prefetchTts(clause, gen, english))
+  playbackChain = playbackChain
+    .then(() => playPrefetched(clause, gen, token, source, english))
+    .catch((error) => setStatus(error.message || '英文配音失败'))
 }
 
-function playBuffer(bytes) {
+function prefetchTts(clause, gen, english) {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 45000)
+  mark('tts-start', { english, gen })
+  const promise = fetch('/api/tts', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: english }),
+    signal: ctrl.signal,
+  }).then(async (response) => {
+    clearTimeout(timer)
+    if (gen !== generation) return { dropped: true }
+    if (!response.ok) {
+      const message = (await response.text()).trim()
+      return { ok: false, status: response.status, message }
+    }
+    if ((response.headers.get('x-audio-format') || '') === 'pcm') return { ok: true, pcm: response }
+    const bytes = await response.arrayBuffer()
+    if (gen !== generation) return { dropped: true }
+    try {
+      const buffer = await audio().decodeAudioData(bytes.slice(0))
+      return { ok: true, buffer }
+    } catch {
+      return { ok: false, status: 200, message: '英文配音失败', decode: true }
+    }
+  }).catch((error) => {
+    clearTimeout(timer)
+    if (error?.name === 'AbortError') return { dropped: true }
+    return { ok: false, status: 0, message: '英文配音失败' }
+  })
+  return { promise, ctrl, gen }
+}
+
+async function playPrefetched(clause, gen, token, source, english) {
+  const job = ttsJobs.get(token)
+  if (!job) return
+  const result = await job.promise
+  if (gen !== generation || result?.dropped || clause.spoken) return
+  if (clause.source !== source || clause.english !== english) return
+  if (!result?.ok) {
+    if (result?.status === 503) {
+      await speakWithSynthesis(english)
+      if (gen !== generation) return
+      clause.spoken = true
+      mark('spoken-browser', { english, gen })
+      setStatus('浏览器在朗读英文。这段声音不会混进录像。要混进成片，设置 MINIMAX_API_KEY。')
+      return
+    }
+    if (!clause.ttsRetried) {
+      clause.ttsRetried = true
+      ttsJobs.delete(token)
+      enqueueSpeak(clause, gen)
+      return
+    }
+    const message = result?.message || ''
+    setStatus(message.startsWith('英文配音失败') ? message : '英文配音失败')
+    return
+  }
+  if (gen !== generation) return
+  if (result.buffer) await playDecoded(result.buffer, clause, gen, recordDest, true)
+  else if (result.pcm) await playPcm(result.pcm, clause, gen)
+  if (gen !== generation) return
+  clause.spoken = true
+  mark('spoken', { english, gen })
+  setStatus('英文正在播出。')
+}
+
+function playDecoded(buffer, clause, gen, dest, speakers) {
+  return new Promise((resolve) => {
+    if (gen !== generation) {
+      resolve()
+      return
+    }
+    const ctx = audio()
+    const source = ctx.createBufferSource()
+    source.buffer = buffer
+    if (speakers) source.connect(ctx.destination)
+    if (dest) {
+      source.connect(dest)
+      if (clause) clause.mixedTake = takeId
+    }
+    if (clause) clause.audio = buffer
+    activeSources.add(source)
+    const timer = setTimeout(() => {
+      try { source.stop() } catch { /* already ended */ }
+      activeSources.delete(source)
+      resolve()
+    }, (buffer.duration + 1.5) * 1000)
+    source.onended = () => {
+      clearTimeout(timer)
+      activeSources.delete(source)
+      resolve()
+    }
+    source.start()
+  })
+}
+
+async function playPcm(response, clause, gen) {
+  const reader = response.body?.getReader?.()
+  if (!reader) return
   const ctx = audio()
-  return ctx.decodeAudioData(bytes.slice(0)).then((buffer) => new Promise((resolve) => {
+  const dest = recordDest
+  const rate = Number(response.headers.get('x-sample-rate') || 32000)
+  let nextTime = ctx.currentTime
+  let leftover = new Uint8Array(0)
+  const samples = []
+  const schedule = (bytes) => {
+    if (gen !== generation || bytes.length < 2) return
+    const count = bytes.length / 2
+    const buffer = ctx.createBuffer(1, count, rate)
+    const channel = buffer.getChannelData(0)
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    for (let i = 0; i < count; i += 1) {
+      const sample = view.getInt16(i * 2, true) / 32768
+      channel[i] = sample
+      samples.push(sample)
+    }
     const source = ctx.createBufferSource()
     source.buffer = buffer
     source.connect(ctx.destination)
-    if (recordDest) source.connect(recordDest)
-    source.onended = () => resolve()
-    source.start()
-  }))
+    if (dest) source.connect(dest)
+    activeSources.add(source)
+    const startAt = Math.max(nextTime, ctx.currentTime + 0.02)
+    source.start(startAt)
+    nextTime = startAt + buffer.duration
+    source.onended = () => activeSources.delete(source)
+  }
+  while (true) {
+    const { value, done } = await reader.read()
+    if (gen !== generation) {
+      try { await reader.cancel() } catch { /* closed */ }
+      break
+    }
+    if (done) break
+    const merged = new Uint8Array(leftover.length + value.length)
+    merged.set(leftover, 0)
+    merged.set(value, leftover.length)
+    const even = merged.length - (merged.length % 2)
+    if (even >= 2) schedule(merged.slice(0, even))
+    leftover = merged.slice(even)
+  }
+  if (clause && samples.length) {
+    const buffer = ctx.createBuffer(1, samples.length, rate)
+    buffer.getChannelData(0).set(samples)
+    clause.audio = buffer
+    if (dest) clause.mixedTake = takeId
+  }
+  const waitMs = Math.max(0, (nextTime - ctx.currentTime) * 1000)
+  if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs + 40))
 }
 
 function speakWithSynthesis(text) {
@@ -209,6 +463,12 @@ function speakWithSynthesis(text) {
     utter.onerror = () => resolve()
     window.speechSynthesis.speak(utter)
   })
+}
+
+async function ensureMic() {
+  if (micStream && micStream.getAudioTracks().some((track) => track.readyState === 'live')) return micStream
+  micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+  return micStream
 }
 
 function startMic() {
@@ -227,18 +487,30 @@ function startMic() {
   }
   recognition.onerror = (event) => {
     if (event.error === 'aborted' || event.error === 'no-speech') return
-    setStatus(`语音识别：${event.error}`)
+    listening = false
+    speakButton.setAttribute('aria-pressed', 'false')
+    speakButton.textContent = '开始说中文'
+    setStatus(MIC_ERRORS[event.error] || `语音识别：${event.error}`)
   }
   recognition.onend = () => {
     if (!listening) return
     try { recognition.start() } catch { /* Chrome restarts can overlap a live session. */ }
   }
-  recognition.start()
+  try {
+    recognition.start()
+  } catch (error) {
+    setStatus(MIC_ERRORS[error?.error] || MIC_ERRORS['not-allowed'])
+    return
+  }
   listening = true
   speakButton.setAttribute('aria-pressed', 'true')
   speakButton.textContent = '停止聆听'
   setStatus('正在听中文。英文会在你还在说的时候出现。')
   mark('listen-start')
+  void ensureMic().catch((error) => {
+    if (!listening) return
+    setStatus(error?.name === 'NotAllowedError' ? MIC_ERRORS['not-allowed'] : MIC_ERRORS['audio-capture'])
+  })
 }
 
 function stopMic() {
@@ -254,7 +526,7 @@ speakButton.addEventListener('click', () => {
   audio()
   if (listening) {
     stopMic()
-    const committed = commitPartial(state)
+    const committed = commitPartial(state, { force: true })
     for (const clause of committed) void translateClause(clause, generation)
     setStatus('已停止聆听。')
     return
@@ -286,6 +558,7 @@ async function ensureCamera() {
 }
 
 cameraButton.addEventListener('click', async () => {
+  if (recording) return
   if (cameraStream) {
     cameraStream.getTracks().forEach((track) => track.stop())
     cameraStream = null
@@ -354,75 +627,156 @@ function draw() {
   window.requestAnimationFrame(draw)
 }
 
-async function startRecording() {
-  audio()
-  await ensureCamera()
-  const ctx = audio()
-  recordDest = ctx.createMediaStreamDestination()
-  if (duckInput.checked) {
-    try {
-      micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
-      const source = ctx.createMediaStreamSource(micStream)
-      const gain = ctx.createGain()
-      gain.gain.value = 0.22
-      source.connect(gain).connect(recordDest)
-    } catch {
-      setStatus('原声没有进入录像，将保留英文字幕和英文配音。')
-    }
-  }
-  const canvasStream = stage.captureStream(30)
-  const audioTrack = recordDest.stream.getAudioTracks()[0]
-  if (audioTrack) canvasStream.addTrack(audioTrack)
-  const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
-    ? 'video/webm;codecs=vp8,opus'
-    : 'video/webm'
-  chunks = []
-  recorder = new MediaRecorder(canvasStream, { mimeType: mime })
-  recorder.ondataavailable = (event) => {
-    if (event.data.size) chunks.push(event.data)
-  }
-  recorder.onstop = () => {
-    const blob = new Blob(chunks, { type: recorder.mimeType || 'video/webm' })
-    window.__lastRecording = blob
-    const url = URL.createObjectURL(blob)
-    playback.src = url
-    download.href = url
-    after.hidden = false
-    mark('record-stop', { bytes: blob.size })
-    setStatus(`录像已保存，${Math.round(blob.size / 1024)} KB。`)
-  }
-  recorder.start(200)
-  recording = true
-  recordButton.classList.add('is-recording')
-  recordButton.textContent = '停止并保存'
-  recordFlag.hidden = false
-  mark('record-start')
-  setStatus('正在录像。英文会写进字幕，并在可以合成语音时混进声音。')
+function readyToRecord() {
+  return listening || rehearsing || Boolean(mandarinCaption(state) || englishCaption(state))
 }
 
-function stopRecording() {
+function showTake(blob) {
+  window.__lastRecording = blob
+  const url = URL.createObjectURL(blob)
+  playback.src = url
+  download.href = url
+  after.hidden = false
+  after.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  download.focus()
+  mark('record-stop', { bytes: blob.size })
+  setStatus(`录像已保存，${Math.round(blob.size / 1024)} KB。`)
+}
+
+function disconnectTake(take, { stopCanvas = false } = {}) {
+  if (stopCanvas) take.canvasStream?.getTracks().forEach((track) => track.stop())
+  if (micForTake) {
+    micForTake.getTracks().forEach((track) => track.stop())
+    if (micStream === micForTake && !listening) micStream = null
+    micForTake = null
+  }
+  if (recordDest === take.dest) recordDest = null
+  if (activeTake === take) activeTake = null
+}
+
+async function mixUnrecorded(dest, gen) {
+  const clips = state.clauses.filter((clause) => clause.audio && clause.mixedTake == null)
+  for (const clause of clips) {
+    if (gen !== generation || !recording) return
+    await playDecoded(clause.audio, clause, gen, dest, false)
+  }
+}
+
+async function beginRecording() {
+  const gen = generation
+  try {
+    audio()
+    await ensureCamera()
+    if (!starting) return
+    const ctx = audio()
+    const take = {
+      chunks: [],
+      dest: ctx.createMediaStreamDestination(),
+      mime: '',
+      recorder: null,
+      canvasStream: null,
+    }
+    takeId += 1
+    activeTake = take
+    recordDest = take.dest
+    let duckFailed = false
+    if (duckInput.checked) {
+      try {
+        micForTake = await ensureMic()
+        const source = ctx.createMediaStreamSource(micForTake)
+        const gain = ctx.createGain()
+        gain.gain.value = 0.22
+        source.connect(gain).connect(take.dest)
+      } catch {
+        duckFailed = true
+        setStatus('麦克风没有允许给录像。取消勾选「压低原声」，英文字幕和配音仍会留下。')
+      }
+    }
+    take.canvasStream = stage.captureStream(30)
+    const audioTrack = take.dest.stream.getAudioTracks()[0]
+    if (audioTrack) take.canvasStream.addTrack(audioTrack)
+    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
+      ? 'video/webm;codecs=vp8,opus'
+      : 'video/webm'
+    take.mime = mime
+    try {
+      take.recorder = new MediaRecorder(take.canvasStream, { mimeType: mime })
+    } catch (error) {
+      disconnectTake(take, { stopCanvas: true })
+      recording = false
+      throw error
+    }
+    take.recorder.ondataavailable = (event) => {
+      if (event.data.size) take.chunks.push(event.data)
+    }
+    take.recorder.onstop = () => {
+      take.canvasStream?.getTracks().forEach((track) => track.stop())
+      const blob = new Blob(take.chunks, { type: take.mime || 'video/webm' })
+      take.blob = blob
+      window.__takes.push(blob)
+      if (activeTake !== take && recording) return
+      showTake(blob)
+    }
+    take.recorder.start(200)
+    recording = true
+    recordButton.classList.add('is-recording')
+    recordButton.textContent = '停止并保存'
+    recordFlag.hidden = false
+    mark('record-start')
+    playbackChain = playbackChain.then(() => mixUnrecorded(take.dest, gen))
+    if (!duckFailed) setStatus('正在录像。英文会写进字幕，并在可以合成语音时混进声音。')
+  } catch (error) {
+    setStatus(error.message || '录像没有开始。')
+  } finally {
+    starting = false
+  }
+}
+
+async function stopRecording() {
+  const take = activeTake
+  if (!take) return
   recording = false
   recordButton.classList.remove('is-recording')
   recordButton.textContent = '开始录像'
   recordFlag.hidden = true
-  if (recorder && recorder.state !== 'inactive') recorder.stop()
-  if (micStream) {
-    micStream.getTracks().forEach((track) => track.stop())
-    micStream = null
+  recordButton.disabled = true
+  setStatus('正在把最后一句英文写入录像…')
+  await Promise.race([
+    playbackChain.catch(() => {}),
+    new Promise((resolve) => setTimeout(resolve, FLUSH_MS)),
+  ])
+  if (take.recorder && take.recorder.state === 'recording') {
+    try { take.recorder.requestData() } catch { /* already stopping */ }
+    take.recorder.stop()
   }
-  recordDest = null
+  disconnectTake(take)
+  recordButton.disabled = false
 }
 
-recordButton.addEventListener('click', async () => {
+recordButton.addEventListener('click', () => {
   if (recording) {
-    stopRecording()
+    void stopRecording()
     return
   }
-  try {
-    await startRecording()
-  } catch (error) {
-    setStatus(error.message)
+  if (starting || !recordGuard.hidden) return
+  if (!readyToRecord()) {
+    recordGuard.hidden = false
+    return
   }
+  starting = true
+  void beginRecording()
+})
+
+recordAnyway.addEventListener('click', () => {
+  recordGuard.hidden = true
+  if (recording || starting) return
+  starting = true
+  void beginRecording()
+})
+
+recordCancel.addEventListener('click', () => {
+  recordGuard.hidden = true
+  setStatus('先说中文，或点「排练一句」。')
 })
 
 rehearseButton.addEventListener('click', async () => {
@@ -439,31 +793,33 @@ rehearseButton.addEventListener('click', async () => {
     feed({ partial: SAMPLE.slice(0, i) })
     await new Promise((resolve) => window.setTimeout(resolve, 70))
   }
-  const tail = commitPartial(state)
+  rehearseButton.setAttribute('aria-pressed', 'false')
+  if (!rehearsing) return
+  const tail = commitPartial(state, { force: true })
   render()
   for (const clause of tail) void translateClause(clause, generation)
   rehearsing = false
-  rehearseButton.setAttribute('aria-pressed', 'false')
   mark('rehearsal-done')
 })
 
-function providerCopy(config) {
+function providerCopy(next) {
   const translation = {
     deepseek: '翻译走 DeepSeek（使用你的 DEEPSEEK_API_KEY）',
     openai: '翻译走 OpenAI（使用你的 OPENAI_API_KEY）',
     libretranslate: '翻译走 LibreTranslate',
     mymemory: '翻译走公开的 MyMemory，说的话会离开这台机器',
     off: '服务器翻译已关闭',
-  }[config.translationProvider] || `翻译：${config.translationProvider}`
-  const voice = config.minimaxVoice || 'female-shaonv'
-  const clone = config.minimaxClone ? '，并用 MINIMAX_CLONE_AUDIO 复刻你的声音' : ''
-  const ready = config.minimaxKey || config.speechPy
+  }[next.translationProvider] || `翻译：${next.translationProvider}`
+  const voice = next.minimaxVoice || 'female-shaonv'
+  const clone = next.minimaxClone ? '，并用 MINIMAX_CLONE_AUDIO 复刻你的声音' : ''
+  const ready = next.minimaxKey || next.speechPy
     ? '可以混进录像'
     : '还没设置 MINIMAX_API_KEY，这路声音进不了录像'
   return `${translation}。英文语音走 MiniMax，音色 ${voice}${clone}。${ready}。`
 }
 
-async function prepareTranslator() {
+async function prepareTranslator(next) {
+  if (next.translationProvider !== 'mymemory') return
   if (typeof Translator === 'undefined' || !Translator.availability) return
   try {
     const availability = await Translator.availability({ sourceLanguage: 'zh', targetLanguage: 'en' })
@@ -475,8 +831,19 @@ async function prepareTranslator() {
   }
 }
 
-const config = await fetch('/api/config').then((response) => response.json())
-providersEl.textContent = providerCopy(config)
-render()
-draw()
-void prepareTranslator()
+async function boot() {
+  try {
+    const response = await fetch('/api/config')
+    if (!response.ok) throw new Error('config')
+    config = await response.json()
+    providersEl.textContent = providerCopy(config)
+    void prepareTranslator(config)
+  } catch {
+    providersEl.textContent = '连不上工作室。在 presentation-studio 目录运行 node server.mjs，然后打开它打印的地址。'
+    setStatus('翻译和 MiniMax 暂时不可用。可以先看页面，但排练需要服务器。')
+  }
+  render()
+  draw()
+}
+
+void boot()

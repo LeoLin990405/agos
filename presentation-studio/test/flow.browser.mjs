@@ -101,6 +101,7 @@ test('speaking, live English, and a captioned recording', async () => {
     })
 
     await page.click('#record')
+    await page.click('#record-anyway')
     await page.waitForFunction(() => document.querySelector('#record-flag') && !document.querySelector('#record-flag').hidden)
     await page.click('#rehearse')
 
@@ -121,7 +122,11 @@ test('speaking, live English, and a captioned recording', async () => {
     await page.waitForFunction(() => (window.__trace || []).some((item) => item.kind === 'spoken'), null, { timeout: 20000 })
     await page.waitForTimeout(1600)
     await page.click('#record')
-    await page.waitForFunction(() => window.__lastRecording && window.__lastRecording.size > 1000, null, { timeout: 10000 })
+    await page.waitForFunction(() => window.__lastRecording && window.__lastRecording.size > 1000, null, { timeout: 20000 })
+    await page.waitForFunction(() => {
+      const after = document.querySelector('#after')
+      return after && !after.hidden && document.querySelector('#saved-title')?.textContent === '录像好了'
+    })
 
     const bytes = await page.evaluate(async () => {
       const raw = new Uint8Array(await window.__lastRecording.arrayBuffer())
@@ -161,6 +166,178 @@ test('speaking, live English, and a captioned recording', async () => {
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('speech before recording is dubbed, and a reset drops in-flight audio', async () => {
+  const { chromium } = require('playwright-core')
+  const minimax = await startMinimax()
+  const running = await startServer({
+    env: {
+      ...process.env,
+      INTERPRET_PROVIDER: 'mymemory',
+      MINIMAX_API_KEY: 'mm-browser-test',
+      MINIMAX_API_HOST: minimax.url,
+      MINIMAX_VOICE_ID: '',
+      MINIMAX_CLONE_AUDIO: '',
+      DSH_CN_VISION_DIR: '/no/such/vision',
+      HOST: '127.0.0.1',
+    },
+    host: '127.0.0.1',
+    port: 0,
+  })
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome',
+    args: [
+      '--use-fake-ui-for-media-stream',
+      '--use-fake-device-for-media-stream',
+      '--autoplay-policy=no-user-gesture-required',
+      '--no-sandbox',
+      '--disable-gpu',
+    ],
+  })
+  const dir = await mkdtemp(join(tmpdir(), 'studio-order-'))
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+    await page.goto(running.url, { waitUntil: 'domcontentloaded' })
+    await page.waitForFunction(() => (document.querySelector('#providers')?.textContent || '').includes('MiniMax'))
+    await page.click('#rehearse')
+    await page.waitForFunction(() => (window.__trace || []).some((item) => item.kind === 'spoken'), null, { timeout: 20000 })
+    await page.click('#record')
+    await page.waitForFunction(() => document.querySelector('#record-flag') && !document.querySelector('#record-flag').hidden)
+    await page.waitForTimeout(2200)
+    await page.click('#record')
+    await page.waitForFunction(() => window.__lastRecording && window.__lastRecording.size > 1000, null, { timeout: 20000 })
+    const bytes = await page.evaluate(async () => {
+      const raw = new Uint8Array(await window.__lastRecording.arrayBuffer())
+      let binary = ''
+      const step = 0x8000
+      for (let i = 0; i < raw.length; i += step) binary += String.fromCharCode(...raw.subarray(i, i + step))
+      return btoa(binary)
+    })
+    const webmPath = join(dir, 'after.webm')
+    await writeFile(webmPath, Buffer.from(bytes, 'base64'))
+    const volume = await run('ffmpeg', ['-i', webmPath, '-af', 'volumedetect', '-f', 'null', '-'])
+    const mean = volume.stderr.match(/mean_volume:\s*(-?\d+(?:\.\d+)?)\s*dB/)
+    assert.ok(mean, volume.stderr)
+    assert.ok(Number(mean[1]) > -45, `pre-roll audio was silent (${mean?.[1]} dB)`)
+
+    const delayed = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+    await delayed.route('**/api/tts', async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 4000))
+      await route.continue()
+    })
+    await delayed.goto(running.url, { waitUntil: 'domcontentloaded' })
+    await delayed.waitForFunction(() => (document.querySelector('#providers')?.textContent || '').includes('MiniMax'))
+    await delayed.click('#rehearse')
+    await delayed.waitForFunction(() => (window.__trace || []).some((item) => item.kind === 'rehearsal-done'), null, { timeout: 20000 })
+    const previous = await delayed.evaluate(() => window.__studio.generation())
+    const markCount = await delayed.evaluate(() => (window.__trace || []).length)
+    await delayed.click('#rehearse')
+    await delayed.waitForTimeout(5000)
+    const stale = await delayed.evaluate(({ gen, start }) => (
+      (window.__trace || []).slice(start).some((item) => item.kind === 'spoken' && item.gen === gen)
+    ), { gen: previous, start: markCount })
+    assert.equal(stale, false)
+
+    const takes = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+    await takes.goto(running.url, { waitUntil: 'domcontentloaded' })
+    await takes.waitForFunction(() => (document.querySelector('#providers')?.textContent || '').includes('MiniMax'))
+    await takes.click('#record')
+    await takes.click('#record-anyway')
+    await takes.waitForFunction(() => document.querySelector('#record-flag') && !document.querySelector('#record-flag').hidden)
+    await takes.waitForTimeout(500)
+    await takes.click('#record')
+    await takes.click('#record')
+    await takes.click('#record-anyway')
+    await takes.waitForTimeout(300)
+    await takes.click('#record')
+    await takes.waitForFunction(() => (window.__takes || []).length >= 2, null, { timeout: 15000 })
+    const sizes = await takes.evaluate(() => window.__takes.map((blob) => blob.size))
+    assert.ok(sizes[0] > 100 && sizes[1] > 100, `takes did not both survive (${sizes.join(',')})`)
+  } finally {
+    await browser.close()
+    await running.close()
+    await minimax.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('a missing key uses the browser voice, a MiniMax error does not', async () => {
+  const { chromium } = require('playwright-core')
+  const failing = await startMinimaxError()
+  const keyed = await startServer({
+    env: {
+      ...process.env,
+      INTERPRET_PROVIDER: 'mymemory',
+      MINIMAX_API_KEY: 'mm-browser-test',
+      MINIMAX_API_HOST: failing.url,
+      MINIMAX_VOICE_ID: '',
+      MINIMAX_CLONE_AUDIO: '',
+      DSH_CN_VISION_DIR: '/no/such/vision',
+      HOST: '127.0.0.1',
+    },
+    host: '127.0.0.1',
+    port: 0,
+  })
+  const missing = await startServer({
+    env: {
+      ...process.env,
+      INTERPRET_PROVIDER: 'mymemory',
+      MINIMAX_API_KEY: '',
+      MINIMAX_CLONE_AUDIO: '',
+      DSH_CN_VISION_DIR: '/no/such/vision',
+      HOST: '127.0.0.1',
+    },
+    host: '127.0.0.1',
+    port: 0,
+  })
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome',
+    args: ['--autoplay-policy=no-user-gesture-required', '--no-sandbox', '--disable-gpu'],
+  })
+  try {
+    const bad = await browser.newPage()
+    await bad.goto(keyed.url, { waitUntil: 'domcontentloaded' })
+    await bad.click('#rehearse')
+    await bad.waitForFunction(() => /[A-Za-z]{3,}/.test(document.querySelector('#english').textContent || ''), null, { timeout: 20000 })
+    await bad.waitForFunction(() => (document.querySelector('#status')?.textContent || '').includes('英文配音失败'), null, { timeout: 20000 })
+    const badStatus = await bad.locator('#status').innerText()
+    assert.equal(badStatus.includes('MINIMAX_API_KEY'), false)
+    const spoken = await bad.evaluate(() => (window.__trace || []).some((item) => item.kind === 'spoken' || item.kind === 'spoken-browser'))
+    assert.equal(spoken, false)
+
+    const open = await browser.newPage()
+    await open.goto(missing.url, { waitUntil: 'domcontentloaded' })
+    await open.click('#rehearse')
+    await open.waitForFunction(() => /[A-Za-z]{3,}/.test(document.querySelector('#english').textContent || ''), null, { timeout: 20000 })
+    await open.waitForFunction(() => (window.__trace || []).some((item) => item.kind === 'spoken-browser'), null, { timeout: 20000 })
+    const status = await open.locator('#status').innerText()
+    assert.match(status, /MINIMAX_API_KEY/)
+  } finally {
+    await browser.close()
+    await keyed.close()
+    await missing.close()
+    await failing.close()
+  }
+})
+
+function startMinimaxError() {
+  const server = createServer(async (req, res) => {
+    for await (const _chunk of req) { /* drain */ }
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ base_resp: { status_code: 1008, status_msg: 'quota exceeded' } }))
+  })
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address()
+      resolve({
+        url: `http://127.0.0.1:${port}`,
+        close: () => new Promise((done, fail) => server.close((error) => error ? fail(error) : done())),
+      })
+    })
+  })
+}
 
 function run(command, args) {
   return new Promise((resolve, reject) => {

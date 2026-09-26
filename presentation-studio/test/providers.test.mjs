@@ -3,7 +3,9 @@ import assert from 'node:assert/strict'
 import { ReadableStream } from 'node:stream/web'
 import {
   decodeEntities,
+  INTERPRETER_PROMPT,
   loadEnvFile,
+  memoryQuery,
   publicConfig,
   readChatStream,
   readMyMemory,
@@ -74,6 +76,57 @@ test('translateText posts Mandarin and does not put the key in the URL', async (
   assert.equal(english, 'Hello everyone')
   assert.match(seen.url, /langpair=zh-CN%7Cen/)
   assert.equal(seen.options?.headers?.authorization, undefined)
+})
+
+test('filler-only text is not sent to MyMemory', async () => {
+  let called = false
+  const english = await translateText('嗯，', { INTERPRET_PROVIDER: 'mymemory' }, () => {
+    called = true
+    throw new Error('should not fetch')
+  })
+  assert.equal(english, '')
+  assert.equal(called, false)
+})
+
+test('a fragment is translated together with the unfinished clause', async () => {
+  let seen = ''
+  const fetchImpl = async (url) => {
+    seen = String(url)
+    return new Response(JSON.stringify({
+      responseStatus: 200,
+      responseData: { translatedText: '35 percent' },
+    }), { status: 200 })
+  }
+  const english = await translateText('三十五。', { INTERPRET_PROVIDER: 'mymemory' }, fetchImpl, {
+    context: { source: '准确率达到百分之', fragment: true, spoken: false },
+  })
+  assert.equal(english, '35 percent')
+  assert.match(decodeURIComponent(seen), /准确率达到百分之三十五/)
+})
+
+test('chat translation keeps prior English and does not return the upstream body', async () => {
+  let body
+  const fetchImpl = async (_url, options) => {
+    body = JSON.parse(options.body)
+    return new Response('nope', { status: 500 })
+  }
+  await assert.rejects(
+    () => translateText('三十五', {
+      INTERPRET_PROVIDER: 'deepseek',
+      DEEPSEEK_API_KEY: 'deepseek-secret',
+    }, fetchImpl, {
+      context: { source: '准确率达到百分之', english: 'The accuracy reached', fragment: true },
+    }),
+    (error) => error.message === 'deepseek HTTP 500' && !/deepseek-secret/.test(error.message),
+  )
+  assert.match(body.messages[0].content, /pinyin/)
+  assert.equal(body.messages[0].content, INTERPRETER_PROMPT)
+  assert.match(body.messages[1].content, /The accuracy reached/)
+  assert.match(body.messages[1].content, /三十五/)
+})
+
+test('memory query stays on the fragment when the previous clause was already spoken as a full line', () => {
+  assert.equal(memoryQuery('我们继续。', { source: '大家好', fragment: false, spoken: true }), '我们继续。')
 })
 
 test('public config names MiniMax and never echoes secrets', () => {
