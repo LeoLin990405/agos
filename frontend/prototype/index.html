@@ -19,6 +19,12 @@
       margin: 0 auto;
     }
 
+    /* Stage is a flex column inside a fixed-height scroller: without this the
+       hero shrinks and its overflow:hidden clips the h1 (title looked overlapped). */
+    .index-stage > * {
+      flex-shrink: 0;
+    }
+
     .hero-banner {
       background: linear-gradient(135deg, rgba(0, 166, 255, 0.14) 0%, rgba(16, 185, 129, 0.08) 100%);
       border: 1px solid var(--border-subtle);

@@ -21,3 +21,13 @@ npm run verify     # host version + types + tests (365 pass / 1 skip, 2026-09-08
 ```
 
 Design notes live in `DESIGN.md`; the honesty rules it encodes (no fabricated numbers, "not collected" as a first-class state, quarantined write endpoints) are enforced by the test suite, not by convention.
+
+## 演示模式 Demo mode（不连 dsh 宿主）
+
+`npm run dev` 后打开 `http://127.0.0.1:3092/agos/?demo=1`（或 `VITE_AGOS_DEMO=1 npm run build`）。`?demo=0` 退出。
+
+- `src/demo/demo-transport.ts` 只替换 `/api/*` 的 `fetch` 与 `/api/remote.mux` 的 WebSocket；冻结层（stores/ fold/ api-client/ contract/）一行未改，真链路照常跑在样例数据上。
+- 样例全部可辨认：会话 id 以 `demo-` 开头、标题与发言带【示例数据】、provider 为 `demo-fixture`；底部常驻 DEMO 条；顶栏把「已连接」换成「演示数据」。
+- 没有样例的端点一律回 `503 DEMO_NOT_COLLECTED`，界面照 DESIGN.md 显示「未采集」，不补数字。概览只给 `sessions.total`（= 样例会话条数）。
+- 只读：任何写请求回 `403 DEMO_READ_ONLY`，不落盘。
+- `src/demo/demo-fixtures.test.ts` 用冻结层的 zod schema 与 `parseMemoryGraph` 校验样例，契约漂移会直接挂测。

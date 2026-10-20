@@ -61,6 +61,10 @@ import { LiveTranscript, useTranscriptItemCount, type OptimisticImageMessage } f
 import { AgosComputer } from '@/components/stage/AgosComputer';
 import { ReplayScrubber } from '@/components/stage/ReplayScrubber';
 import { deriveChatConnectionState } from '@/pages/chat-connection-state';
+import { isDemoMode } from '@/demo/demo-mode';
+
+/** Demo build talks to bundled fixtures, not a host: never label that「已连接」. */
+const DEMO = isDemoMode();
 import { shortSessionRef } from '@/pages/session-short-id';
 
 /** DeepSeek 原生四模式 id → 名(agentPreset.list 实测)。 */
@@ -913,7 +917,7 @@ export const ChatPage: React.FC<{
           rightActions={
             <>
               <span className={`conn-chip ${followUnavailable ? 'is-pending' : isStreamOnline ? 'is-ok' : chatConnectionState === 'connecting' ? 'is-pending' : 'is-off'}`}>
-                {followUnavailable ? '会话订阅中断' : isStreamOnline ? '已连接' : chatConnectionState === 'connecting' ? '连接中' : '未连接'}
+                {followUnavailable ? '会话订阅中断' : isStreamOnline ? (DEMO ? '演示数据' : '已连接') : chatConnectionState === 'connecting' ? '连接中' : '未连接'}
               </span>
               <TopbarAction
                 label="新会话"
