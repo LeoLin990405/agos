@@ -596,3 +596,9 @@ Stated plainly, in the spirit of the thing:
 - Built to run on the DeepSeek Harness plugin runtime (`cordis`); host packages (`@deepseek-ai/*`) are provided by your DSH installation.
 - The browser regression is driven through [OpenCLI](https://github.com/jackwener/opencli)'s browser bridge.
 - Published from this tree as [`LeoLin990405/agos`](https://github.com/LeoLin990405/agos).
+
+
+## Archived frontend design/evaluation notes
+
+`docs/engineering/agos-frontend/` keeps the design and evaluation documents from the former
+`agos-frontend` repository (merged 2026-10-20). The SPA source itself lives in `frontend/`.

@@ -464,3 +464,8 @@ scripts/test-all.sh    # 前端 verify + 五个插件套件 + 部署漂移
 - 跑在 DeepSeek Harness 插件运行时（`cordis`）上；宿主包（`@deepseek-ai/*`）由你的 DSH 安装提供。
 - 浏览器回归经 [OpenCLI](https://github.com/jackwener/opencli) 的浏览器桥驱动。
 - 本树发布为 [`LeoLin990405/agos`](https://github.com/LeoLin990405/agos)。
+
+
+## 已归档的前端设计/评估材料
+
+`docs/engineering/agos-frontend/` 保存原 `agos-frontend` 仓库的设计与评估文档（2026-10-20 合并）；SPA 源码本体在 `frontend/`。
