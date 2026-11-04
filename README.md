@@ -1,3 +1,5 @@
+> 已并入 Conductor（https://github.com/LeoLin990405/Conductor），本仓库归档只读。
+
 <div align="center">
 
 [![English](https://img.shields.io/badge/Language-English-2ea44f?style=for-the-badge)](README.md) &nbsp; [![中文](https://img.shields.io/badge/语言-中文-555555?style=for-the-badge)](README.zh-CN.md)
